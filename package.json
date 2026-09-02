@@ -1,0 +1,11 @@
+{
+  "name": "gbl-office",
+  "private": true,
+  "description": "GBL Enterprise project-based accounting and office management system",
+  "scripts": {
+    "dev:api": "npm run start:dev --prefix backend",
+    "dev:web": "npm run dev --prefix frontend",
+    "test:api": "npm test --prefix backend",
+    "test:e2e": "npm run test:e2e --prefix backend"
+  }
+}

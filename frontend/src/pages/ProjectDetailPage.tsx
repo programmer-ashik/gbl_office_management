@@ -1,0 +1,252 @@
+import { useEffect, useState, type FormEvent } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { api } from '../api/client'
+import { money } from '../types/accounting'
+import {
+  PROJECT_STATUS_LABEL,
+  type Project,
+} from '../types/project'
+
+export function ProjectDetailPage() {
+  const { id } = useParams<{ id: string }>()
+  const [project, setProject] = useState<Project | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [name, setName] = useState('')
+  const [clientName, setClientName] = useState('')
+  const [contractValue, setContractValue] = useState('')
+  const [totalBudget, setTotalBudget] = useState('')
+  const [endDate, setEndDate] = useState('')
+
+  async function load() {
+    if (!id) {
+      return
+    }
+    const row = await api.projectProfitability(id)
+    setProject(row)
+    setName(row.name)
+    setClientName(row.client.name)
+    setContractValue(String(row.contractValue))
+    setTotalBudget(String(row.totalBudget))
+    setEndDate(row.endDate ? row.endDate.slice(0, 10) : '')
+  }
+
+  useEffect(() => {
+    load().catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : 'Unable to load project')
+    })
+  }, [id])
+
+  async function onSave(event: FormEvent) {
+    event.preventDefault()
+    if (!id) {
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await api.updateProject(id, {
+        name,
+        client: { name: clientName },
+        contractValue: Number(contractValue),
+        totalBudget: Number(totalBudget),
+        endDate: endDate || undefined,
+      })
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update project')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function onStatus(status: Project['status']) {
+    if (!id) {
+      return
+    }
+    setError(null)
+    try {
+      await api.updateProjectStatus(id, status)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to change status')
+    }
+  }
+
+  if (!project) {
+    return error ? <p className="form-error">{error}</p> : <p className="muted">Loading…</p>
+  }
+
+  const { financials } = project
+  const usedPct = Math.min(financials.budgetUsedPct ?? 0, 100)
+
+  return (
+    <>
+      <header className="workspace-header">
+        <div>
+          <p className="eyebrow">{project.code}</p>
+          <h1>{project.name}</h1>
+          <p className="muted">{project.client.name}</p>
+        </div>
+        <Link to="/projects" className="ghost-link">
+          All projects
+        </Link>
+      </header>
+
+      <section className="status-row">
+        {(Object.keys(PROJECT_STATUS_LABEL) as Project['status'][]).map((status) => (
+          <button
+            key={status}
+            type="button"
+            className={project.status === status ? '' : 'ghost'}
+            onClick={() => void onStatus(status)}
+          >
+            {PROJECT_STATUS_LABEL[status]}
+          </button>
+        ))}
+      </section>
+
+      <section className="grid">
+        <article className="stat-card">
+          <h3>Recognized revenue</h3>
+          <p className="stat-value">{money(financials.recognizedRevenue)}</p>
+          <p className="muted">
+            Contract remaining {money(financials.contractRemaining)}
+          </p>
+        </article>
+        <article className="stat-card">
+          <h3>Gross profit</h3>
+          <p className={`stat-value ${financials.grossProfit < 0 ? 'loss' : ''}`}>
+            {money(financials.grossProfit)}
+          </p>
+          <p className="muted">
+            Revenue minus materials and labor
+            {financials.grossMarginPct !== null
+              ? ` · ${financials.grossMarginPct}%`
+              : ''}
+          </p>
+        </article>
+        <article className="stat-card">
+          <h3>Net profit</h3>
+          <p className={`stat-value ${financials.netProfit < 0 ? 'loss' : ''}`}>
+            {money(financials.netProfit)}
+          </p>
+          <p className="muted">
+            After all project expenses
+            {financials.netMarginPct !== null ? ` · ${financials.netMarginPct}%` : ''}
+          </p>
+        </article>
+      </section>
+
+      <section className="table-card">
+        <div className="table-head">
+          <h2>Budget threshold</h2>
+          <span className={financials.isOverBudget ? 'badge-bad' : 'badge-ok'}>
+            {financials.isOverBudget ? 'Over budget' : 'Within budget'}
+          </span>
+        </div>
+        <div className="budget-meter" aria-label="Budget used">
+          <div
+            className={`budget-meter-fill ${financials.isOverBudget ? 'over' : ''}`}
+            style={{ width: `${usedPct}%` }}
+          />
+        </div>
+        <p className="muted">
+          Spent {money(financials.totalCost)} of {money(financials.totalBudget)} · remaining{' '}
+          {money(financials.budgetRemaining)}
+        </p>
+      </section>
+
+      <section className="table-card">
+        <h2>Cost and revenue by account</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Account</th>
+              <th>Class</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {financials.breakdown.map((row) => (
+              <tr key={row.accountCode}>
+                <td>{row.accountCode}</td>
+                <td>{row.accountName}</td>
+                <td>
+                  {row.accountType === 'revenue'
+                    ? 'Revenue'
+                    : row.isDirectCost
+                      ? 'Direct cost'
+                      : 'Other expense'}
+                </td>
+                <td>{money(row.amount)}</td>
+              </tr>
+            ))}
+            {financials.breakdown.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="muted">
+                  No tagged journals yet. Post a journal with this project selected.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="table-card">
+        <h2>Edit project</h2>
+        <form className="stack-form" onSubmit={(event) => void onSave(event)}>
+          <div className="name-row">
+            <label>
+              Name
+              <input value={name} onChange={(e) => setName(e.target.value)} required />
+            </label>
+            <label>
+              Client
+              <input
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                required
+              />
+            </label>
+          </div>
+          <div className="name-row">
+            <label>
+              Contract value
+              <input
+                inputMode="decimal"
+                value={contractValue}
+                onChange={(e) => setContractValue(e.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Total budget
+              <input
+                inputMode="decimal"
+                value={totalBudget}
+                onChange={(e) => setTotalBudget(e.target.value)}
+                required
+              />
+            </label>
+          </div>
+          <label>
+            End date
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+          </label>
+          <div className="form-actions">
+            <button type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+          {error ? <p className="form-error">{error}</p> : null}
+        </form>
+      </section>
+    </>
+  )
+}
