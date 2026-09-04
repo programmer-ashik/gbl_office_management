@@ -1,11 +1,14 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 
 export type SelectOption = {
@@ -21,6 +24,7 @@ type SelectProps = {
   placeholder?: string
   disabled?: boolean
   required?: boolean
+  searchable?: boolean
   id?: string
   name?: string
   className?: string
@@ -33,24 +37,44 @@ export function Select({
   placeholder = 'Select…',
   disabled = false,
   required = false,
+  searchable = false,
   id,
   name,
   className,
 }: SelectProps) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const listId = useId()
   const selected = options.find((option) => option.value === value)
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return options
+    return options.filter(
+      (option) =>
+        option.label.toLowerCase().includes(needle) ||
+        option.value.toLowerCase().includes(needle),
+    )
+  }, [options, query])
 
   useEffect(() => {
     function onDocClick(event: MouseEvent) {
       if (!rootRef.current?.contains(event.target as Node)) {
         setOpen(false)
+        setQuery('')
       }
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
+
+  useEffect(() => {
+    if (open && searchable) {
+      window.setTimeout(() => searchRef.current?.focus(), 0)
+    }
+  }, [open, searchable])
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (disabled) return
@@ -60,6 +84,7 @@ export function Select({
     }
     if (event.key === 'Escape') {
       setOpen(false)
+      setQuery('')
     }
   }
 
@@ -86,40 +111,211 @@ export function Select({
       </button>
       <AnimatePresence>
         {open ? (
-          <motion.ul
-            id={listId}
-            role="listbox"
-            className="ui-select-menu"
+          <motion.div
+            className="ui-select-popover"
             initial={{ opacity: 0, y: -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.14, ease: 'easeOut' }}
           >
-            {options.map((option) => (
-              <li key={option.value}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={option.value === value}
-                  className={
-                    option.value === value ? 'ui-select-option is-selected' : 'ui-select-option'
-                  }
-                  disabled={option.disabled}
-                  onClick={() => {
-                    onChange(option.value)
-                    setOpen(false)
-                  }}
-                >
-                  {option.label}
-                </button>
-              </li>
-            ))}
-          </motion.ul>
+            {searchable ? (
+              <input
+                ref={searchRef}
+                className="ui-select-search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search…"
+                aria-label="Search options"
+              />
+            ) : null}
+            <ul id={listId} role="listbox" className="ui-select-menu">
+              {filtered.map((option) => (
+                <li key={option.value || '__empty'}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={option.value === value}
+                    className={
+                      option.value === value
+                        ? 'ui-select-option is-selected'
+                        : 'ui-select-option'
+                    }
+                    disabled={option.disabled}
+                    onClick={() => {
+                      onChange(option.value)
+                      setOpen(false)
+                      setQuery('')
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                </li>
+              ))}
+              {filtered.length === 0 ? (
+                <li className="ui-select-empty muted">No matches</li>
+              ) : null}
+            </ul>
+          </motion.div>
         ) : null}
       </AnimatePresence>
     </div>
   )
 }
+
+type ActionMenuItem = {
+  label: string
+  onSelect: () => void
+  disabled?: boolean
+  disabledReason?: string
+  danger?: boolean
+}
+
+type ActionMenuProps = {
+  label?: string
+  items: ActionMenuItem[]
+  disabled?: boolean
+}
+
+export function ActionMenu({
+  label = 'Actions',
+  items,
+  disabled = false,
+}: ActionMenuProps) {
+  const [open, setOpen] = useState(false)
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  const placeMenu = () => {
+    const trigger = triggerRef.current
+    if (!trigger) return
+    const rect = trigger.getBoundingClientRect()
+    const menuWidth = 220
+    const estimatedHeight = Math.min(items.length * 52 + 8, window.innerHeight * 0.45)
+    const openUp =
+      window.innerHeight - rect.bottom < estimatedHeight + 8 &&
+      rect.top > estimatedHeight + 8
+    const top = openUp
+      ? Math.max(8, rect.top - estimatedHeight - 4)
+      : Math.min(rect.bottom + 4, window.innerHeight - estimatedHeight - 8)
+    const left = Math.min(
+      Math.max(8, rect.right - menuWidth),
+      window.innerWidth - menuWidth - 8,
+    )
+    setCoords({ top, left })
+  }
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setCoords(null)
+      return
+    }
+    placeMenu()
+  }, [open, items.length])
+
+  useEffect(() => {
+    if (!open) return
+
+    let active = false
+    const arm = window.setTimeout(() => {
+      active = true
+    }, 0)
+
+    function onPointerDown(event: MouseEvent) {
+      if (!active) return
+      const target = event.target as Node
+      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) {
+        return
+      }
+      setOpen(false)
+    }
+
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+
+    function onReposition() {
+      placeMenu()
+    }
+
+    document.addEventListener('mousedown', onPointerDown, true)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onReposition)
+    window.addEventListener('scroll', onReposition, true)
+
+    return () => {
+      window.clearTimeout(arm)
+      document.removeEventListener('mousedown', onPointerDown, true)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onReposition)
+      window.removeEventListener('scroll', onReposition, true)
+    }
+  }, [open, items.length])
+
+  return (
+    <div className="ui-action-menu">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="ghost ui-action-trigger"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(event) => {
+          event.stopPropagation()
+          setOpen((current) => !current)
+        }}
+      >
+        {label} ▾
+      </button>
+      {open && coords && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={panelRef}
+              role="menu"
+              className="ui-action-panel is-portal"
+              style={{ top: coords.top, left: coords.left }}
+            >
+              {items.map((item) => {
+                const tip =
+                  item.disabled && item.disabledReason ? item.disabledReason : undefined
+                return (
+                  <div
+                    key={item.label}
+                    className="ui-action-item-wrap"
+                    title={tip}
+                    role="none"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={
+                        item.danger ? 'ui-action-item is-danger' : 'ui-action-item'
+                      }
+                      disabled={item.disabled}
+                      aria-disabled={item.disabled || undefined}
+                      aria-description={tip}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        if (item.disabled) return
+                        setOpen(false)
+                        item.onSelect()
+                      }}
+                    >
+                      <span className="ui-action-item-label">{item.label}</span>
+                      {tip ? <span className="ui-action-item-hint">{tip}</span> : null}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  )
+}
+
 
 type ModalProps = {
   open: boolean

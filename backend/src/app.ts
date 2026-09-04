@@ -57,6 +57,8 @@ import {
   createSuppliersRouter,
   createWarehousesRouter,
 } from './modules/procurement/procurement.routes';
+import { CustomersService } from './modules/customers/customers.service';
+import { createCustomersRouter } from './modules/customers/customers.routes';
 import { seedDemoData } from './database/demo-seed';
 
 export async function createApp(): Promise<Express> {
@@ -78,11 +80,13 @@ export async function createApp(): Promise<Express> {
   const auditService = new AuditService();
   const approvalService = new ApprovalService(projectsService, auditService);
   const ocrService = new OcrService();
+  const customersService = new CustomersService();
   const journalService = new JournalService(
     accountsService,
     projectsService,
     auditService,
     usersService,
+    customersService,
   );
   const ledgerService = new LedgerService();
   const bankingService = new BankingService(
@@ -141,6 +145,10 @@ export async function createApp(): Promise<Express> {
   app.use(
     '/api/v1/employees',
     createEmployeesRouter(employeesService, authService, usersService),
+  );
+  app.use(
+    '/api/v1/customers',
+    createCustomersRouter(customersService, authService, usersService),
   );
   app.use(
     '/api/v1/accounts',

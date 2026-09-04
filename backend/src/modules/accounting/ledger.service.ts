@@ -41,7 +41,18 @@ export class LedgerService {
   async listForAccount(
     accountCode: string,
     asOf?: Date,
-  ): Promise<{ account: AccountBalance; entries: LedgerEntry[] }> {
+    entity?: { entityType?: string; entityId?: string },
+  ): Promise<{
+    account: AccountBalance;
+    entries: Array<
+      LedgerEntry & {
+        entityType: string | null;
+        entityId: string | null;
+        entityName: string | null;
+        projectId: string | null;
+      }
+    >;
+  }> {
     const account = await AccountModel.findOne({
       code: accountCode.trim().toUpperCase(),
     }).exec();
@@ -49,11 +60,12 @@ export class LedgerService {
       throw notFound(`Account ${accountCode} not found`);
     }
 
-    const dateFilter = asOf ? { date: { $lte: asOf } } : {};
-    const lines = await LedgerLineModel.find({
-      accountId: account._id,
-      ...dateFilter,
-    })
+    const query: Record<string, unknown> = { accountId: account._id };
+    if (asOf) query.date = { $lte: asOf };
+    if (entity?.entityType) query.entityType = entity.entityType;
+    if (entity?.entityId) query.entityId = entity.entityId;
+
+    const lines = await LedgerLineModel.find(query)
       .sort({ date: 1, journalEntryNumber: 1 })
       .exec();
 
@@ -78,6 +90,10 @@ export class LedgerService {
         memo: line.memo,
         debit: fromMinorUnits(line.debitMinor),
         credit: fromMinorUnits(line.creditMinor),
+        entityType: line.entityType ?? null,
+        entityId: line.entityId ? line.entityId.toString() : null,
+        entityName: line.entityName ?? null,
+        projectId: line.projectId ? line.projectId.toString() : null,
       })),
     };
   }

@@ -1,5 +1,9 @@
 import { HydratedDocument, Model, Schema, Types, model, models } from 'mongoose';
 import { AccountType } from '../../common/enums/account-type.enum';
+import {
+  JOURNAL_ENTITY_TYPE_VALUES,
+  type JournalEntityType,
+} from './journal.enums';
 
 export interface ILedgerLine {
   journalEntryId: Types.ObjectId;
@@ -13,6 +17,9 @@ export interface ILedgerLine {
   debitMinor: number;
   creditMinor: number;
   projectId?: Types.ObjectId;
+  entityType?: JournalEntityType;
+  entityId?: Types.ObjectId;
+  entityName?: string;
   createdAt?: Date;
 }
 
@@ -45,12 +52,20 @@ const ledgerLineSchema = new Schema<ILedgerLine>(
     debitMinor: { type: Number, required: true, min: 0 },
     creditMinor: { type: Number, required: true, min: 0 },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', index: true },
+    entityType: {
+      type: String,
+      enum: JOURNAL_ENTITY_TYPE_VALUES,
+      index: true,
+    },
+    entityId: { type: Schema.Types.ObjectId, index: true },
+    entityName: { type: String, trim: true, maxlength: 160 },
   },
   { timestamps: { createdAt: true, updatedAt: false }, collection: 'ledger_lines' },
 );
 
 ledgerLineSchema.index({ accountId: 1, date: 1, journalEntryNumber: 1 });
 ledgerLineSchema.index({ projectId: 1, date: 1 });
+ledgerLineSchema.index({ entityType: 1, entityId: 1, date: 1 });
 
 export const LedgerLineModel =
   (models.LedgerLine as Model<ILedgerLine> | undefined) ??

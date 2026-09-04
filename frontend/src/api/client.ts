@@ -1,4 +1,12 @@
-import type { Account, AccountLedger, JournalEntry, TrialBalance } from '../types/accounting'
+import type {
+  Account,
+  AccountLedger,
+  Customer,
+  JournalEntry,
+  JournalSummary,
+  JournalWriteBody,
+  TrialBalance,
+} from '../types/accounting'
 import type {
   AgingReport,
   ClientInvoice,
@@ -184,12 +192,93 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  journals: (projectId?: string) =>
-    request<JournalEntry[]>(
-      projectId ? `/journals?projectId=${projectId}` : '/journals',
-    ),
+  journals: (params?: {
+    projectId?: string
+    fromDate?: string
+    toDate?: string
+    status?: string
+    journalType?: string
+    accountCode?: string
+    entityType?: string
+    entityId?: string
+    search?: string
+    source?: string
+  }) => {
+    const query = new URLSearchParams()
+    if (params?.projectId) query.set('projectId', params.projectId)
+    if (params?.fromDate) query.set('fromDate', params.fromDate)
+    if (params?.toDate) query.set('toDate', params.toDate)
+    if (params?.status) query.set('status', params.status)
+    if (params?.journalType) query.set('journalType', params.journalType)
+    if (params?.accountCode) query.set('accountCode', params.accountCode)
+    if (params?.entityType) query.set('entityType', params.entityType)
+    if (params?.entityId) query.set('entityId', params.entityId)
+    if (params?.search) query.set('search', params.search)
+    if (params?.source) query.set('source', params.source)
+    const qs = query.toString()
+    return request<JournalEntry[]>(qs ? `/journals?${qs}` : '/journals')
+  },
+  journalSummary: (params?: {
+    projectId?: string
+    fromDate?: string
+    toDate?: string
+    status?: string
+    journalType?: string
+    search?: string
+  }) => {
+    const query = new URLSearchParams()
+    if (params?.projectId) query.set('projectId', params.projectId)
+    if (params?.fromDate) query.set('fromDate', params.fromDate)
+    if (params?.toDate) query.set('toDate', params.toDate)
+    if (params?.status) query.set('status', params.status)
+    if (params?.journalType) query.set('journalType', params.journalType)
+    if (params?.search) query.set('search', params.search)
+    const qs = query.toString()
+    return request<JournalSummary>(qs ? `/journals/summary?${qs}` : '/journals/summary')
+  },
+  journal: (id: string) => request<JournalEntry>(`/journals/${id}`),
+  updateJournal: (id: string, body: JournalWriteBody) =>
+    request<JournalEntry>(`/journals/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  postDraftJournal: (id: string) =>
+    request<JournalEntry>(`/journals/${id}/post`, { method: 'POST' }),
+  reverseJournal: (id: string) =>
+    request<JournalEntry>(`/journals/${id}/reverse`, { method: 'POST' }),
+  deleteJournal: (id: string) =>
+    request<{ id: string; entryNumber: string }>(`/journals/${id}`, {
+      method: 'DELETE',
+    }),
   trialBalance: () => request<TrialBalance>('/reports/trial-balance'),
-  ledger: (accountCode: string) => request<AccountLedger>(`/ledgers/${accountCode}`),
+  ledger: (
+    accountCode: string,
+    params?: { asOf?: string; entityType?: string; entityId?: string },
+  ) => {
+    const query = new URLSearchParams()
+    if (params?.asOf) query.set('asOf', params.asOf)
+    if (params?.entityType) query.set('entityType', params.entityType)
+    if (params?.entityId) query.set('entityId', params.entityId)
+    const qs = query.toString()
+    return request<AccountLedger>(
+      qs ? `/ledgers/${accountCode}?${qs}` : `/ledgers/${accountCode}`,
+    )
+  },
+  customers: (activeOnly = false) =>
+    request<Customer[]>(
+      activeOnly ? '/customers?active=1' : '/customers',
+    ),
+  createCustomer: (body: {
+    name: string
+    contactName?: string
+    email?: string
+    phone?: string
+    address?: string
+  }) =>
+    request<Customer>('/customers', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   projects: (status?: ProjectStatus) =>
     request<Project[]>(status ? `/projects?status=${status}` : '/projects'),
   project: (id: string) => request<Project>(`/projects/${id}`),
@@ -210,19 +299,7 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
-  postJournal: (body: {
-    date: string
-    memo: string
-    reference?: string
-    projectId?: string
-    lines: Array<{
-      accountCode: string
-      debit?: number
-      credit?: number
-      description?: string
-      projectId?: string
-    }>
-  }) =>
+  postJournal: (body: JournalWriteBody) =>
     request<JournalEntry>('/journals', {
       method: 'POST',
       body: JSON.stringify(body),

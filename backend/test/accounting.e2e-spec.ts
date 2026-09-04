@@ -147,4 +147,61 @@ describe('Phase 2 double-entry engine (e2e)', () => {
 
     expect(res.body.success).toBe(false);
   });
+
+  it('filters journals by date and supports edit/delete', async () => {
+    const created = await request(app)
+      .post('/api/v1/journals')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        date: '2026-08-15',
+        memo: 'gbl-2026-08-15-Cash in Hand-Owner Equity-',
+        lines: [
+          { accountCode: '1000', debit: 1_000 },
+          { accountCode: '3000', credit: 1_000 },
+        ],
+      })
+      .expect(201);
+
+    const journalId = created.body.data.id as string;
+
+    const filtered = await request(app)
+      .get('/api/v1/journals?fromDate=2026-08-01&toDate=2026-08-31')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(
+      (filtered.body.data as Array<{ id: string }>).some((row) => row.id === journalId),
+    ).toBe(true);
+
+    const outside = await request(app)
+      .get('/api/v1/journals?fromDate=2026-09-01&toDate=2026-09-30')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(
+      (outside.body.data as Array<{ id: string }>).some((row) => row.id === journalId),
+    ).toBe(false);
+
+    const updated = await request(app)
+      .patch(`/api/v1/journals/${journalId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        date: '2026-08-16',
+        memo: 'gbl-2026-08-16-Cash in Hand-Owner Equity-',
+        lines: [
+          { accountCode: '1000', debit: 1_500 },
+          { accountCode: '3000', credit: 1_500 },
+        ],
+      })
+      .expect(200);
+    expect(updated.body.data.totalDebit).toBe(1_500);
+
+    await request(app)
+      .delete(`/api/v1/journals/${journalId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+
+    await request(app)
+      .get(`/api/v1/journals/${journalId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(404);
+  });
 });

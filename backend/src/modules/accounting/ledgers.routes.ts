@@ -26,9 +26,16 @@ export function createLedgersRouter(
       const asOf = req.query.asOf
         ? new Date(String(req.query.asOf))
         : undefined;
+      const entityType =
+        typeof req.query.entityType === 'string'
+          ? req.query.entityType
+          : undefined;
+      const entityId =
+        typeof req.query.entityId === 'string' ? req.query.entityId : undefined;
       const ledger = await ledgerService.listForAccount(
         String(req.params.accountCode),
         asOf,
+        { entityType, entityId },
       );
       sendSuccess(res, ledger, 'Ledger retrieved successfully');
     }),

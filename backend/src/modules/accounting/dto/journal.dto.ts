@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsIn,
   IsMongoId,
   IsNumber,
   IsOptional,
@@ -12,6 +13,10 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import {
+  JOURNAL_ENTITY_TYPE_VALUES,
+  JOURNAL_TYPE_VALUES,
+} from '../journal.enums';
 
 const emptyToUndefined = ({ value }: { value: unknown }) =>
   value === '' || value === null ? undefined : value;
@@ -41,6 +46,16 @@ export class JournalLineDto {
   @Transform(emptyToUndefined)
   @IsMongoId()
   projectId?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsIn(JOURNAL_ENTITY_TYPE_VALUES)
+  entityType?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsMongoId()
+  entityId?: string;
 }
 
 export class PostJournalDto {
@@ -56,6 +71,16 @@ export class PostJournalDto {
   @IsString()
   @MaxLength(80)
   reference?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsIn(JOURNAL_TYPE_VALUES)
+  journalType?: string;
+
+  /** draft = save without posting; post = immediate post (default). */
+  @IsOptional()
+  @IsIn(['draft', 'post'])
+  intent?: 'draft' | 'post';
 
   @IsOptional()
   @Transform(emptyToUndefined)

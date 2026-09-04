@@ -3,57 +3,18 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { money } from '../types/accounting'
-import type {
-  BurnRateRow,
-  CashFlowForecast,
-  FinancialStatements,
-} from '../types/analytics'
-import { ROLE_LABEL, Role, type HealthStatus, type PublicUser } from '../types/auth'
-import type { Project } from '../types/project'
+import type { CashFlowForecast, FinancialStatements } from '../types/analytics'
+import { Role } from '../types/auth'
 import type { TreasuryAccount } from '../types/banking'
 
 export function DashboardPage() {
   const { user } = useAuth()
-  const [health, setHealth] = useState<HealthStatus | null>(null)
-  const [users, setUsers] = useState<PublicUser[] | null>(null)
-  const [usersError, setUsersError] = useState<string | null>(null)
-  const [projects, setProjects] = useState<Project[] | null>(null)
   const [treasury, setTreasury] = useState<TreasuryAccount[] | null>(null)
   const [cashFlow, setCashFlow] = useState<CashFlowForecast | null>(null)
-  const [burnRates, setBurnRates] = useState<BurnRateRow[] | null>(null)
   const [statements, setStatements] = useState<FinancialStatements | null>(null)
   const [analyticsError, setAnalyticsError] = useState<string | null>(null)
 
   const isFinance = user?.role === Role.ADMIN || user?.role === Role.ACCOUNTANT
-  const canSeeProjects =
-    user?.role === Role.ADMIN ||
-    user?.role === Role.ACCOUNTANT ||
-    user?.role === Role.PROJECT_MANAGER
-
-  useEffect(() => {
-    api
-      .health()
-      .then(setHealth)
-      .catch(() => setHealth(null))
-  }, [])
-
-  useEffect(() => {
-    if (user?.role !== Role.ADMIN) return
-    api
-      .users()
-      .then(setUsers)
-      .catch((err: unknown) => {
-        setUsersError(err instanceof Error ? err.message : 'Unable to load users')
-      })
-  }, [user?.role])
-
-  useEffect(() => {
-    if (!canSeeProjects) return
-    api
-      .projects()
-      .then(setProjects)
-      .catch(() => setProjects([]))
-  }, [canSeeProjects])
 
   useEffect(() => {
     if (!isFinance) return
@@ -64,32 +25,23 @@ export function DashboardPage() {
   }, [isFinance])
 
   useEffect(() => {
-    if (!canSeeProjects) return
+    if (!isFinance) return
     setAnalyticsError(null)
-    const tasks: Promise<void>[] = [
+    void Promise.all([
       api
-        .burnRate()
-        .then(setBurnRates)
-        .catch(() => setBurnRates([])),
-    ]
-    if (isFinance) {
-      tasks.push(
-        api
-          .cashFlow()
-          .then(setCashFlow)
-          .catch((err: unknown) => {
-            setAnalyticsError(
-              err instanceof Error ? err.message : 'Unable to load cash-flow forecast',
-            )
-          }),
-        api
-          .statements()
-          .then(setStatements)
-          .catch(() => setStatements(null)),
-      )
-    }
-    void Promise.all(tasks)
-  }, [canSeeProjects, isFinance])
+        .cashFlow()
+        .then(setCashFlow)
+        .catch((err: unknown) => {
+          setAnalyticsError(
+            err instanceof Error ? err.message : 'Unable to load cash-flow forecast',
+          )
+        }),
+      api
+        .statements()
+        .then(setStatements)
+        .catch(() => setStatements(null)),
+    ])
+  }, [isFinance])
 
   const maxFlow = (() => {
     if (!cashFlow?.weeks.length) return 1
@@ -110,28 +62,6 @@ export function DashboardPage() {
           <h1>Executive overview</h1>
         </div>
       </header>
-
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Authentication</h3>
-          <p className="stat-value">Active</p>
-          <p className="muted">JWT access token + rotating refresh token</p>
-        </article>
-        <article className="stat-card">
-          <h3>Database</h3>
-          <p className="stat-value">
-            {health?.database.connected ? 'Connected' : 'Checking…'}
-          </p>
-          <p className="muted">
-            Replica set transactions {health?.database.ping ? 'ready' : 'pending'}
-          </p>
-        </article>
-        <article className="stat-card">
-          <h3>Your role</h3>
-          <p className="stat-value">{ROLE_LABEL[user.role]}</p>
-          <p className="muted">{user.email}</p>
-        </article>
-      </section>
 
       {treasury ? (
         <section className="grid">
@@ -177,7 +107,8 @@ export function DashboardPage() {
           <div className="table-head">
             <h2>Cash-flow forecast</h2>
             <p className="muted">
-              8-week outlook · AR inflows vs AP, scheduled payments & draft payroll
+              8-week outlook · AR inflows vs AP, scheduled payments & draft payroll ·{' '}
+              <Link to="/analytics/cash-flow">Open full cash-flow view</Link>
             </p>
           </div>
           <section className="grid">
@@ -232,56 +163,6 @@ export function DashboardPage() {
 
       {analyticsError ? <p className="form-error">{analyticsError}</p> : null}
 
-      {burnRates && burnRates.length > 0 ? (
-        <section className="table-card">
-          <div className="table-head">
-            <h2>Project burn rate</h2>
-            <p className="muted">Daily/weekly spend vs budget runway</p>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Budget</th>
-                <th>Cost</th>
-                <th>Daily</th>
-                <th>Weekly</th>
-                <th>Days left</th>
-                <th>Projected end</th>
-              </tr>
-            </thead>
-            <tbody>
-              {burnRates.map((row) => (
-                <tr key={row.projectId}>
-                  <td>
-                    <Link to={`/projects/${row.projectId}`}>
-                      {row.projectCode} · {row.projectName}
-                    </Link>
-                    {row.isOverBudget ? (
-                      <span className="badge-bad budget-flag">Over</span>
-                    ) : null}
-                  </td>
-                  <td>{money(row.totalBudget)}</td>
-                  <td>{money(row.totalCost)}</td>
-                  <td>{money(row.dailyBurn)}</td>
-                  <td>{money(row.weeklyBurn)}</td>
-                  <td>
-                    {row.estimatedDaysToComplete === null
-                      ? '—'
-                      : row.estimatedDaysToComplete}
-                  </td>
-                  <td>
-                    {row.projectedEndDate
-                      ? row.projectedEndDate.slice(0, 10)
-                      : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      ) : null}
-
       {statements ? (
         <section className="grid">
           <article className="stat-card">
@@ -316,71 +197,13 @@ export function DashboardPage() {
         </section>
       ) : null}
 
-      {projects ? (
-        <section className="grid">
-          <article className="stat-card">
-            <h3>Projects</h3>
-            <p className="stat-value">{projects.length}</p>
-            <p className="muted">
-              <Link to="/projects">Open project register</Link>
-            </p>
-          </article>
-          <article className="stat-card">
-            <h3>Over budget</h3>
-            <p className="stat-value">
-              {projects.filter((project) => project.financials.isOverBudget).length}
-            </p>
-            <p className="muted">Cost above the project budget threshold</p>
-          </article>
-          <article className="stat-card">
-            <h3>Net profit (all)</h3>
-            <p className="stat-value">
-              {money(
-                projects.reduce((sum, project) => sum + project.financials.netProfit, 0),
-              )}
-            </p>
-            <p className="muted">From journals tagged to projects</p>
-          </article>
-        </section>
-      ) : null}
-
-      {user.role === Role.ADMIN ? (
-        <section className="table-card">
-          <div className="table-head">
-            <h2>Users</h2>
-            <p className="muted">Admin-only directory (RBAC enforced)</p>
-          </div>
-          {usersError ? <p className="form-error">{usersError}</p> : null}
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(users ?? []).map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    {row.firstName} {row.lastName}
-                  </td>
-                  <td>{row.email}</td>
-                  <td>{ROLE_LABEL[row.role]}</td>
-                  <td>{row.isActive ? 'Active' : 'Disabled'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      ) : !isFinance ? (
+      {!isFinance ? (
         <section className="table-card">
           <h2>Workspace</h2>
           <p className="muted">
             {user.role === Role.PROJECT_MANAGER
-              ? 'Review burn rates above, then open assigned Projects, Approvals, Advances, Procurement, or Inventory.'
-              : 'Request a project advance from Advances. Full financials stay with Admin and Accountant.'}
+              ? 'Open Project Financials for burn rates and budget KPIs, or continue to Projects, Approvals, Advances, Procurement, or Inventory.'
+              : 'Request a project advance from Advances. Full financials stay with Admin and Accountant. Open Settings → Profile for your account details.'}
           </p>
         </section>
       ) : null}

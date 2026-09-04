@@ -1,7 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import { Modal, Select } from '../components/ui'
+import { Select } from '../components/ui'
 import { money } from '../types/accounting'
 import {
   ADVANCE_STATUS_LABEL,
@@ -9,15 +9,25 @@ import {
   type AdvanceProjectOption,
 } from '../types/advance'
 
+const STATUS_OPTIONS = [
+  { value: '', label: 'All statuses' },
+  ...Object.entries(ADVANCE_STATUS_LABEL).map(([value, label]) => ({
+    value,
+    label,
+  })),
+]
+
 export function AdvancesPage() {
   const [rows, setRows] = useState<Advance[]>([])
   const [projects, setProjects] = useState<AdvanceProjectOption[]>([])
   const [projectId, setProjectId] = useState('')
   const [amount, setAmount] = useState('')
   const [purpose, setPurpose] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [projectFilter, setProjectFilter] = useState('')
+  const [search, setSearch] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [modalOpen, setModalOpen] = useState(false)
 
   async function load() {
     const [advances, options] = await Promise.all([
@@ -37,6 +47,25 @@ export function AdvancesPage() {
     })
   }, [])
 
+  const filtered = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    return rows.filter((row) => {
+      if (statusFilter && row.status !== statusFilter) return false
+      if (projectFilter && row.projectId !== projectFilter) return false
+      if (!needle) return true
+      const haystack = [
+        row.advanceNumber,
+        row.projectCode,
+        row.projectName,
+        row.employeeName,
+        row.purpose,
+      ]
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(needle)
+    })
+  }, [rows, statusFilter, projectFilter, search])
+
   async function onCreate(event: FormEvent) {
     event.preventDefault()
     if (!projectId) return
@@ -50,7 +79,6 @@ export function AdvancesPage() {
       })
       setAmount('')
       setPurpose('')
-      setModalOpen(false)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to submit requisition')
@@ -59,23 +87,30 @@ export function AdvancesPage() {
     }
   }
 
+  const projectOptions = projects.map((project) => ({
+    value: project.id,
+    label: `${project.code} · ${project.name}`,
+  }))
+
   return (
     <>
       <header className="workspace-header">
         <div>
-          <h1>Advance & expense settlement</h1>
+          <h1>Advance requisitions</h1>
         </div>
-        <button type="button" onClick={() => setModalOpen(true)}>
-          Submit requisition
-        </button>
+        <Link to="/advances/settlements" className="action-link">
+          Expense settlements
+        </Link>
       </header>
 
-      <Modal
-        open={modalOpen}
-        title="Step 1 · Requisition"
-        description="Request cash for a project. Until settlement, the payment is an employee advance asset — not a project expense."
-        onClose={() => setModalOpen(false)}
-      >
+      <section className="table-card">
+        <div className="table-head">
+          <h2>Submit requisition</h2>
+          <p className="muted">
+            Request cash for a project. Until settlement, the payment is an employee
+            advance asset — not a project expense.
+          </p>
+        </div>
         <form className="stack-form" onSubmit={(event) => void onCreate(event)}>
           <div className="name-row">
             <label>
@@ -83,10 +118,8 @@ export function AdvancesPage() {
               <Select
                 value={projectId}
                 onChange={setProjectId}
-                options={projects.map((project) => ({
-                  value: project.id,
-                  label: `${project.code} · ${project.name}`,
-                }))}
+                options={projectOptions}
+                searchable
                 placeholder="Select project"
                 required
               />
@@ -117,12 +150,55 @@ export function AdvancesPage() {
           </div>
           {error ? <p className="form-error">{error}</p> : null}
         </form>
-      </Modal>
+      </section>
 
       <section className="table-card">
         <div className="table-head">
-          <h2>Advances</h2>
+          <h2>Requisition register</h2>
+          <p className="muted">{filtered.length} of {rows.length} shown</p>
         </div>
+        <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
+          <label>
+            Search
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Number, project, employee…"
+            />
+          </label>
+          <label>
+            Status
+            <Select
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={STATUS_OPTIONS}
+              searchable
+            />
+          </label>
+          <label>
+            Project
+            <Select
+              value={projectFilter}
+              onChange={setProjectFilter}
+              options={[
+                { value: '', label: 'All projects' },
+                ...projectOptions,
+              ]}
+              searchable
+            />
+          </label>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              setSearch('')
+              setStatusFilter('')
+              setProjectFilter('')
+            }}
+          >
+            Clear
+          </button>
+        </form>
         <table>
           <thead>
             <tr>
@@ -135,7 +211,7 @@ export function AdvancesPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {filtered.map((row) => (
               <tr key={row.id}>
                 <td>
                   <Link to={`/advances/${row.id}`}>{row.advanceNumber}</Link>
@@ -153,18 +229,16 @@ export function AdvancesPage() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 ? (
+            {filtered.length === 0 ? (
               <tr>
                 <td colSpan={6} className="muted">
-                  No advances yet.
+                  No requisitions match the current filters.
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </section>
-
-      {!modalOpen && error ? <p className="form-error">{error}</p> : null}
     </>
   )
 }

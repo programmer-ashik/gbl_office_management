@@ -14,6 +14,23 @@ import type { JournalService } from './journal.service';
 
 const FINANCE = [Role.ADMIN, Role.ACCOUNTANT] as const;
 
+function listFiltersFromQuery(query: Record<string, unknown>) {
+  const str = (key: string) =>
+    typeof query[key] === 'string' ? (query[key] as string) : undefined;
+  return {
+    projectId: str('projectId'),
+    fromDate: str('fromDate'),
+    toDate: str('toDate'),
+    status: str('status'),
+    journalType: str('journalType'),
+    accountCode: str('accountCode'),
+    entityType: str('entityType'),
+    entityId: str('entityId'),
+    search: str('search') ?? str('q'),
+    source: str('source'),
+  };
+}
+
 export function createJournalsRouter(
   journalService: JournalService,
   authService: AuthService,
@@ -28,10 +45,23 @@ export function createJournalsRouter(
     auth,
     requireRoles(...FINANCE),
     asyncHandler(async (req, res) => {
-      const projectId =
-        typeof req.query.projectId === 'string' ? req.query.projectId : undefined;
-      const entries = await journalService.list(50, projectId);
+      const entries = await journalService.list(
+        300,
+        listFiltersFromQuery(req.query as Record<string, unknown>),
+      );
       sendSuccess(res, entries, 'Journal entries retrieved successfully');
+    }),
+  );
+
+  router.get(
+    '/summary',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const summary = await journalService.summary(
+        listFiltersFromQuery(req.query as Record<string, unknown>),
+      );
+      sendSuccess(res, summary, 'Journal summary retrieved successfully');
     }),
   );
 
@@ -42,6 +72,14 @@ export function createJournalsRouter(
     validateBody(PostJournalDto),
     asyncHandler(async (req, res) => {
       const dto = req.body as PostJournalDto;
+      const intent = dto.intent ?? 'post';
+
+      if (intent === 'draft') {
+        const entry = await journalService.saveDraft(dto, req.user!.userId);
+        sendSuccess(res, entry, 'Journal draft saved successfully', 201);
+        return;
+      }
+
       const amount = dto.lines.reduce((sum, line) => sum + (line.debit ?? 0), 0);
 
       if (approvalService && req.user!.role !== Role.ADMIN) {
@@ -55,6 +93,7 @@ export function createJournalsRouter(
               date: dto.date,
               memo: dto.memo,
               reference: dto.reference,
+              journalType: dto.journalType,
               projectId: dto.projectId,
               lines: dto.lines,
             },
@@ -96,6 +135,47 @@ export function createJournalsRouter(
         journalService.toPublic(entry),
         'Journal entry retrieved successfully',
       );
+    }),
+  );
+
+  router.patch(
+    '/:id',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(PostJournalDto),
+    asyncHandler(async (req, res) => {
+      const entry = await journalService.update(
+        String(req.params.id),
+        req.body,
+        req.user!.userId,
+      );
+      sendSuccess(res, entry, 'Journal updated successfully');
+    }),
+  );
+
+  router.post(
+    '/:id/post',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const entry = await journalService.postExisting(
+        String(req.params.id),
+        req.user!.userId,
+      );
+      sendSuccess(res, entry, 'Journal posted successfully');
+    }),
+  );
+
+  router.delete(
+    '/:id',
+    auth,
+    requireRoles(Role.ADMIN, Role.ACCOUNTANT),
+    asyncHandler(async (req, res) => {
+      const result = await journalService.delete(
+        String(req.params.id),
+        req.user!.userId,
+      );
+      sendSuccess(res, result, 'Journal deleted successfully');
     }),
   );
 

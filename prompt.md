@@ -73,4 +73,97 @@ PHASE 7: Accounts Payable (AP) & Accounts Receivable (AR)Goal: Track money owed 
 PHASE 8: Payroll & Project Cost Allocation ModuleGoal: Manage employee salaries and attribute labor costs to specific projects.Tasks:Create Salary Structure Schemas (Basic, Allowances, Deductions).Implement Labor Cost Allocation: Distribute employee salary cost to projects based on logged hours/days.Implement Advance Auto-Deduction: Automatically check and propose deducting active Employee Advances from monthly salary.Generate Salary Sheet & Execute Disbursement (Single-click payout via Bank/Cash).Phase Completion Criteria: Monthly payroll generated with automatic advance deduction and proper project-wise cost attribution.
 PHASE 9: Advanced Features, RBAC Enforcement, OCR & Audit TrailGoal: Enhance security, automation, and office management operations.Tasks:Strict RBAC Middleware: Restrict Project Managers to their assigned project scope only; expose full financials to Admin/Accountant only.Multi-Level Approval Engine: Dynamic approval routing (e.g., Project Manager $\rightarrow$ Accounts $\rightarrow$ MD) for large transactions.OCR Integration Mock/API: Interface for scanning receipt images to auto-fill Expense Settlement fields.Audit Log System: Immutable database logging of all CREATE, UPDATE, DELETE actions on financial records (storing User, Timestamp, Before-State, After-State).Phase Completion Criteria: Non-admin users restricted correctly; approval flow working; audit logs capturing all ledger updates.
 PHASE 10: Executive Analytics Dashboard & Final Integration TestingGoal: Provide high-level business intelligence and ensure end-to-end system reliability.Tasks:Cash Flow Forecast Dashboard: Visual analytics predicting inflows (Client AR) vs outflows (Supplier AP, Payroll, Expenses).Project Burn Rate Calculator: Real-time tracking of daily/weekly spending rate vs estimated completion dates.End-to-End System Integration Testing: Run full simulation from Project Creation $\rightarrow$ PO $\rightarrow$ Advance $\rightarrow$ Expense $\rightarrow$ Client Invoice $\rightarrow$ Settlement $\rightarrow$ Financial Statements (P&L, Balance Sheet).Phase Completion Criteria: Dashboards reporting accurate real-time data; overall project builds without errors.
+phase 11:Create a professional collapsible enterprise sidebar with the following structure:
+
+📊 DASHBOARD & ANALYTICS
+Executive Overview
+Admin / MD
+Project Financials
+Project Manager / Accountant
+📁 PROJECTS & BUDGETING
+All Projects
+List
+Status
+Profitability
+Project Budgets
+Budget vs Actual
+Variance
+Site Locations
+Material Mapping
+Advance Mapping
+💸 ADVANCE & EXPENSE SETTLEMENT
+Advance Requisitions
+Request
+Approval Queue
+Expense Settlements
+Voucher Verification
+Case A / B / C
+Unsettled Advances
+Employee Balance Tracker
+💳 BANKING & CASH MANAGEMENT
+Accounts & Wallets
+BRAC
+DBBL
+Petty Cash
+bKash
+Nagad
+Internal Transfers
+Cash-in-hand
+Deposits
+Account-to-account
+Bank Reconciliation
+Statement Matching
+📑 ACCOUNTS PAYABLE & RECEIVABLE
+Client Invoices (AR)
+Invoicing
+Milestone Billing
+Collections
+Supplier Bills (AP)
+Purchases
+Schedules
+Disbursements
+Aging Reports
+30 Days
+60 Days
+90+ Days
+📦 PROCUREMENT & INVENTORY
+Purchase Orders (PO)
+PO Issuance
+Tracking
+Material Allocation
+Direct to Site
+Central Warehouse
+Vendor Directory
+Supplier Profiles
+Ledgers
+👥 PAYROLL & HUMAN RESOURCES
+Employee Directory
+Staff Profiles
+Advance Limits
+Attendance & Time Tracking
+Labor Hours
+Project Allocation
+Salary Disbursement
+Auto Advance Deduction
+Payouts
+📈 FINANCIAL REPORTING
+Statement of P&L
+Project-wise
+Company-wide
+Balance Sheet & Trial
+General Ledger
+Chart of Accounts
+Cash Flow & Burn Rate
+Forecasts
+Predictive Analytics
+⚙️ SYSTEM SETTINGS
+Chart of Accounts
+Double-Entry Ledger Architecture
+Approvals Engine
+Multi-level Workflows
+User Roles & RBAC
+Permissions Matrix
+Audit Trail & Logs
+Security
+Change History
 ```
