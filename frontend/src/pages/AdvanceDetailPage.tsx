@@ -12,6 +12,7 @@ import {
 } from '../types/advance'
 import { Role } from '../types/auth'
 import type { TreasuryAccount } from '../types/banking'
+import { MetricCard } from '../components/MetricCard'
 
 type VoucherDraft = { accountCode: string; amount: string; description: string }
 
@@ -191,30 +192,29 @@ export function AdvanceDetailPage() {
         </Link>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Requested</h3>
-          <p className="stat-value">{money(row.requestedAmount)}</p>
-          <p className="muted">{row.purpose}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Status</h3>
-          <p className="stat-value">{ADVANCE_STATUS_LABEL[row.status]}</p>
-          <p className="muted">
-            {row.settlementCase
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="blue"
+          title="Requested"
+          value={money(row.requestedAmount)}
+          meta={row.purpose}
+        />
+        <MetricCard
+          variant="purple"
+          title="Status"
+          value={ADVANCE_STATUS_LABEL[row.status]}
+          meta={
+            row.settlementCase
               ? SETTLEMENT_CASE_LABEL[row.settlementCase]
-              : 'Awaiting the next step'}
-          </p>
-        </article>
-        <article className="stat-card">
-          <h3>Spent</h3>
-          <p className="stat-value">
-            {row.spentAmount === null ? '—' : money(row.spentAmount)}
-          </p>
-          <p className="muted">
-            {row.disbursementJournalNumber ?? 'Not disbursed'}
-          </p>
-        </article>
+              : 'Awaiting the next step'
+          }
+        />
+        <MetricCard
+          variant="teal"
+          title="Spent"
+          value={row.spentAmount === null ? '—' : money(row.spentAmount)}
+          meta={row.disbursementJournalNumber ?? 'Not disbursed'}
+        />
       </section>
 
       {isFinance && row.status === 'pending' ? (
@@ -342,8 +342,17 @@ export function AdvanceDetailPage() {
               </tbody>
             </table>
             <p className="muted">
-              Voucher total {money(spent)} vs advance {money(row.disbursedAmount ?? row.requestedAmount)}
+              Voucher total {money(spent)} vs advance{' '}
+              {money(row.disbursedAmount ?? row.requestedAmount)}
             </p>
+            {spent > (row.disbursedAmount ?? row.requestedAmount) ? (
+              <div className="callout callout-info">
+                Actual spent exceeds advance by{' '}
+                {money(spent - (row.disbursedAmount ?? row.requestedAmount))}.
+                This excess amount will be credited to Employee Payable as
+                Reimbursement Due.
+              </div>
+            ) : null}
             <div className="form-actions">
               <button
                 type="button"
@@ -394,6 +403,16 @@ export function AdvanceDetailPage() {
               />
             </label>
           ) : null}
+          {(row.spentAmount ?? 0) > (row.disbursedAmount ?? row.requestedAmount) ? (
+            <div className="callout callout-info">
+              Actual spent exceeds advance by{' '}
+              {money(
+                (row.spentAmount ?? 0) -
+                  (row.disbursedAmount ?? row.requestedAmount),
+              )}
+              . Confirming will credit Employee Payable (2121) for the excess.
+            </div>
+          ) : null}
           <div className="form-actions">
             <button type="button" disabled={saving} onClick={() => void onConfirm()}>
               {saving ? 'Posting…' : 'Confirm and post journals'}
@@ -406,10 +425,35 @@ export function AdvanceDetailPage() {
         <section className="table-card">
           <h2>Posted settlement</h2>
           <p className="muted">
-            {row.settlementJournalNumber} · {row.settlementCase
-              ? SETTLEMENT_CASE_LABEL[row.settlementCase]
-              : ''}
+            {row.settlementJournalNumber} ·{' '}
+            {row.settlementCase ? SETTLEMENT_CASE_LABEL[row.settlementCase] : ''}
           </p>
+          {row.reimbursementDue > 0 ? (
+            <>
+              <div className="callout callout-warn">
+                Reimbursement due {money(row.reimbursementDue)}. Pay from the
+                employee ledger or use the button below.
+              </div>
+              {isFinance ? (
+                <div className="form-actions">
+                  <Link
+                    className="action-link"
+                    to={`/employees/${row.employeeId}/ledger`}
+                  >
+                    Open employee ledger
+                  </Link>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+          {row.reimbursedAmount > 0 ? (
+            <p className="muted">
+              Reimbursed {money(row.reimbursedAmount)}
+              {row.reimbursementJournalNumber
+                ? ` · ${row.reimbursementJournalNumber}`
+                : ''}
+            </p>
+          ) : null}
         </section>
       ) : null}
 

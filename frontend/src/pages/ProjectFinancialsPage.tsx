@@ -6,6 +6,7 @@ import { money } from '../types/accounting'
 import type { BurnRateRow } from '../types/analytics'
 import { Role } from '../types/auth'
 import type { Project } from '../types/project'
+import { MetricCard } from '../components/MetricCard'
 
 export function ProjectFinancialsPage() {
   const { user } = useAuth()
@@ -69,30 +70,32 @@ export function ProjectFinancialsPage() {
       {error ? <p className="form-error">{error}</p> : null}
 
       {projects ? (
-        <section className="grid">
-          <article className="stat-card">
-            <h3>Projects</h3>
-            <p className="stat-value">{projects.length}</p>
-            <p className="muted">
-              <Link to="/projects">Open project register</Link>
-            </p>
-          </article>
-          <article className="stat-card">
-            <h3>Over budget</h3>
-            <p className="stat-value">
-              {projects.filter((project) => project.financials.isOverBudget).length}
-            </p>
-            <p className="muted">Cost above the project budget threshold</p>
-          </article>
-          <article className="stat-card">
-            <h3>Net profit (all)</h3>
-            <p className="stat-value">
-              {money(
-                projects.reduce((sum, project) => sum + project.financials.netProfit, 0),
-              )}
-            </p>
-            <p className="muted">From journals tagged to projects</p>
-          </article>
+        <section className="grid metric-card-grid">
+          <MetricCard
+            variant="blue"
+            title="Projects"
+            value={projects.length}
+            meta={<Link to="/projects">Open project register</Link>}
+          />
+          <MetricCard
+            variant="amber"
+            title="Over budget"
+            value={
+              projects.filter((project) => project.financials.isOverBudget).length
+            }
+            meta="Cost above the project budget threshold"
+          />
+          <MetricCard
+            variant="green"
+            title="Net profit (all)"
+            value={money(
+              projects.reduce(
+                (sum, project) => sum + project.financials.netProfit,
+                0,
+              ),
+            )}
+            meta="From journals tagged to projects"
+          />
         </section>
       ) : null}
 

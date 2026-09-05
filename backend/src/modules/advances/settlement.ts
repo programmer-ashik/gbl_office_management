@@ -3,9 +3,11 @@ import { SettlementCase } from '../../common/enums/advance-status.enum';
 import { badRequest } from '../../common/errors/app-error';
 import { fromMinorUnits } from '../../common/utils/money';
 import type { JournalLineDto } from '../accounting/dto/journal.dto';
+import { JournalEntityType } from '../accounting/journal.enums';
+import { SystemAccountCode } from '../accounting/system-account-codes';
 
-export const ADVANCE_ASSET_CODE = '1300';
-export const EMPLOYEE_PAYABLE_CODE = '2100';
+export const ADVANCE_ASSET_CODE = SystemAccountCode.EMPLOYEE_ADVANCES;
+export const EMPLOYEE_PAYABLE_CODE = SystemAccountCode.EMPLOYEE_PAYABLES;
 
 export type VoucherInput = {
   accountCode: string;
@@ -32,6 +34,7 @@ export function classifySettlement(
 
 export function buildSettlementJournalLines(input: {
   projectId: string;
+  employeeId: string;
   advancedMinor: number;
   vouchers: VoucherInput[];
   returnAccountCode?: string;
@@ -81,6 +84,8 @@ export function buildSettlementJournalLines(input: {
     credit: fromMinorUnits(input.advancedMinor),
     description: 'Close employee advance',
     projectId: input.projectId,
+    entityType: JournalEntityType.EMPLOYEE,
+    entityId: input.employeeId,
   });
 
   if (settlementCase === SettlementCase.MORE) {
@@ -88,10 +93,38 @@ export function buildSettlementJournalLines(input: {
       accountCode: EMPLOYEE_PAYABLE_CODE,
       credit: fromMinorUnits(excessMinor),
       description: 'Excess spend due to employee',
+      entityType: JournalEntityType.EMPLOYEE,
+      entityId: input.employeeId,
     });
   }
 
   return { settlementCase, lines };
+}
+
+export function buildReimbursementJournalLines(input: {
+  employeeId: string;
+  amountMinor: number;
+  treasuryAccountCode: string;
+  description: string;
+}): JournalLineDto[] {
+  if (input.amountMinor <= 0) {
+    throw badRequest('Reimbursement amount must be greater than zero');
+  }
+  const amount = fromMinorUnits(input.amountMinor);
+  return [
+    {
+      accountCode: EMPLOYEE_PAYABLE_CODE,
+      debit: amount,
+      description: input.description,
+      entityType: JournalEntityType.EMPLOYEE,
+      entityId: input.employeeId,
+    },
+    {
+      accountCode: input.treasuryAccountCode,
+      credit: amount,
+      description: input.description,
+    },
+  ];
 }
 
 export function assertExpenseAccount(type: AccountType, code: string): void {

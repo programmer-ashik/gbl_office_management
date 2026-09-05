@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { money } from '../types/accounting'
 import { VENDOR_LEDGER_LABEL, type VendorLedger } from '../types/procurement'
+import { MetricCard } from '../components/MetricCard'
 
 export function SupplierDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -36,30 +37,21 @@ export function SupplierDetailPage() {
         </Link>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Purchases (GRN)</h3>
-          <p className="stat-value">{money(row.purchased)}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Returns</h3>
-          <p className="stat-value">{money(row.returned)}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Credit bills</h3>
-          <p className="stat-value">{money(row.billed)}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Paid</h3>
-          <p className="stat-value">{money(row.paid)}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Outstanding</h3>
-          <p className="stat-value">{money(row.outstanding)}</p>
-          <p className="muted">
-            <Link to="/payables">Schedule payment</Link>
-          </p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="blue"
+          title="Purchases (GRN)"
+          value={money(row.purchased)}
+        />
+        <MetricCard variant="amber" title="Returns" value={money(row.returned)} />
+        <MetricCard variant="purple" title="Credit bills" value={money(row.billed)} />
+        <MetricCard variant="green" title="Paid" value={money(row.paid)} />
+        <MetricCard
+          variant="red"
+          title="Outstanding"
+          value={money(row.outstanding)}
+          meta={<Link to="/payables">Schedule payment</Link>}
+        />
       </section>
 
       <section className="table-card">

@@ -5,6 +5,7 @@ import { toMinorUnits } from '../common/utils/money';
 import { CounterModel } from '../modules/accounting/counter.model';
 import type { JournalService } from '../modules/accounting/journal.service';
 import type { BankingService } from '../modules/banking/banking.service';
+import { CustomerModel } from '../modules/customers/customer.model';
 import { ItemModel } from '../modules/procurement/item.model';
 import { SupplierModel } from '../modules/procurement/supplier.model';
 import { ProjectModel } from '../modules/projects/project.model';
@@ -64,7 +65,7 @@ async function nextNumber(scope: string, prefix: string): Promise<string> {
 }
 
 /**
- * Idempotent demo seed for real MongoDB deployments.
+ * Idempotent demo seed for real MongoDB deployments (new CoA leaf codes).
  */
 export async function seedDemoData(deps: SeedDeps): Promise<void> {
   for (const row of DEMO_USERS) {
@@ -83,6 +84,29 @@ export async function seedDemoData(deps: SeedDeps): Promise<void> {
 
   const pm = await UserModel.findOne({ email: 'pm@gblenterprise.com' }).exec();
   const admin = await UserModel.findOne({ role: Role.ADMIN }).exec();
+
+  if ((await CustomerModel.countDocuments().exec()) === 0) {
+    await CustomerModel.create([
+      {
+        customerNumber: await nextNumber('customer', 'CUS'),
+        name: 'ABC Construction Ltd',
+        contactName: 'Accounts',
+        email: 'ar@abcconstruction.test',
+        phone: '+8801711000001',
+        isActive: true,
+      },
+      {
+        customerNumber: await nextNumber('customer', 'CUS'),
+        name: 'GBL Properties Ltd',
+        contactName: 'Billing Desk',
+        email: 'billing@gblproperties.test',
+        phone: '+8801700000000',
+        isActive: true,
+      },
+    ]);
+    console.log('Seeded demo customers');
+  }
+
   const projectCount = await ProjectModel.countDocuments().exec();
   if (projectCount === 0 && admin) {
     await ProjectModel.create({
@@ -129,8 +153,8 @@ export async function seedDemoData(deps: SeedDeps): Promise<void> {
   }
 
   const treasury = await deps.bankingService.list();
-  const cash = treasury.find((row) => row.glAccountCode === '1000');
-  const bank = treasury.find((row) => row.glAccountCode === '1010');
+  const cash = treasury.find((row) => row.glAccountCode === '1111');
+  const bank = treasury.find((row) => row.glAccountCode === '1112');
   if (
     cash &&
     bank &&
@@ -142,14 +166,16 @@ export async function seedDemoData(deps: SeedDeps): Promise<void> {
       {
         date: '2026-01-01',
         memo: 'Opening capital (seed)',
+        journalType: 'opening_balance',
+        reference: 'SEED-OB-001',
         lines: [
-          { accountCode: '1000', debit: 150_000 },
-          { accountCode: '1010', debit: 850_000 },
-          { accountCode: '3000', credit: 1_000_000 },
+          { accountCode: '1111', debit: 150_000 },
+          { accountCode: '1112', debit: 850_000 },
+          { accountCode: '3100', credit: 1_000_000 },
         ],
       },
       admin._id.toString(),
     );
-    console.log('Seeded opening cash and bank balances');
+    console.log('Seeded opening cash and bank balances (balanced BS)');
   }
 }

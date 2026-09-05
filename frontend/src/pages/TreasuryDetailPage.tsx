@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { MetricCard } from '../components/MetricCard'
 import { money } from '../types/accounting'
 import {
   TREASURY_KIND_LABEL,
@@ -122,28 +123,30 @@ export function TreasuryDetailPage() {
         </Link>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Book balance</h3>
-          <p className="stat-value">{money(account.bookBalance)}</p>
-          <p className="muted">From posted ledger lines</p>
-        </article>
-        <article className="stat-card">
-          <h3>Statement</h3>
-          <p className="stat-value">
-            {session ? money(session.statementBalance) : '—'}
-          </p>
-          <p className="muted">{session ? session.reconciliationNumber : 'No import yet'}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Difference</h3>
-          <p className={`stat-value ${session && session.difference !== 0 ? 'loss' : ''}`}>
-            {session ? money(session.difference) : '—'}
-          </p>
-          <p className="muted">
-            {session?.isReconciled ? 'Reconciled' : 'Match remaining items'}
-          </p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="teal"
+          title="Book balance"
+          value={money(account.bookBalance)}
+          meta="From posted ledger lines"
+        />
+        <MetricCard
+          variant="blue"
+          title="Statement"
+          value={session ? money(session.statementBalance) : '—'}
+          meta={session ? session.reconciliationNumber : 'No import yet'}
+        />
+        <MetricCard
+          variant="amber"
+          title="Difference"
+          value={session ? money(session.difference) : '—'}
+          valueTone={
+            session && session.difference !== 0 ? 'down' : 'default'
+          }
+          meta={
+            session?.isReconciled ? 'Reconciled' : 'Match remaining items'
+          }
+        />
       </section>
 
       <section className="table-card">

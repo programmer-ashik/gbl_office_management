@@ -59,7 +59,11 @@ import {
 } from './modules/procurement/procurement.routes';
 import { CustomersService } from './modules/customers/customers.service';
 import { createCustomersRouter } from './modules/customers/customers.routes';
+import { ReportTemplatesService } from './modules/templates/report-templates.service';
+import { createTemplatesRouter } from './modules/templates/templates.routes';
 import { seedDemoData } from './database/demo-seed';
+import path from 'node:path';
+import fs from 'node:fs';
 
 export async function createApp(): Promise<Express> {
   const config = loadConfig();
@@ -106,6 +110,7 @@ export async function createApp(): Promise<Express> {
   const procurementService = new ProcurementService(
     journalService,
     projectsService,
+    bankingService,
   );
   await procurementService.seedDefaults();
   const arApService = new ArApService(
@@ -122,6 +127,7 @@ export async function createApp(): Promise<Express> {
   );
   const analyticsService = new AnalyticsService(ledgerService, bankingService);
   const employeesService = new EmployeesService(usersService);
+  const templatesService = new ReportTemplatesService();
 
   if (!config.mongodb.memory) {
     await seedDemoData({ usersService, bankingService, journalService });
@@ -129,7 +135,11 @@ export async function createApp(): Promise<Express> {
 
   const app = express();
   app.set('trust proxy', 1);
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use(
     cors({
       origin: config.corsOrigins,
@@ -139,12 +149,16 @@ export async function createApp(): Promise<Express> {
   app.use(express.json({ limit: '3mb' }));
   app.use(cookieParser());
 
+  const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+  fs.mkdirSync(path.join(uploadsRoot, 'logos'), { recursive: true });
+  app.use('/uploads', express.static(uploadsRoot));
+
   app.use('/api/v1/health', createHealthRouter());
   app.use('/api/v1/auth', createAuthRouter(authService, usersService));
   app.use('/api/v1/users', createUsersRouter(usersService, authService));
   app.use(
     '/api/v1/employees',
-    createEmployeesRouter(employeesService, authService, usersService),
+    createEmployeesRouter(employeesService, advancesService, authService, usersService),
   );
   app.use(
     '/api/v1/customers',
@@ -170,6 +184,10 @@ export async function createApp(): Promise<Express> {
   app.use(
     '/api/v1/reports',
     createReportsRouter(ledgerService, authService, usersService),
+  );
+  app.use(
+    '/api/v1/templates',
+    createTemplatesRouter(templatesService, authService, usersService),
   );
   app.use(
     '/api/v1/projects',

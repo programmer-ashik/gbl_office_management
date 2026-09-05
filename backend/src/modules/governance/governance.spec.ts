@@ -15,7 +15,7 @@ describe('OCR mock', () => {
 
   it('maps materials keywords to project materials', () => {
     const result = ocr.scanReceipt({ textHint: 'Cement bag supply 4200' });
-    expect(result.lines[0]?.accountCode).toBe('5000');
+    expect(result.lines[0]?.accountCode).toBe('5110');
     expect(result.total).toBe(4200);
   });
 });

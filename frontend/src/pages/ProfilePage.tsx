@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { ROLE_LABEL, type HealthStatus } from '../types/auth'
+import { MetricCard } from '../components/MetricCard'
 
 function formatWhen(value: string | null | undefined): string {
   if (!value) return '—'
@@ -49,26 +50,25 @@ export function ProfilePage() {
 
       {error ? <p className="form-error">{error}</p> : null}
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Authentication</h3>
-          <p className="stat-value">Active</p>
-          <p className="muted">JWT access token + rotating refresh token</p>
-        </article>
-        <article className="stat-card">
-          <h3>Database</h3>
-          <p className="stat-value">
-            {health?.database.connected ? 'Connected' : 'Checking…'}
-          </p>
-          <p className="muted">
-            Replica set transactions {health?.database.ping ? 'ready' : 'pending'}
-          </p>
-        </article>
-        <article className="stat-card">
-          <h3>Your role</h3>
-          <p className="stat-value">{ROLE_LABEL[profile.role]}</p>
-          <p className="muted">{profile.email}</p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="green"
+          title="Authentication"
+          value="Active"
+          meta="JWT access token + rotating refresh token"
+        />
+        <MetricCard
+          variant="blue"
+          title="Database"
+          value={health?.database.connected ? 'Connected' : 'Checking…'}
+          meta={`Replica set transactions ${health?.database.ping ? 'ready' : 'pending'}`}
+        />
+        <MetricCard
+          variant="purple"
+          title="Your role"
+          value={ROLE_LABEL[profile.role]}
+          meta={profile.email}
+        />
       </section>
 
       <section className="table-card">

@@ -10,6 +10,7 @@ import {
   type OverdueNotice,
 } from '../types/ar-ap'
 import type { Project } from '../types/project'
+import { MetricCard } from '../components/MetricCard'
 
 export function ReceivablesPage() {
   const [rows, setRows] = useState<ClientInvoice[]>([])
@@ -91,22 +92,25 @@ export function ReceivablesPage() {
         </div>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Open AR</h3>
-          <p className="stat-value">{money(openTotal)}</p>
-          <p className="muted">Outstanding client balances (1100)</p>
-        </article>
-        <article className="stat-card">
-          <h3>Overdue</h3>
-          <p className="stat-value">{overdue.length}</p>
-          <p className="muted">Invoices past due date</p>
-        </article>
-        <article className="stat-card">
-          <h3>Invoices</h3>
-          <p className="stat-value">{rows.length}</p>
-          <p className="muted">Milestone and lump-sum billing</p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="teal"
+          title="Open AR"
+          value={money(openTotal)}
+          meta="Outstanding client balances (1100)"
+        />
+        <MetricCard
+          variant="red"
+          title="Overdue"
+          value={overdue.length}
+          meta="Invoices past due date"
+        />
+        <MetricCard
+          variant="blue"
+          title="Invoices"
+          value={rows.length}
+          meta="Milestone and lump-sum billing"
+        />
       </section>
 
       {overdue.length > 0 ? (

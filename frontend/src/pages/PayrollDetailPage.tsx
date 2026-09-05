@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { money } from '../types/accounting'
 import { PAYROLL_STATUS_LABEL, type PayrollRun } from '../types/payroll'
+import { MetricCard } from '../components/MetricCard'
 
 export function PayrollDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -43,19 +44,14 @@ export function PayrollDetailPage() {
         </Link>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Gross</h3>
-          <p className="stat-value">{money(row.totalGross)}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Advance deductions</h3>
-          <p className="stat-value">{money(row.totalAdvanceDeductions)}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Net pay</h3>
-          <p className="stat-value">{money(row.totalNetPay)}</p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard variant="blue" title="Gross" value={money(row.totalGross)} />
+        <MetricCard
+          variant="amber"
+          title="Advance deductions"
+          value={money(row.totalAdvanceDeductions)}
+        />
+        <MetricCard variant="green" title="Net pay" value={money(row.totalNetPay)} />
       </section>
 
       {row.lines.map((line) => (

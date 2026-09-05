@@ -13,6 +13,7 @@ import {
   CreateAdvanceDto,
   DisburseAdvanceDto,
   RejectAdvanceDto,
+  ReimburseAdvanceDto,
   SubmitSettlementDto,
 } from './dto/advance.dto';
 
@@ -148,6 +149,21 @@ export function createAdvancesRouter(
         req.user!,
       );
       sendSuccess(res, row, 'Advance settled', 201);
+    }),
+  );
+
+  router.post(
+    '/:id/reimburse',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(ReimburseAdvanceDto),
+    asyncHandler(async (req, res) => {
+      const row = await advancesService.reimburse(
+        String(req.params.id),
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Employee reimbursed', 201);
     }),
   );
 

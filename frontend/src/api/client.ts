@@ -5,6 +5,7 @@ import type {
   JournalEntry,
   JournalSummary,
   JournalWriteBody,
+  BalanceSheetReport,
   TrialBalance,
 } from '../types/accounting'
 import type {
@@ -23,6 +24,7 @@ import type {
 import type {
   Advance,
   AdvanceProjectOption,
+  EmployeeLedgerReport,
   ExpenseAccountOption,
 } from '../types/advance'
 import type { ApiError, ApiSuccess, AuthResult, HealthStatus, PublicUser, Role } from '../types/auth'
@@ -44,6 +46,7 @@ import type {
   CashFlowForecast,
   FinancialStatements,
 } from '../types/analytics'
+import type { BalanceSheetTemplate } from '../types/report-template'
 import type {
   Item,
   PurchaseOrder,
@@ -187,10 +190,29 @@ export const api = {
     name: string
     type: Account['type']
     description?: string
+    parentCode?: string
+    isPostable?: boolean
   }) =>
     request<Account>('/accounts', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  updateAccount: (
+    id: string,
+    body: {
+      name?: string
+      description?: string
+      isActive?: boolean
+      isPostable?: boolean
+    },
+  ) =>
+    request<Account>(`/accounts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteAccount: (id: string) =>
+    request<{ id: string; code: string }>(`/accounts/${id}`, {
+      method: 'DELETE',
     }),
   journals: (params?: {
     projectId?: string
@@ -251,6 +273,93 @@ export const api = {
       method: 'DELETE',
     }),
   trialBalance: () => request<TrialBalance>('/reports/trial-balance'),
+  balanceSheet: (asOfDate?: string) => {
+    const query = asOfDate
+      ? `?asOfDate=${encodeURIComponent(asOfDate)}`
+      : ''
+    return request<BalanceSheetReport>(`/reports/balance-sheet${query}`)
+  },
+  balanceSheetTemplate: () =>
+    request<BalanceSheetTemplate>('/templates/balance-sheet'),
+  saveBalanceSheetTemplate: (body: Omit<
+    BalanceSheetTemplate,
+    'id' | 'isDefault' | 'updatedBy' | 'updatedAt' | 'reportType'
+  > & {
+    templateName?: string
+    companyLogoUrl?: string | null
+    reportType?: 'BALANCE_SHEET'
+  }) =>
+    request<BalanceSheetTemplate>('/templates/balance-sheet', {
+      method: 'POST',
+      body: JSON.stringify({
+        templateName: body.templateName,
+        companyLogoUrl: body.companyLogoUrl ?? undefined,
+        headerConfig: body.headerConfig,
+        layoutStructure: body.layoutStructure,
+        footerConfig: body.footerConfig,
+      }),
+    }),
+  journalVoucherTemplate: () =>
+    request<BalanceSheetTemplate>('/templates/journal-voucher'),
+  saveJournalVoucherTemplate: (body: Omit<
+    BalanceSheetTemplate,
+    'id' | 'isDefault' | 'updatedBy' | 'updatedAt' | 'reportType'
+  > & {
+    templateName?: string
+    companyLogoUrl?: string | null
+  }) =>
+    request<BalanceSheetTemplate>('/templates/journal-voucher', {
+      method: 'POST',
+      body: JSON.stringify({
+        templateName: body.templateName,
+        companyLogoUrl: body.companyLogoUrl ?? undefined,
+        headerConfig: body.headerConfig,
+        layoutStructure: body.layoutStructure,
+        footerConfig: body.footerConfig,
+      }),
+    }),
+  uploadTemplateLogo: async (file: File) => {
+    const form = new FormData()
+    form.append('logo', file)
+    const headers = new Headers()
+    const token = getAccessToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    const res = await fetch(`${API_BASE}/templates/upload-logo`, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: form,
+    })
+    if (res.status === 401) {
+      const refreshed = await tryRefresh()
+      if (refreshed) {
+        const retryHeaders = new Headers()
+        const next = getAccessToken()
+        if (next) retryHeaders.set('Authorization', `Bearer ${next}`)
+        const retry = await fetch(`${API_BASE}/templates/upload-logo`, {
+          method: 'POST',
+          headers: retryHeaders,
+          credentials: 'include',
+          body: form,
+        })
+        if (!retry.ok) {
+          const err = (await retry.json().catch(() => null)) as ApiError | null
+          throw new ApiRequestError(
+            err?.message ?? 'Logo upload failed',
+            retry.status,
+          )
+        }
+        const json = (await retry.json()) as ApiSuccess<{ url: string }>
+        return json.data
+      }
+    }
+    if (!res.ok) {
+      const err = (await res.json().catch(() => null)) as ApiError | null
+      throw new ApiRequestError(err?.message ?? 'Logo upload failed', res.status)
+    }
+    const json = (await res.json()) as ApiSuccess<{ url: string }>
+    return json.data
+  },
   ledger: (
     accountCode: string,
     params?: { asOf?: string; entityType?: string; entityId?: string },
@@ -396,6 +505,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
     }),
+  reimburseAdvance: (
+    id: string,
+    body: { treasuryId: string; date?: string; memo?: string },
+  ) =>
+    request<Advance>(`/advances/${id}/reimburse`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  employeeLedger: (id: string) =>
+    request<EmployeeLedgerReport>(`/employees/${id}/ledger`),
   suppliers: () => request<Supplier[]>('/suppliers'),
   supplier: (id: string) => request<Supplier>(`/suppliers/${id}`),
   vendorLedger: (id: string) => request<VendorLedger>(`/suppliers/${id}/ledger`),
@@ -433,7 +552,12 @@ export const api = {
     }),
   receiveGoods: (
     id: string,
-    body: { date: string; lines: Array<{ lineId: string; quantity: number }> },
+    body: {
+      date: string
+      paymentMethod?: 'due' | 'cash' | 'bank'
+      treasuryId?: string
+      lines: Array<{ lineId: string; quantity: number }>
+    },
   ) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/receive`, {
       method: 'POST',

@@ -8,6 +8,8 @@ export type NavItem = {
   hint?: string
   icon: NavIconName
   roles: Role[]
+  /** Nested submenu items (e.g. Voucher Template → BS / JV). */
+  children?: NavItem[]
 }
 
 export type NavSection = {
@@ -280,7 +282,14 @@ export const NAV_SECTIONS: NavSection[] = [
         label: 'Trial Balance',
         to: '/trial-balance',
         icon: 'balance',
-        hint: 'Balance sheet check',
+        hint: 'Debit · Credit check',
+        roles: FINANCE,
+      },
+      {
+        label: 'Balance Sheet',
+        to: '/balance-sheet',
+        icon: 'balance',
+        hint: 'Statement of position',
         roles: FINANCE,
       },
       {
@@ -340,6 +349,36 @@ export const NAV_SECTIONS: NavSection[] = [
         hint: 'Security · History',
         roles: FINANCE,
       },
+      {
+        label: 'Voucher Template',
+        to: '/settings/templates/balance-sheet',
+        icon: 'reports',
+        hint: 'PDF · Layout · Appearance',
+        roles: [Role.ADMIN],
+        children: [
+          {
+            label: 'Appearance',
+            to: '/settings/appearance',
+            icon: 'settings',
+            hint: 'Theme · Table headers',
+            roles: [Role.ADMIN],
+          },
+          {
+            label: 'BS Template',
+            to: '/settings/templates/balance-sheet',
+            icon: 'balance',
+            hint: 'Balance sheet layout',
+            roles: [Role.ADMIN],
+          },
+          {
+            label: 'Journal Voucher Template',
+            to: '/settings/templates/journal-voucher',
+            icon: 'journal',
+            hint: 'JV PDF layout',
+            roles: [Role.ADMIN],
+          },
+        ],
+      },
     ],
   },
 ]
@@ -348,7 +387,18 @@ export function sectionsForRole(role: Role): NavSection[] {
   return NAV_SECTIONS.filter((section) => section.roles.includes(role))
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => item.roles.includes(role)),
+      items: section.items
+        .filter((item) => item.roles.includes(role))
+        .map((item) =>
+          item.children
+            ? {
+                ...item,
+                children: item.children.filter((child) =>
+                  child.roles.includes(role),
+                ),
+              }
+            : item,
+        ),
     }))
     .filter((section) => section.items.length > 0)
 }

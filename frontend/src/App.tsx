@@ -37,10 +37,16 @@ import { SignupPage } from './pages/SignupPage'
 import { SupplierDetailPage } from './pages/SupplierDetailPage'
 import { TreasuryDetailPage } from './pages/TreasuryDetailPage'
 import { TrialBalancePage } from './pages/TrialBalancePage'
+import { BalanceSheetPage } from './pages/BalanceSheetPage'
+import { BalanceSheetTemplateBuilderPage } from './pages/BalanceSheetTemplateBuilderPage'
+import { JournalVoucherTemplateBuilderPage } from './pages/ReportTemplateBuilderPage'
 import { AccountLedgerPage } from './pages/AccountLedgerPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { VendorsPage } from './pages/VendorsPage'
+import { AppearanceSettingsPage } from './pages/AppearanceSettingsPage'
+import { AdminRoute } from './components/AdminRoute'
+import { EmployeeLedgerPage } from './pages/EmployeeLedgerPage'
 
 export default function App() {
   return (
@@ -88,6 +94,7 @@ export default function App() {
             <Route path="/customers" element={<CustomersPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/trial-balance" element={<TrialBalancePage />} />
+            <Route path="/balance-sheet" element={<BalanceSheetPage />} />
 
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/projects/budgets" element={<ProjectBudgetsPage />} />
@@ -123,16 +130,61 @@ export default function App() {
             <Route path="/payroll/time" element={<PayrollTimePage />} />
             <Route path="/payroll/:id" element={<PayrollDetailPage />} />
             <Route path="/employees" element={<EmployeesPage />} />
+            <Route path="/employees/:id/ledger" element={<EmployeeLedgerPage />} />
+            <Route
+              path="/dashboard/employees/:id/ledger"
+              element={<EmployeeLedgerPage />}
+            />
 
             <Route path="/approvals" element={<ApprovalsPage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
 
             <Route path="/settings/profile" element={<ProfilePage />} />
+            <Route
+              path="/settings/appearance"
+              element={
+                <AdminRoute>
+                  <AppearanceSettingsPage />
+                </AdminRoute>
+              }
+            />
             <Route path="/settings/accounts" element={<ChartOfAccountsPage />} />
             <Route path="/settings/approvals" element={<ApprovalsPage />} />
             <Route path="/settings/users" element={<EmployeesPage />} />
             <Route path="/settings/audit" element={<AuditPage />} />
+            <Route
+              path="/settings/templates/balance-sheet"
+              element={
+                <AdminRoute>
+                  <BalanceSheetTemplateBuilderPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/settings/templates/journal-voucher"
+              element={
+                <AdminRoute>
+                  <JournalVoucherTemplateBuilderPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/dashboard/settings/templates/balance-sheet"
+              element={
+                <AdminRoute>
+                  <BalanceSheetTemplateBuilderPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/dashboard/settings/templates/journal-voucher"
+              element={
+                <AdminRoute>
+                  <JournalVoucherTemplateBuilderPage />
+                </AdminRoute>
+              }
+            />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

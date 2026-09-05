@@ -68,5 +68,15 @@ export function createAccountsRouter(
     }),
   );
 
+  router.delete(
+    '/:id',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const result = await accountsService.remove(String(req.params.id));
+      sendSuccess(res, result, 'Account deleted successfully');
+    }),
+  );
+
   return router;
 }

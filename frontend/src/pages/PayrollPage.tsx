@@ -12,6 +12,7 @@ import {
 } from '../types/payroll'
 import type { Project } from '../types/project'
 import type { TreasuryAccount } from '../types/banking'
+import { MetricCard } from '../components/MetricCard'
 
 export function PayrollPage() {
   const [employees, setEmployees] = useState<PayrollEmployee[]>([])
@@ -185,22 +186,19 @@ export function PayrollPage() {
         </div>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Salary structures</h3>
-          <p className="stat-value">{structures.length}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Time logs</h3>
-          <p className="stat-value">{timeLogs.length}</p>
-          <p className="muted">
-            {periodYear}-{String(periodMonth).padStart(2, '0')}
-          </p>
-        </article>
-        <article className="stat-card">
-          <h3>Payroll runs</h3>
-          <p className="stat-value">{runs.length}</p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="blue"
+          title="Salary structures"
+          value={structures.length}
+        />
+        <MetricCard
+          variant="teal"
+          title="Time logs"
+          value={timeLogs.length}
+          meta={`${periodYear}-${String(periodMonth).padStart(2, '0')}`}
+        />
+        <MetricCard variant="purple" title="Payroll runs" value={runs.length} />
       </section>
 
       <Modal

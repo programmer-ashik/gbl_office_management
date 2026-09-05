@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { Select } from '../components/ui'
 import type { PayrollEmployee, TimeLog } from '../types/payroll'
 import type { Project } from '../types/project'
+import { MetricCard } from '../components/MetricCard'
 
 export function PayrollTimePage() {
   const [employees, setEmployees] = useState<PayrollEmployee[]>([])
@@ -83,24 +84,25 @@ export function PayrollTimePage() {
         </Link>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Time logs</h3>
-          <p className="stat-value">{timeLogs.length}</p>
-          <p className="muted">
-            {periodYear}-{String(periodMonth).padStart(2, '0')}
-          </p>
-        </article>
-        <article className="stat-card">
-          <h3>Employees</h3>
-          <p className="stat-value">{employees.length}</p>
-          <p className="muted">Available for labor allocation</p>
-        </article>
-        <article className="stat-card">
-          <h3>Projects</h3>
-          <p className="stat-value">{projects.length}</p>
-          <p className="muted">Sites receiving labor cost</p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="blue"
+          title="Time logs"
+          value={timeLogs.length}
+          meta={`${periodYear}-${String(periodMonth).padStart(2, '0')}`}
+        />
+        <MetricCard
+          variant="teal"
+          title="Employees"
+          value={employees.length}
+          meta="Available for labor allocation"
+        />
+        <MetricCard
+          variant="purple"
+          title="Projects"
+          value={projects.length}
+          meta="Sites receiving labor cost"
+        />
       </section>
 
       <section className="table-card">

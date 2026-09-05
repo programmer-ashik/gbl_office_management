@@ -34,9 +34,10 @@ export class CreateAccountDto {
   description?: string;
 
   @IsOptional()
-  @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.trim().toUpperCase() : value,
-  )
+  @Transform(({ value }: { value: unknown }) => {
+    if (value === '' || value === null || value === undefined) return undefined;
+    return typeof value === 'string' ? value.trim().toUpperCase() : value;
+  })
   @IsString()
   parentCode?: string;
 

@@ -28,6 +28,7 @@ import {
   type JournalEntityType as EntityType,
   type JournalType as JournalTypeValue,
 } from './journal.enums';
+import { SystemAccountCode } from './system-account-codes';
 import {
   JournalEntryModel,
   type IJournalLine,
@@ -765,14 +766,23 @@ export class JournalService {
 
     let type = entityType;
     if (!type) {
-      if (accountCode === '1100') type = JournalEntityType.CUSTOMER;
-      else if (accountCode === '2000') type = JournalEntityType.SUPPLIER;
-      else if (accountCode === '1300' || accountCode === '2100') {
+      if (accountCode === SystemAccountCode.ACCOUNTS_RECEIVABLE) {
+        type = JournalEntityType.CUSTOMER;
+      } else if (
+        accountCode === SystemAccountCode.ACCOUNTS_PAYABLE ||
+        accountCode === SystemAccountCode.SUBCONTRACTOR_PAYABLE
+      ) {
+        type = JournalEntityType.SUPPLIER;
+      } else if (
+        accountCode === SystemAccountCode.EMPLOYEE_ADVANCES ||
+        accountCode === SystemAccountCode.EMPLOYEE_PAYABLES
+      ) {
         type = JournalEntityType.EMPLOYEE;
       } else if (
-        accountCode === '1000' ||
-        accountCode === '1010' ||
-        accountCode === '1020'
+        accountCode === SystemAccountCode.CASH ||
+        accountCode === SystemAccountCode.BANK ||
+        accountCode === SystemAccountCode.BANK_ALT ||
+        accountCode === SystemAccountCode.MOBILE_BANKING
       ) {
         type = JournalEntityType.TREASURY;
       } else {

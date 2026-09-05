@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { MetricCard } from '../components/MetricCard'
 import { money } from '../types/accounting'
 import {
   PROJECT_STATUS_LABEL,
@@ -106,36 +107,35 @@ export function ProjectDetailPage() {
         ))}
       </section>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Recognized revenue</h3>
-          <p className="stat-value">{money(financials.recognizedRevenue)}</p>
-          <p className="muted">
-            Contract remaining {money(financials.contractRemaining)}
-          </p>
-        </article>
-        <article className="stat-card">
-          <h3>Gross profit</h3>
-          <p className={`stat-value ${financials.grossProfit < 0 ? 'loss' : ''}`}>
-            {money(financials.grossProfit)}
-          </p>
-          <p className="muted">
-            Revenue minus materials and labor
-            {financials.grossMarginPct !== null
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="blue"
+          title="Recognized revenue"
+          value={money(financials.recognizedRevenue)}
+          meta={`Contract remaining ${money(financials.contractRemaining)}`}
+        />
+        <MetricCard
+          variant="teal"
+          title="Gross profit"
+          value={money(financials.grossProfit)}
+          valueTone={financials.grossProfit < 0 ? 'down' : 'default'}
+          meta={`Revenue minus materials and labor${
+            financials.grossMarginPct !== null
               ? ` · ${financials.grossMarginPct}%`
-              : ''}
-          </p>
-        </article>
-        <article className="stat-card">
-          <h3>Net profit</h3>
-          <p className={`stat-value ${financials.netProfit < 0 ? 'loss' : ''}`}>
-            {money(financials.netProfit)}
-          </p>
-          <p className="muted">
-            After all project expenses
-            {financials.netMarginPct !== null ? ` · ${financials.netMarginPct}%` : ''}
-          </p>
-        </article>
+              : ''
+          }`}
+        />
+        <MetricCard
+          variant="green"
+          title="Net profit"
+          value={money(financials.netProfit)}
+          valueTone={financials.netProfit < 0 ? 'down' : 'default'}
+          meta={`After all project expenses${
+            financials.netMarginPct !== null
+              ? ` · ${financials.netMarginPct}%`
+              : ''
+          }`}
+        />
       </section>
 
       <section className="table-card">
@@ -162,15 +162,19 @@ export function ProjectDetailPage() {
         <table>
           <thead>
             <tr>
+              <th>Date</th>
               <th>Code</th>
               <th>Account</th>
               <th>Class</th>
+              <th>Debit</th>
+              <th>Credit</th>
               <th>Amount</th>
             </tr>
           </thead>
           <tbody>
             {financials.breakdown.map((row) => (
               <tr key={row.accountCode}>
+                <td>{row.date ?? '—'}</td>
                 <td>{row.accountCode}</td>
                 <td>{row.accountName}</td>
                 <td>
@@ -180,12 +184,14 @@ export function ProjectDetailPage() {
                       ? 'Direct cost'
                       : 'Other expense'}
                 </td>
+                <td>{money(row.debit ?? 0)}</td>
+                <td>{money(row.credit ?? 0)}</td>
                 <td>{money(row.amount)}</td>
               </tr>
             ))}
             {financials.breakdown.length === 0 ? (
               <tr>
-                <td colSpan={4} className="muted">
+                <td colSpan={7} className="muted">
                   No tagged journals yet. Post a journal with this project selected.
                 </td>
               </tr>

@@ -171,8 +171,8 @@ describe('Phase 9 RBAC, approvals, OCR and audit (e2e)', () => {
         memo: 'Large equity injection',
         projectId: assignedProjectId,
         lines: [
-          { accountCode: '1010', debit: 150_000 },
-          { accountCode: '3000', credit: 150_000 },
+          { accountCode: '1112', debit: 150_000 },
+          { accountCode: '3100', credit: 150_000 },
         ],
       })
       .expect(202);
@@ -209,8 +209,8 @@ describe('Phase 9 RBAC, approvals, OCR and audit (e2e)', () => {
         projectId: assignedProjectId,
         approvalId,
         lines: [
-          { accountCode: '1010', debit: 150_000 },
-          { accountCode: '3000', credit: 150_000 },
+          { accountCode: '1112', debit: 150_000 },
+          { accountCode: '3100', credit: 150_000 },
         ],
       })
       .expect(201);

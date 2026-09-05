@@ -169,6 +169,46 @@ export type TrialBalance = {
   isBalanced: boolean
 }
 
+export type BalanceSheetLine = {
+  code: string
+  name: string
+  parentCode: string | null
+  balance: number
+  isHeader: boolean
+  isPostable: boolean
+  depth: number
+}
+
+export type BalanceSheetSection = {
+  id: string
+  title: string
+  total: number
+  lines: BalanceSheetLine[]
+}
+
+export type BalanceSheetReport = {
+  asOf: string
+  assets: {
+    current: BalanceSheetSection
+    fixed: BalanceSheetSection
+    total: number
+  }
+  liabilities: {
+    current: BalanceSheetSection
+    longTerm: BalanceSheetSection
+    total: number
+  }
+  equity: {
+    section: BalanceSheetSection
+    retainedEarnings: number
+    netIncome: number
+    total: number
+  }
+  totalLiabilitiesAndEquity: number
+  isBalanced: boolean
+  difference: number
+}
+
 export type AccountLedger = {
   account: {
     accountCode: string
@@ -209,55 +249,79 @@ export type DimensionRule = {
 }
 
 const DIMENSION_RULES: Record<string, DimensionRule> = {
-  '1100': {
+  '1121': {
     entityType: JournalEntityType.CUSTOMER,
     entityRequired: true,
     projectRequired: false,
     label: 'Customer',
   },
-  '2000': {
+  '2111': {
     entityType: JournalEntityType.SUPPLIER,
     entityRequired: true,
     projectRequired: false,
     label: 'Supplier',
   },
-  '1300': {
+  '2113': {
+    entityType: JournalEntityType.SUPPLIER,
+    entityRequired: true,
+    projectRequired: false,
+    label: 'Supplier',
+  },
+  '1131': {
     entityType: JournalEntityType.EMPLOYEE,
     entityRequired: true,
     projectRequired: false,
     label: 'Employee',
   },
-  '2100': {
+  '2121': {
     entityType: JournalEntityType.EMPLOYEE,
     entityRequired: true,
     projectRequired: false,
     label: 'Employee',
   },
-  '5000': {
+  '5110': {
     entityType: null,
     entityRequired: false,
     projectRequired: true,
     label: 'Project',
   },
-  '5100': {
+  '5120': {
     entityType: null,
     entityRequired: false,
     projectRequired: true,
     label: 'Project',
   },
-  '1000': {
+  '5130': {
+    entityType: null,
+    entityRequired: false,
+    projectRequired: true,
+    label: 'Project',
+  },
+  '5140': {
+    entityType: null,
+    entityRequired: false,
+    projectRequired: true,
+    label: 'Project',
+  },
+  '1111': {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
     label: 'Treasury',
   },
-  '1010': {
+  '1112': {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
     label: 'Treasury',
   },
-  '1020': {
+  '1113': {
+    entityType: JournalEntityType.TREASURY,
+    entityRequired: false,
+    projectRequired: false,
+    label: 'Treasury',
+  },
+  '1114': {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,

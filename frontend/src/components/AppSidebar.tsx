@@ -19,12 +19,15 @@ function sectionIdForPath(
   let best: { id: string; score: number } | null = null
   for (const section of sections) {
     for (const item of section.items) {
-      const matches = item.end
-        ? pathname === item.to
-        : pathname === item.to || pathname.startsWith(`${item.to}/`)
-      if (!matches) continue
-      const score = item.to.length
-      if (!best || score > best.score) best = { id: section.id, score }
+      const candidates = item.children?.length ? item.children : [item]
+      for (const link of candidates) {
+        const matches = link.end
+          ? pathname === link.to
+          : pathname === link.to || pathname.startsWith(`${link.to}/`)
+        if (!matches) continue
+        const score = link.to.length
+        if (!best || score > best.score) best = { id: section.id, score }
+      }
     }
   }
   return best?.id ?? null
@@ -144,31 +147,80 @@ export function AppSidebar() {
                     </span>
                   </button>
 
-                  {isOpen ? (
+                  <div
+                    className={
+                      isOpen
+                        ? 'nav-section-panel is-open'
+                        : 'nav-section-panel'
+                    }
+                  >
                     <div className="nav-section-items">
-                      {section.items.map((item) => (
-                        <NavLink
-                          key={`${section.id}-${item.label}-${item.to}`}
-                          to={item.to}
-                          end={item.end}
-                          title={item.hint}
-                          className={({ isActive }) =>
-                            isActive ? 'nav-link is-active' : 'nav-link'
-                          }
-                        >
-                          <span className="nav-link-main">
-                            <NavIcon name={item.icon} size={15} />
-                            <span className="nav-link-copy">
-                              <span className="nav-link-label">{item.label}</span>
-                              {item.hint ? (
-                                <span className="nav-link-hint">{item.hint}</span>
-                              ) : null}
+                      {section.items.map((item) =>
+                        item.children && item.children.length > 0 ? (
+                          <div
+                            key={`${section.id}-${item.label}-group`}
+                            className="nav-subgroup"
+                          >
+                            <div className="nav-subgroup-label">
+                              <NavIcon name={item.icon} size={14} />
+                              <span>{item.label}</span>
+                            </div>
+                            {item.children.map((child) => (
+                              <NavLink
+                                key={`${section.id}-${child.label}-${child.to}`}
+                                to={child.to}
+                                end={child.end}
+                                title={child.hint}
+                                className={({ isActive }) =>
+                                  isActive
+                                    ? 'nav-link nav-link-nested is-active'
+                                    : 'nav-link nav-link-nested'
+                                }
+                              >
+                                <span className="nav-link-main">
+                                  <NavIcon name={child.icon} size={14} />
+                                  <span className="nav-link-copy">
+                                    <span className="nav-link-label">
+                                      {child.label}
+                                    </span>
+                                    {child.hint ? (
+                                      <span className="nav-link-hint">
+                                        {child.hint}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                </span>
+                              </NavLink>
+                            ))}
+                          </div>
+                        ) : (
+                          <NavLink
+                            key={`${section.id}-${item.label}-${item.to}`}
+                            to={item.to}
+                            end={item.end}
+                            title={item.hint}
+                            className={({ isActive }) =>
+                              isActive ? 'nav-link is-active' : 'nav-link'
+                            }
+                          >
+                            <span className="nav-link-main">
+                              <NavIcon name={item.icon} size={15} />
+                              <span className="nav-link-copy">
+                                <span className="nav-link-label">
+                                  {item.label}
+                                </span>
+                                {item.hint ? (
+                                  <span className="nav-link-hint">
+                                    {item.hint}
+                                  </span>
+                                ) : null}
+                              </span>
                             </span>
-                          </span>
-                        </NavLink>
-                      ))}
+                          </NavLink>
+                        ),
+                      )}
                     </div>
-                  ) : null}
+                  </div>
                 </div>
               )
             })}

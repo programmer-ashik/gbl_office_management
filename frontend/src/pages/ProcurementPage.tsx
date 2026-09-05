@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { MetricCard } from '../components/MetricCard'
 import { Modal, Select } from '../components/ui'
 import { money } from '../types/accounting'
 import { Role } from '../types/auth'
@@ -173,14 +174,15 @@ export function ProcurementPage() {
       </header>
 
       {isFinance ? (
-        <section className="grid">
-          <article className="stat-card">
-            <h3>Open payables</h3>
-            <p className="stat-value">
-              {money(orders.reduce((sum, row) => sum + row.outstandingPayable, 0))}
-            </p>
-            <p className="muted">Received less vendor returns</p>
-          </article>
+        <section className="grid metric-card-grid">
+          <MetricCard
+            variant="amber"
+            title="Open payables"
+            value={money(
+              orders.reduce((sum, row) => sum + row.outstandingPayable, 0),
+            )}
+            meta="Received less vendor returns"
+          />
         </section>
       ) : null}
 
@@ -242,7 +244,7 @@ export function ProcurementPage() {
       <Modal
         open={poModalOpen}
         title="New purchase order"
-        description="Direct to site costs the project on receipt. Warehouse receipts sit in inventory (1200) until issued."
+        description="Direct to site costs the project on receipt. Warehouse receipts sit in inventory (1141) until issued."
         onClose={() => setPoModalOpen(false)}
         wide
       >

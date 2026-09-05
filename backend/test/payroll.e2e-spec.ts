@@ -85,8 +85,8 @@ describe('Phase 8 payroll and project cost allocation (e2e)', () => {
         date: '2026-09-01',
         memo: 'Opening cash',
         lines: [
-          { accountCode: '1010', debit: 1_000_000 },
-          { accountCode: '3000', credit: 1_000_000 },
+          { accountCode: '1112', debit: 1_000_000 },
+          { accountCode: '3100', credit: 1_000_000 },
         ],
       })
       .expect(201);

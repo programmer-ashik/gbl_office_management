@@ -2,10 +2,12 @@ import { badRequest } from '../../common/errors/app-error';
 import { fromMinorUnits } from '../../common/utils/money';
 import type { JournalLineDto } from '../accounting/dto/journal.dto';
 
-export const AR_CODE = '1100';
-export const AP_CODE = '2000';
-export const REVENUE_CODE = '4000';
-export const DEFAULT_BILL_EXPENSE_CODE = '5200';
+import { SystemAccountCode } from '../accounting/system-account-codes';
+
+export const AR_CODE = SystemAccountCode.ACCOUNTS_RECEIVABLE;
+export const AP_CODE = SystemAccountCode.ACCOUNTS_PAYABLE;
+export const REVENUE_CODE = SystemAccountCode.PROJECT_REVENUE;
+export const DEFAULT_BILL_EXPENSE_CODE = SystemAccountCode.OFFICE_EXPENSES;
 
 export function buildInvoiceJournalLines(input: {
   amountMinor: number;

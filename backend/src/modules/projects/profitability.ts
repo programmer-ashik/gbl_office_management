@@ -2,7 +2,12 @@ import { AccountType } from '../../common/enums/account-type.enum';
 import { fromMinorUnits } from '../../common/utils/money';
 
 /** Materials and labor are treated as direct/project COGS for gross profit. */
-export const DIRECT_COST_ACCOUNT_CODES = new Set(['5000', '5100']);
+export const DIRECT_COST_ACCOUNT_CODES = new Set([
+  '5110',
+  '5120',
+  '5130',
+  '5140',
+]);
 
 export type AccountRollup = {
   accountCode: string;
@@ -10,6 +15,7 @@ export type AccountRollup = {
   accountType: AccountType;
   debitMinor: number;
   creditMinor: number;
+  lastDate?: Date | string | null;
 };
 
 export type CostBreakdownRow = {
@@ -17,6 +23,9 @@ export type CostBreakdownRow = {
   accountName: string;
   accountType: AccountType;
   amount: number;
+  debit: number;
+  credit: number;
+  date: string | null;
   isDirectCost: boolean;
 };
 
@@ -60,6 +69,13 @@ export function computeProjectFinancials(
   const breakdown: CostBreakdownRow[] = [];
 
   for (const row of rollups) {
+    const debit = fromMinorUnits(row.debitMinor);
+    const credit = fromMinorUnits(row.creditMinor);
+    const date =
+      row.lastDate != null
+        ? new Date(row.lastDate).toISOString().slice(0, 10)
+        : null;
+
     if (row.accountType === AccountType.REVENUE) {
       const amountMinor = row.creditMinor - row.debitMinor;
       revenueMinor += amountMinor;
@@ -69,6 +85,9 @@ export function computeProjectFinancials(
           accountName: row.accountName,
           accountType: row.accountType,
           amount: fromMinorUnits(amountMinor),
+          debit,
+          credit,
+          date,
           isDirectCost: false,
         });
       }
@@ -96,6 +115,9 @@ export function computeProjectFinancials(
       accountName: row.accountName,
       accountType: row.accountType,
       amount: fromMinorUnits(amountMinor),
+      debit,
+      credit,
+      date,
       isDirectCost,
     });
   }

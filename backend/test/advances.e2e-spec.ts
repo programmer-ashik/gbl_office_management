@@ -59,7 +59,7 @@ describe('Phase 5 advance and expense settlement (e2e)', () => {
       .expect(200);
     cashId = (
       treasury.body.data as Array<{ id: string; glAccountCode: string }>
-    ).find((row) => row.glAccountCode === '1000')!.id;
+    ).find((row) => row.glAccountCode === '1111')!.id;
 
     await request(app)
       .post('/api/v1/journals')
@@ -68,8 +68,8 @@ describe('Phase 5 advance and expense settlement (e2e)', () => {
         date: '2026-09-01',
         memo: 'Opening cash',
         lines: [
-          { accountCode: '1000', debit: 100000 },
-          { accountCode: '3000', credit: 100000 },
+          { accountCode: '1111', debit: 100000 },
+          { accountCode: '3100', credit: 100000 },
         ],
       })
       .expect(201);
@@ -125,7 +125,7 @@ describe('Phase 5 advance and expense settlement (e2e)', () => {
       .post(`/api/v1/advances/${id}/settlement`)
       .set('Authorization', `Bearer ${employeeToken}`)
       .send({
-        lines: [{ accountCode: '5000', amount: 10000, description: 'Cement and sand' }],
+        lines: [{ accountCode: '5110', amount: 10000, description: 'Cement and sand' }],
       })
       .expect(200);
 
@@ -184,7 +184,7 @@ describe('Phase 5 advance and expense settlement (e2e)', () => {
       .expect(200);
     const cashBalance = (
       cash.body.data as Array<{ glAccountCode: string; bookBalance: number }>
-    ).find((row) => row.glAccountCode === '1000')!.bookBalance;
+    ).find((row) => row.glAccountCode === '1111')!.bookBalance;
     expect(cashBalance).toBe(87000);
   });
 
@@ -195,7 +195,7 @@ describe('Phase 5 advance and expense settlement (e2e)', () => {
       .post(`/api/v1/advances/${id}/settlement`)
       .set('Authorization', `Bearer ${employeeToken}`)
       .send({
-        lines: [{ accountCode: '5000', amount: 5500, description: 'Steel extras' }],
+        lines: [{ accountCode: '5110', amount: 5500, description: 'Steel extras' }],
       })
       .expect(200);
 
@@ -209,7 +209,7 @@ describe('Phase 5 advance and expense settlement (e2e)', () => {
     expect(settled.body.data.spentAmount).toBe(5500);
 
     const payable = await request(app)
-      .get('/api/v1/ledgers/2100')
+      .get('/api/v1/ledgers/2121')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
     expect(payable.body.data.account.balance).toBe(1500);

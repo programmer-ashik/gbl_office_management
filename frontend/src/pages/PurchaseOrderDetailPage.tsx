@@ -1,15 +1,23 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { MetricCard } from '../components/MetricCard'
+import { Select } from '../components/ui'
 import { money } from '../types/accounting'
 import { Role } from '../types/auth'
+import {
+  TREASURY_KIND_LABEL,
+  type TreasuryAccount,
+} from '../types/banking'
 import {
   PO_STATUS_LABEL,
   PURCHASE_DESTINATION_LABEL,
   qty,
   type PurchaseOrder,
 } from '../types/procurement'
+
+type PaymentMethod = 'due' | 'cash' | 'bank'
 
 export function PurchaseOrderDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -18,6 +26,9 @@ export function PurchaseOrderDetailPage() {
   const [row, setRow] = useState<PurchaseOrder | null>(null)
   const [qtyByLine, setQtyByLine] = useState<Record<string, string>>({})
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('due')
+  const [treasuryId, setTreasuryId] = useState('')
+  const [treasury, setTreasury] = useState<TreasuryAccount[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -42,6 +53,43 @@ export function PurchaseOrderDetailPage() {
     })
   }, [id])
 
+  useEffect(() => {
+    if (!isFinance) return
+    api
+      .treasury()
+      .then(setTreasury)
+      .catch(() => setTreasury([]))
+  }, [isFinance])
+
+  const treasuryOptions = useMemo(() => {
+    const filtered = treasury.filter((account) => {
+      if (!account.isActive) return false
+      if (paymentMethod === 'cash') {
+        return account.kind === 'cash' || account.kind === 'petty_cash'
+      }
+      if (paymentMethod === 'bank') {
+        return (
+          account.kind === 'commercial_bank' || account.kind === 'mobile_banking'
+        )
+      }
+      return false
+    })
+    return filtered.map((account) => ({
+      value: account.id,
+      label: `${account.name} · ${TREASURY_KIND_LABEL[account.kind]} · ${account.glAccountCode}`,
+    }))
+  }, [treasury, paymentMethod])
+
+  useEffect(() => {
+    if (paymentMethod === 'due') {
+      setTreasuryId('')
+      return
+    }
+    if (!treasuryOptions.some((opt) => opt.value === treasuryId)) {
+      setTreasuryId(treasuryOptions[0]?.value ?? '')
+    }
+  }, [paymentMethod, treasuryOptions, treasuryId])
+
   function selectedLines() {
     if (!row) return []
     return row.lines
@@ -58,7 +106,13 @@ export function PurchaseOrderDetailPage() {
     setSaving(true)
     setError(null)
     try {
-      await api.receiveGoods(id, { date, lines: selectedLines() })
+      await api.receiveGoods(id, {
+        date,
+        paymentMethod,
+        treasuryId:
+          paymentMethod === 'due' ? undefined : treasuryId || undefined,
+        lines: selectedLines(),
+      })
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to receive goods')
@@ -121,22 +175,25 @@ export function PurchaseOrderDetailPage() {
         </Link>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Ordered</h3>
-          <p className="stat-value">{money(row.orderedAmount)}</p>
-          <p className="muted">{PO_STATUS_LABEL[row.status]}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Received</h3>
-          <p className="stat-value">{money(row.receivedAmount)}</p>
-          <p className="muted">Returns {money(row.returnedAmount)}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Outstanding payable</h3>
-          <p className="stat-value">{money(row.outstandingPayable)}</p>
-          <p className="muted">Before supplier payment</p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="blue"
+          title="Ordered"
+          value={money(row.orderedAmount)}
+          meta={PO_STATUS_LABEL[row.status]}
+        />
+        <MetricCard
+          variant="teal"
+          title="Received"
+          value={money(row.receivedAmount)}
+          meta={`Returns ${money(row.returnedAmount)}`}
+        />
+        <MetricCard
+          variant="amber"
+          title="Outstanding payable"
+          value={money(row.outstandingPayable)}
+          meta="Before supplier payment"
+        />
       </section>
 
       <section className="table-card">
@@ -194,15 +251,48 @@ export function PurchaseOrderDetailPage() {
           </table>
           {showQty ? (
             <>
-              <label>
-                Date
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  required
-                />
-              </label>
+              <div className="name-row">
+                <label>
+                  Date
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    required
+                  />
+                </label>
+                {canReceive ? (
+                  <label>
+                    Payment method
+                    <Select
+                      value={paymentMethod}
+                      onChange={(value) =>
+                        setPaymentMethod(value as PaymentMethod)
+                      }
+                      options={[
+                        { value: 'due', label: 'Due (Accounts payable)' },
+                        { value: 'cash', label: 'Cash' },
+                        { value: 'bank', label: 'Bank' },
+                      ]}
+                    />
+                  </label>
+                ) : null}
+              </div>
+              {canReceive && paymentMethod !== 'due' ? (
+                <label>
+                  {paymentMethod === 'cash' ? 'Cash account' : 'Bank account'}
+                  <Select
+                    value={treasuryId}
+                    onChange={setTreasuryId}
+                    options={
+                      treasuryOptions.length > 0
+                        ? treasuryOptions
+                        : [{ value: '', label: 'No matching treasury channels' }]
+                    }
+                    searchable
+                  />
+                </label>
+              ) : null}
               <div className="form-actions">
                 {row.receivedAmount === 0 ? (
                   <button type="button" className="ghost" onClick={() => void onCancel()}>

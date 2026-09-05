@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
@@ -25,9 +26,19 @@ type SelectProps = {
   disabled?: boolean
   required?: boolean
   searchable?: boolean
+  /** Use fixed portal. Default: auto (local inside modals, portal elsewhere). */
+  portal?: boolean
   id?: string
   name?: string
   className?: string
+}
+
+type PopoverCoords = {
+  top: number
+  left: number
+  width: number
+  maxHeight: number
+  openUp: boolean
 }
 
 export function Select({
@@ -38,16 +49,26 @@ export function Select({
   disabled = false,
   required = false,
   searchable = false,
+  portal,
   id,
   name,
   className,
 }: SelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [coords, setCoords] = useState<PopoverCoords | null>(null)
+  const [autoPortal, setAutoPortal] = useState(true)
   const rootRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const listId = useId()
   const selected = options.find((option) => option.value === value)
+  const usePortal = portal ?? autoPortal
+
+  useLayoutEffect(() => {
+    setAutoPortal(!rootRef.current?.closest('.ui-modal-panel'))
+  }, [])
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -59,16 +80,106 @@ export function Select({
     )
   }, [options, query])
 
+  const placePopover = () => {
+    const trigger = triggerRef.current
+    if (!trigger) return
+
+    const rect = trigger.getBoundingClientRect()
+    const gap = 4
+    const pad = 8
+    const width = Math.min(window.innerWidth - pad * 2, Math.max(rect.width, 160))
+    const estimated =
+      panelRef.current?.offsetHeight ||
+      Math.min(filtered.length * 40 + (searchable ? 44 : 8), 240)
+
+    const spaceBelow = window.innerHeight - rect.bottom - pad
+    const spaceAbove = rect.top - pad
+    const openUp = spaceBelow < estimated + gap && spaceAbove > spaceBelow
+    const available = openUp ? spaceAbove : spaceBelow
+    const maxHeight = Math.max(120, Math.min(240, available - gap))
+
+    if (!usePortal) {
+      setCoords({
+        top: 0,
+        left: 0,
+        width: rect.width,
+        maxHeight,
+        openUp,
+      })
+      return
+    }
+
+    let top = openUp ? rect.top - gap - Math.min(estimated, maxHeight) : rect.bottom + gap
+    // Clamp so the menu stays on-screen
+    top = Math.min(Math.max(pad, top), window.innerHeight - Math.min(estimated, maxHeight) - pad)
+
+    let left = rect.left
+    if (left + width > window.innerWidth - pad) {
+      left = window.innerWidth - width - pad
+    }
+    if (left < pad) left = pad
+
+    setCoords({ top, left, width, maxHeight, openUp })
+  }
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setCoords(null)
+      return
+    }
+    placePopover()
+    // Second pass after paint — measure real menu height
+    const id = window.requestAnimationFrame(() => placePopover())
+    return () => window.cancelAnimationFrame(id)
+  }, [open, options.length, filtered.length, usePortal, searchable])
+
   useEffect(() => {
-    function onDocClick(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) {
+    if (!open) return
+
+    let armed = false
+    const arm = window.setTimeout(() => {
+      armed = true
+    }, 10)
+
+    function onPointerDown(event: MouseEvent) {
+      if (!armed) return
+      const target = event.target as Node
+      if (
+        rootRef.current?.contains(target) ||
+        panelRef.current?.contains(target)
+      ) {
+        return
+      }
+      setOpen(false)
+      setQuery('')
+    }
+
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
         setOpen(false)
         setQuery('')
       }
     }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [])
+
+    function onReposition() {
+      placePopover()
+    }
+
+    document.addEventListener('mousedown', onPointerDown, true)
+    document.addEventListener('keydown', onKey, true)
+    window.addEventListener('resize', onReposition)
+    window.addEventListener('scroll', onReposition, true)
+
+    return () => {
+      window.clearTimeout(arm)
+      document.removeEventListener('mousedown', onPointerDown, true)
+      document.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('resize', onReposition)
+      window.removeEventListener('scroll', onReposition, true)
+    }
+  }, [open, options.length, usePortal, searchable, filtered.length])
 
   useEffect(() => {
     if (open && searchable) {
@@ -88,10 +199,88 @@ export function Select({
     }
   }
 
+  function closeAndSelect(next: string) {
+    onChange(next)
+    setOpen(false)
+    setQuery('')
+  }
+
+  const menu = open ? (
+    <div
+      ref={panelRef}
+      className={
+        usePortal
+          ? 'ui-select-popover is-portal'
+          : coords?.openUp
+            ? 'ui-select-popover is-local is-open-up'
+            : 'ui-select-popover is-local'
+      }
+      style={
+        usePortal && coords
+          ? ({
+              top: coords.top,
+              left: coords.left,
+              width: coords.width,
+              maxHeight: coords.maxHeight,
+              zIndex: 10050,
+            } satisfies CSSProperties)
+          : coords
+            ? ({ maxHeight: coords.maxHeight } satisfies CSSProperties)
+            : undefined
+      }
+      role="presentation"
+    >
+      {searchable ? (
+        <input
+          ref={searchRef}
+          className="ui-select-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search…"
+          aria-label="Search options"
+        />
+      ) : null}
+      <ul id={listId} role="listbox" className="ui-select-menu">
+        {filtered.map((option) => (
+          <li key={option.value || '__empty'}>
+            <button
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className={
+                option.value === value
+                  ? 'ui-select-option is-selected'
+                  : 'ui-select-option'
+              }
+              disabled={option.disabled}
+              title={option.label}
+              onMouseDown={(event) => {
+                // Prevent trigger blur / outside handlers from racing the click
+                event.preventDefault()
+              }}
+              onClick={() => closeAndSelect(option.value)}
+            >
+              {option.label}
+            </button>
+          </li>
+        ))}
+        {filtered.length === 0 ? (
+          <li className="ui-select-empty muted">No matches</li>
+        ) : null}
+      </ul>
+    </div>
+  ) : null
+
   return (
-    <div className={`ui-select ${className ?? ''}`.trim()} ref={rootRef}>
-      {name ? <input type="hidden" name={name} value={value} required={required} /> : null}
+    <div
+      className={`ui-select${open ? ' is-open' : ''} ${className ?? ''}`.trim()}
+      ref={rootRef}
+    >
+      {name ? (
+        <input type="hidden" name={name} value={value} required={required} />
+      ) : null}
       <button
+        ref={triggerRef}
         type="button"
         id={id}
         className="ui-select-trigger"
@@ -99,65 +288,22 @@ export function Select({
         aria-expanded={open}
         aria-controls={listId}
         disabled={disabled}
+        title={selected?.label ?? placeholder}
         onClick={() => setOpen((current) => !current)}
         onKeyDown={onKeyDown}
       >
-        <span className={selected ? '' : 'ui-select-placeholder'}>
+        <span className={selected ? 'ui-select-value' : 'ui-select-placeholder'}>
           {selected?.label ?? placeholder}
         </span>
         <span className="ui-select-chevron" aria-hidden>
           ▾
         </span>
       </button>
-      <AnimatePresence>
-        {open ? (
-          <motion.div
-            className="ui-select-popover"
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.98 }}
-            transition={{ duration: 0.14, ease: 'easeOut' }}
-          >
-            {searchable ? (
-              <input
-                ref={searchRef}
-                className="ui-select-search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search…"
-                aria-label="Search options"
-              />
-            ) : null}
-            <ul id={listId} role="listbox" className="ui-select-menu">
-              {filtered.map((option) => (
-                <li key={option.value || '__empty'}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={option.value === value}
-                    className={
-                      option.value === value
-                        ? 'ui-select-option is-selected'
-                        : 'ui-select-option'
-                    }
-                    disabled={option.disabled}
-                    onClick={() => {
-                      onChange(option.value)
-                      setOpen(false)
-                      setQuery('')
-                    }}
-                  >
-                    {option.label}
-                  </button>
-                </li>
-              ))}
-              {filtered.length === 0 ? (
-                <li className="ui-select-empty muted">No matches</li>
-              ) : null}
-            </ul>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+      {usePortal
+        ? open && coords && typeof document !== 'undefined'
+          ? createPortal(menu, document.body)
+          : null
+        : menu}
     </div>
   )
 }
@@ -182,7 +328,9 @@ export function ActionMenu({
   disabled = false,
 }: ActionMenuProps) {
   const [open, setOpen] = useState(false)
-  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(
+    null,
+  )
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -190,18 +338,22 @@ export function ActionMenu({
     const trigger = triggerRef.current
     if (!trigger) return
     const rect = trigger.getBoundingClientRect()
-    const menuWidth = 220
-    const estimatedHeight = Math.min(items.length * 52 + 8, window.innerHeight * 0.45)
+    const menuWidth = 180
+    const estimatedHeight = Math.min(
+      items.length * 40 + 8,
+      window.innerHeight * 0.45,
+    )
     const openUp =
       window.innerHeight - rect.bottom < estimatedHeight + 8 &&
       rect.top > estimatedHeight + 8
     const top = openUp
       ? Math.max(8, rect.top - estimatedHeight - 4)
-      : Math.min(rect.bottom + 4, window.innerHeight - estimatedHeight - 8)
-    const left = Math.min(
-      Math.max(8, rect.right - menuWidth),
-      window.innerWidth - menuWidth - 8,
-    )
+      : Math.min(rect.bottom + 4, window.innerHeight - 8)
+    let left = rect.right - menuWidth
+    if (left < 8) left = 8
+    if (left + menuWidth > window.innerWidth - 8) {
+      left = window.innerWidth - menuWidth - 8
+    }
     setCoords({ top, left })
   }
 
@@ -215,23 +367,21 @@ export function ActionMenu({
 
   useEffect(() => {
     if (!open) return
-
-    let active = false
+    let armed = false
     const arm = window.setTimeout(() => {
-      active = true
-    }, 0)
+      armed = true
+    }, 10)
 
     function onPointerDown(event: MouseEvent) {
-      if (!active) return
+      if (!armed) return
       const target = event.target as Node
-      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) {
+      if (
+        triggerRef.current?.contains(target) ||
+        panelRef.current?.contains(target)
+      ) {
         return
       }
       setOpen(false)
-    }
-
-    function onKey(event: globalThis.KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false)
     }
 
     function onReposition() {
@@ -239,14 +389,11 @@ export function ActionMenu({
     }
 
     document.addEventListener('mousedown', onPointerDown, true)
-    document.addEventListener('keydown', onKey)
     window.addEventListener('resize', onReposition)
     window.addEventListener('scroll', onReposition, true)
-
     return () => {
       window.clearTimeout(arm)
       document.removeEventListener('mousedown', onPointerDown, true)
-      document.removeEventListener('keydown', onKey)
       window.removeEventListener('resize', onReposition)
       window.removeEventListener('scroll', onReposition, true)
     }
@@ -259,51 +406,42 @@ export function ActionMenu({
         type="button"
         className="ghost ui-action-trigger"
         disabled={disabled}
-        aria-haspopup="menu"
         aria-expanded={open}
-        onClick={(event) => {
-          event.stopPropagation()
-          setOpen((current) => !current)
-        }}
+        onClick={() => setOpen((current) => !current)}
       >
-        {label} ▾
+        {label}
       </button>
       {open && coords && typeof document !== 'undefined'
         ? createPortal(
             <div
               ref={panelRef}
-              role="menu"
               className="ui-action-panel is-portal"
-              style={{ top: coords.top, left: coords.left }}
+              style={{ top: coords.top, left: coords.left, minWidth: 180 }}
             >
               {items.map((item) => {
-                const tip =
-                  item.disabled && item.disabledReason ? item.disabledReason : undefined
+                const tip = item.disabled ? item.disabledReason : undefined
                 return (
-                  <div
-                    key={item.label}
-                    className="ui-action-item-wrap"
-                    title={tip}
-                    role="none"
-                  >
+                  <div key={item.label} className="ui-action-item-wrap">
                     <button
                       type="button"
-                      role="menuitem"
                       className={
-                        item.danger ? 'ui-action-item is-danger' : 'ui-action-item'
+                        item.danger
+                          ? 'ui-action-item is-danger'
+                          : 'ui-action-item'
                       }
                       disabled={item.disabled}
-                      aria-disabled={item.disabled || undefined}
-                      aria-description={tip}
-                      onClick={(event) => {
-                        event.stopPropagation()
+                      title={tip}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
                         if (item.disabled) return
                         setOpen(false)
                         item.onSelect()
                       }}
                     >
                       <span className="ui-action-item-label">{item.label}</span>
-                      {tip ? <span className="ui-action-item-hint">{tip}</span> : null}
+                      {tip ? (
+                        <span className="ui-action-item-hint">{tip}</span>
+                      ) : null}
                     </button>
                   </div>
                 )
@@ -315,7 +453,6 @@ export function ActionMenu({
     </div>
   )
 }
-
 
 type ModalProps = {
   open: boolean
@@ -336,18 +473,15 @@ export function Modal({
 }: ModalProps) {
   useEffect(() => {
     if (!open) return
-    function onKey(event: globalThis.KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
     return () => {
-      document.removeEventListener('keydown', onKey)
       document.body.style.overflow = ''
     }
-  }, [open, onClose])
+  }, [open])
 
-  return (
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
     <AnimatePresence>
       {open ? (
         <motion.div
@@ -357,12 +491,7 @@ export function Modal({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.16 }}
         >
-          <button
-            type="button"
-            className="ui-modal-backdrop"
-            aria-label="Close dialog"
-            onClick={onClose}
-          />
+          <div className="ui-modal-backdrop" aria-hidden />
           <motion.div
             role="dialog"
             aria-modal="true"
@@ -378,7 +507,11 @@ export function Modal({
                 <h2 id="ui-modal-title">{title}</h2>
                 {description ? <p className="muted">{description}</p> : null}
               </div>
-              <button type="button" className="ghost ui-modal-close" onClick={onClose}>
+              <button
+                type="button"
+                className="ghost ui-modal-close"
+                onClick={onClose}
+              >
                 Close
               </button>
             </header>
@@ -386,6 +519,7 @@ export function Modal({
           </motion.div>
         </motion.div>
       ) : null}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   )
 }

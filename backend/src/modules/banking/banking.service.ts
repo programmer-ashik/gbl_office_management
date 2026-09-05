@@ -109,17 +109,17 @@ const DEFAULT_TREASURY: Array<{
   glAccountCode: string;
   institution?: string;
 }> = [
-  { name: 'Cash in Hand', kind: TreasuryKind.CASH, glAccountCode: '1000' },
+  { name: 'Petty Cash (Hand Cash)', kind: TreasuryKind.CASH, glAccountCode: '1111' },
   {
-    name: 'Bank Accounts',
+    name: 'BRAC Bank',
     kind: TreasuryKind.COMMERCIAL_BANK,
-    glAccountCode: '1010',
-    institution: 'Control account',
+    glAccountCode: '1112',
+    institution: 'BRAC Bank',
   },
   {
-    name: 'Mobile Banking',
+    name: 'Mobile Banking (bKash / Nagad)',
     kind: TreasuryKind.MOBILE_BANKING,
-    glAccountCode: '1020',
+    glAccountCode: '1114',
     institution: 'bKash / Nagad',
   },
 ];

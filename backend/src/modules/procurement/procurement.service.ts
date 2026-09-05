@@ -15,11 +15,15 @@ import {
 } from '../../common/utils/quantity';
 import { CounterModel } from '../accounting/counter.model';
 import type { JournalService } from '../accounting/journal.service';
+import { SystemAccountCode } from '../accounting/system-account-codes';
+import type { BankingService } from '../banking/banking.service';
+import { isBankLike, isCashLike } from '../../common/enums/treasury-kind.enum';
 import type { ProjectsService } from '../projects/projects.service';
 import {
   buildIssueJournalLines,
   buildReceiptJournalLines,
   buildReturnJournalLines,
+  type ReceiptSettlement,
 } from './allocation';
 import type {
   CreateItemDto,
@@ -146,6 +150,7 @@ export class ProcurementService {
   constructor(
     private readonly journalService: JournalService,
     private readonly projectsService: ProjectsService,
+    private readonly bankingService: BankingService,
   ) {}
 
   async seedDefaults(): Promise<void> {
@@ -539,6 +544,25 @@ export class ProcurementService {
     po.receivedMinor += amountMinor;
     this.refreshPoStatus(po);
 
+    const settlement = (dto.paymentMethod ?? 'due') as ReceiptSettlement;
+    let creditAccountCode: string | undefined;
+    if (settlement === 'cash' || settlement === 'bank') {
+      if (dto.treasuryId) {
+        const treasury = await this.bankingService.requireActive(dto.treasuryId);
+        if (settlement === 'cash' && !isCashLike(treasury.kind)) {
+          throw badRequest('Select a cash or petty-cash treasury channel');
+        }
+        if (settlement === 'bank' && !isBankLike(treasury.kind)) {
+          throw badRequest('Select a bank or mobile-banking treasury channel');
+        }
+        creditAccountCode = treasury.glAccountCode;
+      } else if (settlement === 'cash') {
+        creditAccountCode = SystemAccountCode.CASH_IN_HAND;
+      } else {
+        throw badRequest('Select a bank account for bank settlement');
+      }
+    }
+
     const journal = await this.journalService.post(
       {
         date: date.toISOString(),
@@ -550,6 +574,8 @@ export class ProcurementService {
           amountMinor,
           projectId: po.projectId?.toString(),
           description: `Goods received ${po.poNumber}`,
+          settlement,
+          creditAccountCode,
         }),
       },
       actor.userId,

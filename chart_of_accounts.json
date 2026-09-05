@@ -1,0 +1,67 @@
+[
+  { "code": "1000", "name": "ASSETS", "type": "Asset", "isHeader": true, "parentCode": null },
+  { "code": "1100", "name": "Current Assets", "type": "Asset", "isHeader": true, "parentCode": "1000" },
+  { "code": "1110", "name": "Cash & Bank Accounts", "type": "Asset", "isHeader": true, "parentCode": "1100" },
+  { "code": "1111", "name": "Petty Cash (Hand Cash)", "type": "Asset", "isHeader": false, "parentCode": "1110" },
+  { "code": "1112", "name": "BRAC Bank", "type": "Asset", "isHeader": false, "parentCode": "1110" },
+  { "code": "1113", "name": "DBBL Bank", "type": "Asset", "isHeader": false, "parentCode": "1110" },
+  { "code": "1114", "name": "Mobile Banking (bKash / Nagad)", "type": "Asset", "isHeader": false, "parentCode": "1110" },
+  { "code": "1115", "name": "Cash in Hand", "type": "Asset", "isHeader": false, "parentCode": "1110" },
+
+  { "code": "1120", "name": "ACCOUNTS RECEIVABLE", "type": "Asset", "isHeader": true, "parentCode": "1100" },
+  { "code": "1121", "name": "Client Receivables", "type": "Asset", "isHeader": false, "parentCode": "1120" },
+  { "code": "1129", "name": "Allowance for Doubtful Accounts", "type": "Asset", "isHeader": false, "parentCode": "1120" },
+
+  { "code": "1130", "name": "Employee Advances", "type": "Asset", "isHeader": true, "parentCode": "1100" },
+  { "code": "1131", "name": "Advance to Staff", "type": "Asset", "isHeader": false, "parentCode": "1130" },
+
+  { "code": "1140", "name": "Inventory & Materials", "type": "Asset", "isHeader": true, "parentCode": "1100" },
+  { "code": "1141", "name": "Central Warehouse Stock", "type": "Asset", "isHeader": false, "parentCode": "1140" },
+  { "code": "1142", "name": "Site-Allocated Stock", "type": "Asset", "isHeader": false, "parentCode": "1140" },
+
+  { "code": "1200", "name": "Fixed Assets", "type": "Asset", "isHeader": true, "parentCode": "1000" },
+  { "code": "1210", "name": "Office Equipment & Computers", "type": "Asset", "isHeader": false, "parentCode": "1200" },
+  { "code": "1220", "name": "Furniture & Fixtures", "type": "Asset", "isHeader": false, "parentCode": "1200" },
+  { "code": "1290", "name": "Accumulated Depreciation", "type": "Asset", "isHeader": false, "parentCode": "1200" },
+
+  { "code": "2000", "name": "LIABILITIES", "type": "Liability", "isHeader": true, "parentCode": null },
+  { "code": "2100", "name": "Current Liabilities", "type": "Liability", "isHeader": true, "parentCode": "2000" },
+  { "code": "2110", "name": "ACCOUNTS PAYABLE", "type": "Liability", "isHeader": true, "parentCode": "2100" },
+  { "code": "2111", "name": "Supplier Payables", "type": "Liability", "isHeader": false, "parentCode": "2110" },
+  { "code": "2113", "name": "Subcontractor Payables", "type": "Liability", "isHeader": false, "parentCode": "2110" },
+
+  { "code": "2120", "name": "Accrued Payroll & Salaries", "type": "Liability", "isHeader": true, "parentCode": "2100" },
+  { "code": "2121", "name": "Unpaid Staff Salaries", "type": "Liability", "isHeader": false, "parentCode": "2120" },
+
+  { "code": "2130", "name": "Tax & VAT Payable", "type": "Liability", "isHeader": true, "parentCode": "2100" },
+  { "code": "2131", "name": "Source Tax / AIT Payable", "type": "Liability", "isHeader": false, "parentCode": "2130" },
+  { "code": "2132", "name": "VAT Payable", "type": "Liability", "isHeader": false, "parentCode": "2130" },
+
+  { "code": "2200", "name": "Long-Term Liabilities", "type": "Liability", "isHeader": true, "parentCode": "2000" },
+  { "code": "2210", "name": "Bank Loan / Director Loan", "type": "Liability", "isHeader": false, "parentCode": "2200" },
+
+  { "code": "3000", "name": "EQUITY", "type": "Equity", "isHeader": true, "parentCode": null },
+  { "code": "3100", "name": "Owner Capital", "type": "Equity", "isHeader": false, "parentCode": "3000" },
+  { "code": "3200", "name": "Retained Earnings", "type": "Equity", "isHeader": false, "parentCode": "3000" },
+  { "code": "3300", "name": "Owner Drawings", "type": "Equity", "isHeader": false, "parentCode": "3000" },
+
+  { "code": "4000", "name": "REVENUE", "type": "Revenue", "isHeader": true, "parentCode": null },
+  { "code": "4100", "name": "Project Sales / Contract Income", "type": "Revenue", "isHeader": true, "parentCode": "4000" },
+  { "code": "4110", "name": "Milestone Billing Revenue", "type": "Revenue", "isHeader": false, "parentCode": "4100" },
+  { "code": "4120", "name": "Direct Material Sales Revenue", "type": "Revenue", "isHeader": false, "parentCode": "4100" },
+  { "code": "4200", "name": "Other Income", "type": "Revenue", "isHeader": false, "parentCode": "4000" },
+
+  { "code": "5000", "name": "EXPENSES", "type": "Expense", "isHeader": true, "parentCode": null },
+  { "code": "5100", "name": "Direct Project Cost (COGS)", "type": "Expense", "isHeader": true, "parentCode": "5000" },
+  { "code": "5110", "name": "Raw Material Expenses", "type": "Expense", "isHeader": false, "parentCode": "5100" },
+  { "code": "5120", "name": "Direct Project Labor / Site Salary", "type": "Expense", "isHeader": false, "parentCode": "5100" },
+  { "code": "5130", "name": "Equipment Rental Cost", "type": "Expense", "isHeader": false, "parentCode": "5100" },
+  { "code": "5140", "name": "Site Transport & Freight Expenses", "type": "Expense", "isHeader": false, "parentCode": "5100" },
+
+  { "code": "5200", "name": "Operating & Office Overhead Expenses", "type": "Expense", "isHeader": true, "parentCode": "5000" },
+  { "code": "5210", "name": "Office Rent", "type": "Expense", "isHeader": false, "parentCode": "5200" },
+  { "code": "5220", "name": "Utility Bills", "type": "Expense", "isHeader": false, "parentCode": "5200" },
+  { "code": "5230", "name": "Administrative & HQ Staff Salaries", "type": "Expense", "isHeader": false, "parentCode": "5200" },
+  { "code": "5240", "name": "Office Petty Cash Expenses", "type": "Expense", "isHeader": false, "parentCode": "5200" },
+  { "code": "5250", "name": "Bank Charges & Transaction Fees", "type": "Expense", "isHeader": false, "parentCode": "5200" }
+]

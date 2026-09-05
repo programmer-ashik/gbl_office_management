@@ -86,3 +86,17 @@ export class ConfirmSettlementDto {
   @IsDateString()
   date?: string;
 }
+
+export class ReimburseAdvanceDto {
+  @IsMongoId()
+  treasuryId: string;
+
+  @IsOptional()
+  @IsDateString()
+  date?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  memo?: string;
+}

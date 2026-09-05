@@ -50,6 +50,15 @@ export function ReportsPage() {
                 </Link>
               </td>
             </tr>
+            <tr>
+              <td>Balance sheet</td>
+              <td>Statement of financial position as of a date</td>
+              <td>
+                <Link to="/balance-sheet" className="action-link">
+                  Open
+                </Link>
+              </td>
+            </tr>
           </tbody>
         </table>
       </section>

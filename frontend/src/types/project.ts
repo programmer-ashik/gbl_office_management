@@ -27,6 +27,9 @@ export type CostBreakdownRow = {
   accountName: string
   accountType: string
   amount: number
+  debit: number
+  credit: number
+  date: string | null
   isDirectCost: boolean
 }
 

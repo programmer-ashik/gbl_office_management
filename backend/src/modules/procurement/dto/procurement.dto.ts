@@ -4,6 +4,7 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsMongoId,
   IsNumber,
@@ -137,6 +138,15 @@ export class ReceiveLineDto {
 export class ReceiveGoodsDto {
   @IsDateString()
   date: string;
+
+  @IsOptional()
+  @IsIn(['due', 'cash', 'bank'])
+  paymentMethod?: 'due' | 'cash' | 'bank';
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsMongoId()
+  treasuryId?: string;
 
   @IsArray()
   @ArrayMinSize(1)

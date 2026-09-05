@@ -7,6 +7,7 @@ import { money } from '../types/accounting'
 import { Role } from '../types/auth'
 import type { Project } from '../types/project'
 import { qty, type StockIssue, type StockRow, type Warehouse } from '../types/procurement'
+import { MetricCard } from '../components/MetricCard'
 
 export function InventoryPage() {
   const { user } = useAuth()
@@ -79,24 +80,26 @@ export function InventoryPage() {
         </Link>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>On-hand value</h3>
-          <p className="stat-value">{money(totalValue)}</p>
-          <p className="muted">GL 1200 · Inventory</p>
-        </article>
-        <article className="stat-card">
-          <h3>SKUs in stock</h3>
-          <p className="stat-value">{stock.length}</p>
-          <p className="muted">FIFO lots from warehouse receipts</p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="teal"
+          title="On-hand value"
+          value={money(totalValue)}
+          meta="GL 1141 · Inventory"
+        />
+        <MetricCard
+          variant="blue"
+          title="SKUs in stock"
+          value={stock.length}
+          meta="FIFO lots from warehouse receipts"
+        />
       </section>
 
       {isFinance ? (
         <section className="table-card">
           <h2>Issue to project</h2>
           <p className="muted">
-            Moves warehouse stock to project materials (Dr 5000 / Cr 1200). Direct
+            Moves warehouse stock to project materials (Dr 5110 / Cr 1141). Direct
             site deliveries never pass through this screen.
           </p>
           <form className="stack-form" onSubmit={(event) => void onIssue(event)}>

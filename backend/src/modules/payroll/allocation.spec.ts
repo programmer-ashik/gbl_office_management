@@ -68,7 +68,7 @@ describe('payroll allocation', () => {
       ],
       structuralDeductionMinor: 5000,
       netPayMinor: 35_000,
-      treasuryAccountCode: '1010',
+      treasuryAccountCode: '1112',
       employeeName: 'Rahim',
     });
 
@@ -78,9 +78,9 @@ describe('payroll allocation', () => {
     expect(lines).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ accountCode: '5100', debit: 500 }),
-        expect.objectContaining({ accountCode: '1300', credit: 100 }),
+        expect.objectContaining({ accountCode: '1131', credit: 100 }),
         expect.objectContaining({ accountCode: '2100', credit: 50 }),
-        expect.objectContaining({ accountCode: '1010', credit: 350 }),
+        expect.objectContaining({ accountCode: '1112', credit: 350 }),
       ]),
     );
   });

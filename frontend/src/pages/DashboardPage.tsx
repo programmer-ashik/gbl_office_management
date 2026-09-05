@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { MetricCard } from '../components/MetricCard'
 import { money } from '../types/accounting'
 import type { CashFlowForecast, FinancialStatements } from '../types/analytics'
 import { Role } from '../types/auth'
@@ -64,41 +65,36 @@ export function DashboardPage() {
       </header>
 
       {treasury ? (
-        <section className="grid">
-          <article className="stat-card">
-            <h3>Cash on hand</h3>
-            <p className="stat-value">
-              {money(
-                treasury
-                  .filter((row) => row.kind === 'cash' || row.kind === 'petty_cash')
-                  .reduce((sum, row) => sum + row.bookBalance, 0),
-              )}
-            </p>
-            <p className="muted">
-              <Link to="/banking">Open banking</Link>
-            </p>
-          </article>
-          <article className="stat-card">
-            <h3>Banks & wallets</h3>
-            <p className="stat-value">
-              {money(
-                treasury
-                  .filter(
-                    (row) =>
-                      row.kind === 'commercial_bank' || row.kind === 'mobile_banking',
-                  )
-                  .reduce((sum, row) => sum + row.bookBalance, 0),
-              )}
-            </p>
-            <p className="muted">{treasury.length} treasury channels</p>
-          </article>
-          <article className="stat-card">
-            <h3>Total liquid</h3>
-            <p className="stat-value">
-              {money(treasury.reduce((sum, row) => sum + row.bookBalance, 0))}
-            </p>
-            <p className="muted">Book balances from the ledger</p>
-          </article>
+        <section className="grid metric-card-grid">
+          <MetricCard
+            variant="teal"
+            title="Cash on hand"
+            value={money(
+              treasury
+                .filter((row) => row.kind === 'cash' || row.kind === 'petty_cash')
+                .reduce((sum, row) => sum + row.bookBalance, 0),
+            )}
+            meta={<Link to="/banking">Open banking</Link>}
+          />
+          <MetricCard
+            variant="blue"
+            title="Banks & wallets"
+            value={money(
+              treasury
+                .filter(
+                  (row) =>
+                    row.kind === 'commercial_bank' || row.kind === 'mobile_banking',
+                )
+                .reduce((sum, row) => sum + row.bookBalance, 0),
+            )}
+            meta={`${treasury.length} treasury channels`}
+          />
+          <MetricCard
+            variant="purple"
+            title="Total liquid"
+            value={money(treasury.reduce((sum, row) => sum + row.bookBalance, 0))}
+            meta="Book balances from the ledger"
+          />
         </section>
       ) : null}
 
@@ -111,34 +107,37 @@ export function DashboardPage() {
               <Link to="/analytics/cash-flow">Open full cash-flow view</Link>
             </p>
           </div>
-          <section className="grid">
-            <article className="stat-card">
-              <h3>Opening cash</h3>
-              <p className="stat-value">{money(cashFlow.openingCash)}</p>
-            </article>
-            <article className="stat-card">
-              <h3>Projected inflows</h3>
-              <p className="stat-value gain">{money(cashFlow.totalInflow)}</p>
-              <p className="muted">Open AR {money(cashFlow.sources.openReceivables)}</p>
-            </article>
-            <article className="stat-card">
-              <h3>Projected outflows</h3>
-              <p className="stat-value loss">{money(cashFlow.totalOutflow)}</p>
-              <p className="muted">
-                AP {money(cashFlow.sources.openPayables)} · Payroll{' '}
-                {money(cashFlow.sources.draftPayroll)}
-              </p>
-            </article>
-            <article className="stat-card">
-              <h3>Projected close</h3>
-              <p
-                className={
-                  cashFlow.projectedClosingCash < 0 ? 'stat-value loss' : 'stat-value'
-                }
-              >
-                {money(cashFlow.projectedClosingCash)}
-              </p>
-            </article>
+          <section className="grid metric-card-grid">
+            <MetricCard
+              variant="blue"
+              title="Opening cash"
+              value={money(cashFlow.openingCash)}
+            />
+            <MetricCard
+              variant="green"
+              title="Projected inflows"
+              value={money(cashFlow.totalInflow)}
+              valueTone="up"
+              meta={`Open AR ${money(cashFlow.sources.openReceivables)}`}
+            />
+            <MetricCard
+              variant="red"
+              title="Projected outflows"
+              value={money(cashFlow.totalOutflow)}
+              valueTone="down"
+              meta={
+                <>
+                  AP {money(cashFlow.sources.openPayables)} · Payroll{' '}
+                  {money(cashFlow.sources.draftPayroll)}
+                </>
+              }
+            />
+            <MetricCard
+              variant="amber"
+              title="Projected close"
+              value={money(cashFlow.projectedClosingCash)}
+              valueTone={cashFlow.projectedClosingCash < 0 ? 'down' : 'default'}
+            />
           </section>
           <div className="cashflow-bars">
             {cashFlow.weeks.map((week) => (
@@ -164,36 +163,39 @@ export function DashboardPage() {
       {analyticsError ? <p className="form-error">{analyticsError}</p> : null}
 
       {statements ? (
-        <section className="grid">
-          <article className="stat-card">
-            <h3>Revenue (P&amp;L)</h3>
-            <p className="stat-value gain">{money(statements.profitAndLoss.revenue)}</p>
-            <p className="muted">As of {statements.asOf.slice(0, 10)}</p>
-          </article>
-          <article className="stat-card">
-            <h3>Expenses (P&amp;L)</h3>
-            <p className="stat-value loss">{money(statements.profitAndLoss.expenses)}</p>
-          </article>
-          <article className="stat-card">
-            <h3>Net income</h3>
-            <p
-              className={
-                statements.profitAndLoss.netIncome < 0
-                  ? 'stat-value loss'
-                  : 'stat-value gain'
-              }
-            >
-              {money(statements.profitAndLoss.netIncome)}
-            </p>
-          </article>
-          <article className="stat-card">
-            <h3>Balance sheet</h3>
-            <p className="stat-value">{money(statements.balanceSheet.assets)}</p>
-            <p className="muted">
-              Assets · Liab. {money(statements.balanceSheet.liabilities)} · Equity{' '}
-              {money(statements.balanceSheet.equity)}
-            </p>
-          </article>
+        <section className="grid metric-card-grid">
+          <MetricCard
+            variant="green"
+            title="Revenue (P&L)"
+            value={money(statements.profitAndLoss.revenue)}
+            valueTone="up"
+            meta={`As of ${statements.asOf.slice(0, 10)}`}
+          />
+          <MetricCard
+            variant="red"
+            title="Expenses (P&L)"
+            value={money(statements.profitAndLoss.expenses)}
+            valueTone="down"
+          />
+          <MetricCard
+            variant="purple"
+            title="Net income"
+            value={money(statements.profitAndLoss.netIncome)}
+            valueTone={
+              statements.profitAndLoss.netIncome < 0 ? 'down' : 'up'
+            }
+          />
+          <MetricCard
+            variant="blue"
+            title="Balance sheet"
+            value={money(statements.balanceSheet.assets)}
+            meta={
+              <>
+                Assets · Liab. {money(statements.balanceSheet.liabilities)} · Equity{' '}
+                {money(statements.balanceSheet.equity)}
+              </>
+            }
+          />
         </section>
       ) : null}
 

@@ -3,7 +3,7 @@ import { fromMinorUnits } from '../../common/utils/money';
 import type { JournalLineDto } from '../accounting/dto/journal.dto';
 
 export const LABOR_CODE = '5100';
-export const ADVANCE_ASSET_CODE = '1300';
+export const ADVANCE_ASSET_CODE = '1131';
 export const EMPLOYEE_PAYABLE_CODE = '2100';
 
 export type LaborAllocation = {

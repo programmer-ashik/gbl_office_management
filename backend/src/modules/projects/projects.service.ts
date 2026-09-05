@@ -375,6 +375,7 @@ export class ProjectsService {
       accountType: AccountType;
       debitMinor: number;
       creditMinor: number;
+      lastDate: Date;
     }>([
       { $match: { projectId: { $in: projectIds } } },
       {
@@ -384,6 +385,7 @@ export class ProjectsService {
           accountType: { $first: '$accountType' },
           debitMinor: { $sum: '$debitMinor' },
           creditMinor: { $sum: '$creditMinor' },
+          lastDate: { $max: '$date' },
         },
       },
     ]);
@@ -398,6 +400,7 @@ export class ProjectsService {
         accountType: row.accountType,
         debitMinor: row.debitMinor,
         creditMinor: row.creditMinor,
+        lastDate: row.lastDate,
       });
       rollupsByProject.set(projectId, list);
     }

@@ -13,8 +13,13 @@ import {
 import type { Project } from '../types/project'
 import {
   downloadJournalVoucher,
+  loadJournalVoucherTemplate,
   previewJournalVoucher,
 } from '../utils/journalVoucherPdf'
+
+async function getJvTemplate() {
+  return loadJournalVoucherTemplate(() => api.journalVoucherTemplate())
+}
 
 export function journalEditDisabledReason(entry: JournalEntry): string | undefined {
   if (entry.source === 'system') {
@@ -204,8 +209,8 @@ export function JournalRegister({
     try {
       const voucher =
         entry.lines && entry.lines.length > 0 ? entry : await api.journal(entry.id)
-      if (action === 'preview') previewJournalVoucher(voucher)
-      else downloadJournalVoucher(voucher)
+      if (action === 'preview') await previewJournalVoucher(voucher, await getJvTemplate())
+      else await downloadJournalVoucher(voucher, await getJvTemplate())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to open voucher PDF')
     } finally {
@@ -339,7 +344,7 @@ export function JournalRegister({
       {error ? <p className="form-error">{error}</p> : null}
 
       <div className="journal-lines-scroll">
-        <table className="journal-lines-table">
+        <table className="journal-lines-table journal-register-table">
           <thead>
             <tr>
               <th>Number</th>
