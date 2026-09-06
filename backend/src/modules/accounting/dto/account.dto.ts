@@ -2,10 +2,12 @@ import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 import { AccountType } from '../../../common/enums/account-type.enum';
@@ -44,6 +46,20 @@ export class CreateAccountDto {
   @IsOptional()
   @IsBoolean()
   isPostable?: boolean;
+
+  /** Optional go-live amount; posts a balanced Opening Balance journal vs capital. */
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => {
+    if (value === '' || value === null || value === undefined) return undefined;
+    if (typeof value === 'string') {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : value;
+    }
+    return value;
+  })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  openingBalance?: number;
 }
 
 export class UpdateAccountDto {

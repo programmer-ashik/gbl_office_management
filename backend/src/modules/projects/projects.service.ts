@@ -10,6 +10,7 @@ import { LedgerLineModel } from '../accounting/ledger.model';
 import { CounterModel } from '../accounting/counter.model';
 import { fromMilliQty } from '../../common/utils/quantity';
 import { StockIssueModel } from '../procurement/stock-issue.model';
+import { ItemModel } from '../procurement/item.model';
 import { UserModel } from '../users/user.model';
 import type {
   CreateProjectDto,
@@ -49,6 +50,9 @@ export type PublicProjectMaterialSummary = {
   sku: string;
   name: string;
   unit: string;
+  brand: string | null;
+  model: string | null;
+  countryOfOrigin: string | null;
   quantity: number;
   unitCost: number;
   amount: number;
@@ -419,21 +423,45 @@ export class ProjectsService {
       }),
     );
 
-    const byItem = new Map<string, PublicProjectMaterialSummary>();
-    for (const entry of materialIssues) {
-      const key = `${entry.sku}::${entry.name}::${entry.unit}`;
-      const current = byItem.get(key) ?? {
-        itemId: key,
-        sku: entry.sku,
-        name: entry.name,
-        unit: entry.unit,
-        quantity: 0,
-        unitCost: 0,
-        amount: 0,
-      };
-      current.quantity += entry.quantity;
-      current.amount += entry.amount;
-      byItem.set(key, current);
+    const byItem = new Map<
+      string,
+      Omit<PublicProjectMaterialSummary, 'unitCost'> & { unitCost: number }
+    >();
+    for (const row of rows) {
+      for (const line of row.lines) {
+        const itemId = line.itemId.toString();
+        const quantity = fromMilliQty(line.quantityMilli);
+        const amount = fromMinorUnits(line.amountMinor);
+        const current = byItem.get(itemId) ?? {
+          itemId,
+          sku: line.sku,
+          name: line.name,
+          unit: line.unit,
+          brand: null,
+          model: null,
+          countryOfOrigin: null,
+          quantity: 0,
+          unitCost: 0,
+          amount: 0,
+        };
+        current.quantity += quantity;
+        current.amount += amount;
+        byItem.set(itemId, current);
+      }
+    }
+
+    const itemIds = [...byItem.keys()].map((id) => new Types.ObjectId(id));
+    if (itemIds.length > 0) {
+      const items = await ItemModel.find({ _id: { $in: itemIds } })
+        .select('brand model countryOfOrigin')
+        .exec();
+      for (const item of items) {
+        const summary = byItem.get(item._id.toString());
+        if (!summary) continue;
+        summary.brand = item.brand?.trim() || null;
+        summary.model = item.model?.trim() || null;
+        summary.countryOfOrigin = item.countryOfOrigin?.trim() || null;
+      }
     }
 
     const materialsSummary = [...byItem.values()].map((row) => ({

@@ -27,6 +27,7 @@ import { PayrollTimePage } from './pages/PayrollTimePage'
 import { ProcurementPage } from './pages/ProcurementPage'
 import { ProjectBudgetsPage } from './pages/ProjectBudgetsPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
+import { ProjectInvoicePage } from './pages/ProjectInvoicePage'
 import { ProjectFinancialsPage } from './pages/ProjectFinancialsPage'
 import { ProjectSitesPage } from './pages/ProjectSitesPage'
 import { ProjectsPage } from './pages/ProjectsPage'
@@ -99,6 +100,7 @@ export default function App() {
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/projects/budgets" element={<ProjectBudgetsPage />} />
             <Route path="/projects/sites" element={<ProjectSitesPage />} />
+            <Route path="/projects/:id/invoice" element={<ProjectInvoicePage />} />
             <Route path="/projects/:id" element={<ProjectDetailPage />} />
 
             <Route path="/banking" element={<BankingPage />} />

@@ -79,6 +79,26 @@ export class CreateItemDto {
   @MinLength(1)
   @MaxLength(24)
   unit: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  brand?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  model?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  countryOfOrigin?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  technicalSpecification?: string;
 }
 
 export class PurchaseOrderLineDto {

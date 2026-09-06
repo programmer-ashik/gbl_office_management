@@ -32,6 +32,10 @@ export function ProcurementPage() {
   const [sku, setSku] = useState('')
   const [itemName, setItemName] = useState('')
   const [unit, setUnit] = useState('bag')
+  const [brand, setBrand] = useState('')
+  const [model, setModel] = useState('')
+  const [countryOfOrigin, setCountryOfOrigin] = useState('')
+  const [technicalSpecification, setTechnicalSpecification] = useState('')
   const [supplierId, setSupplierId] = useState('')
   const [destination, setDestination] =
     useState<(typeof PurchaseDestination)[keyof typeof PurchaseDestination]>(
@@ -97,9 +101,21 @@ export function ProcurementPage() {
     setSaving(true)
     setError(null)
     try {
-      const created = await api.createItem({ sku, name: itemName, unit })
+      const created = await api.createItem({
+        sku,
+        name: itemName,
+        unit,
+        brand: brand || undefined,
+        model: model || undefined,
+        countryOfOrigin: countryOfOrigin || undefined,
+        technicalSpecification: technicalSpecification || undefined,
+      })
       setSku('')
       setItemName('')
+      setBrand('')
+      setModel('')
+      setCountryOfOrigin('')
+      setTechnicalSpecification('')
       setItemModalOpen(false)
       setItemId(created.id)
       await load()
@@ -213,29 +229,69 @@ export function ProcurementPage() {
 
       <Modal
         open={itemModalOpen}
-        title="New item"
+        title="New inventory item"
+        description="Adds a catalog SKU. Stock quantity appears after a warehouse PO is received."
         onClose={() => setItemModalOpen(false)}
       >
         <form className="stack-form" onSubmit={(event) => void onCreateItem(event)}>
+          <div className="name-row">
+            <label>
+              SKU
+              <input value={sku} onChange={(e) => setSku(e.target.value)} required />
+            </label>
+            <label>
+              Name
+              <input
+                value={itemName}
+                onChange={(e) => setItemName(e.target.value)}
+                required
+              />
+            </label>
+          </div>
+          <div className="name-row">
+            <label>
+              Unit
+              <input value={unit} onChange={(e) => setUnit(e.target.value)} required />
+            </label>
+            <label>
+              Brand
+              <input
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+                placeholder="Optional"
+              />
+            </label>
+          </div>
+          <div className="name-row">
+            <label>
+              Model
+              <input
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="Optional"
+              />
+            </label>
+            <label>
+              Country of origin
+              <input
+                value={countryOfOrigin}
+                onChange={(e) => setCountryOfOrigin(e.target.value)}
+                placeholder="Optional"
+              />
+            </label>
+          </div>
           <label>
-            SKU
-            <input value={sku} onChange={(e) => setSku(e.target.value)} required />
-          </label>
-          <label>
-            Name
-            <input
-              value={itemName}
-              onChange={(e) => setItemName(e.target.value)}
-              required
+            Technical specification
+            <textarea
+              value={technicalSpecification}
+              onChange={(e) => setTechnicalSpecification(e.target.value)}
+              rows={3}
+              placeholder="Materials, capacity, standards…"
             />
-          </label>
-          <label>
-            Unit
-            <input value={unit} onChange={(e) => setUnit(e.target.value)} required />
           </label>
           <div className="form-actions">
             <button type="submit" disabled={saving}>
-              Add item
+              {saving ? 'Saving…' : 'Add item'}
             </button>
           </div>
           {error ? <p className="form-error">{error}</p> : null}
@@ -275,6 +331,8 @@ export function ProcurementPage() {
                 }))}
               />
             </label>
+          </div>
+          <div className="name-row">
             <label>
               Date
               <input
@@ -284,36 +342,36 @@ export function ProcurementPage() {
                 required
               />
             </label>
+            {destination === PurchaseDestination.DIRECT_TO_SITE ? (
+              <label>
+                Project
+                <Select
+                  value={projectId}
+                  onChange={setProjectId}
+                  options={projects.map((row) => ({
+                    value: row.id,
+                    label: `${row.code} · ${row.name}`,
+                  }))}
+                  placeholder="Select project"
+                  required
+                />
+              </label>
+            ) : (
+              <label>
+                Warehouse
+                <Select
+                  value={warehouseId}
+                  onChange={setWarehouseId}
+                  options={warehouses.map((row) => ({
+                    value: row.id,
+                    label: `${row.code} · ${row.name}`,
+                  }))}
+                  placeholder="Select warehouse"
+                  required
+                />
+              </label>
+            )}
           </div>
-          {destination === PurchaseDestination.DIRECT_TO_SITE ? (
-            <label>
-              Project
-              <Select
-                value={projectId}
-                onChange={setProjectId}
-                options={projects.map((row) => ({
-                  value: row.id,
-                  label: `${row.code} · ${row.name}`,
-                }))}
-                placeholder="Select project"
-                required
-              />
-            </label>
-          ) : (
-            <label>
-              Warehouse
-              <Select
-                value={warehouseId}
-                onChange={setWarehouseId}
-                options={warehouses.map((row) => ({
-                  value: row.id,
-                  label: `${row.code} · ${row.name}`,
-                }))}
-                placeholder="Select warehouse"
-                required
-              />
-            </label>
-          )}
           <div className="name-row">
             <label>
               Item
@@ -337,16 +395,16 @@ export function ProcurementPage() {
                 required
               />
             </label>
-            <label>
-              Unit cost
-              <input
-                inputMode="decimal"
-                value={unitCost}
-                onChange={(e) => setUnitCost(e.target.value)}
-                required
-              />
-            </label>
           </div>
+          <label>
+            Unit cost
+            <input
+              inputMode="decimal"
+              value={unitCost}
+              onChange={(e) => setUnitCost(e.target.value)}
+              required
+            />
+          </label>
           <div className="form-actions">
             <button type="submit" disabled={saving || !supplierId || !itemId}>
               {saving ? 'Saving…' : 'Create purchase order'}

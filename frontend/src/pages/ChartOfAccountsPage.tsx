@@ -30,8 +30,10 @@ export function ChartOfAccountsPage() {
   const [type, setType] = useState<Account['type']>(AccountType.ASSET)
   const [parentCode, setParentCode] = useState('')
   const [description, setDescription] = useState('')
+  const [openingBalance, setOpeningBalance] = useState('')
   const [saving, setSaving] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
   const [editing, setEditing] = useState<Account | null>(null)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
@@ -88,7 +90,10 @@ export function ChartOfAccountsPage() {
     setName('')
     setDescription('')
     setParentCode('')
+    setOpeningBalance('')
     setType(AccountType.ASSET)
+    setError(null)
+    setMessage(null)
     setModalOpen(true)
   }
 
@@ -104,19 +109,32 @@ export function ChartOfAccountsPage() {
     event.preventDefault()
     setSaving(true)
     setError(null)
+    setMessage(null)
     try {
-      await api.createAccount({
+      const amountRaw = openingBalance.trim()
+      const amount = amountRaw === '' ? undefined : Number(amountRaw)
+      if (amountRaw !== '' && (!Number.isFinite(amount) || (amount ?? 0) <= 0)) {
+        throw new Error('Opening balance must be a positive number')
+      }
+      const created = await api.createAccount({
         code,
         name,
         type,
         description: description || undefined,
         parentCode: parentCode || undefined,
+        openingBalance: amount,
       })
       setCode('')
       setName('')
       setDescription('')
       setParentCode('')
+      setOpeningBalance('')
       setModalOpen(false)
+      if (created.openingJournalNumber) {
+        setMessage(
+          `Account ${created.code} created. Opening Balance journal ${created.openingJournalNumber} posted.`,
+        )
+      }
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create account')
@@ -181,6 +199,9 @@ export function ChartOfAccountsPage() {
           Add account
         </button>
       </header>
+
+      {message ? <p className="muted">{message}</p> : null}
+      {!modalOpen && error ? <p className="form-error">{error}</p> : null}
 
       <section className="table-card">
         <div className="table-head">
@@ -374,6 +395,19 @@ export function ChartOfAccountsPage() {
                 onChange={(e) => setDescription(e.target.value)}
               />
             </label>
+            <label>
+              Opening balance (optional)
+              <input
+                inputMode="decimal"
+                value={openingBalance}
+                onChange={(e) => setOpeningBalance(e.target.value)}
+                placeholder="Leave blank for zero"
+              />
+            </label>
+            <p className="muted">
+              If set, posts a balanced Opening Balance journal against Owner
+              Capital (3100). Not for AR/AP/advances that need a party.
+            </p>
             <div className="form-actions">
               <button type="submit" disabled={saving}>
                 {saving ? 'Saving…' : 'Add'}
@@ -383,8 +417,6 @@ export function ChartOfAccountsPage() {
           </form>
         )}
       </Modal>
-
-      {!modalOpen && error ? <p className="form-error">{error}</p> : null}
     </>
   )
 }

@@ -69,6 +69,9 @@ export type ProjectMaterialSummary = {
   sku: string
   name: string
   unit: string
+  brand: string | null
+  model: string | null
+  countryOfOrigin: string | null
   quantity: number
   unitCost: number
   amount: number

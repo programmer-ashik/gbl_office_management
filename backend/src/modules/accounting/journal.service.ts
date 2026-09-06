@@ -1,5 +1,6 @@
 import type { ClientSession } from 'mongoose';
 import { Types } from 'mongoose';
+import { AccountType } from '../../common/enums/account-type.enum';
 import { AuditAction } from '../../common/enums/governance.enum';
 import { Role } from '../../common/enums/role.enum';
 import { badRequest, notFound } from '../../common/errors/app-error';
@@ -259,6 +260,117 @@ export class JournalService {
       requireBalance: true,
       writeLedger: true,
     });
+  }
+
+  /**
+   * Balanced Opening Balance for a newly created postable account.
+   * Debit-normal (asset/expense): Dr account / Cr owner capital (3100).
+   * Credit-normal (liability/equity/revenue): Cr account / Dr owner capital.
+   * Creating 3100 itself: Dr cash (1111) / Cr 3100.
+   */
+  async postOpeningBalanceForNewAccount(input: {
+    accountCode: string;
+    accountType: AccountType;
+    amount: number;
+    userId: string;
+    date?: string;
+  }): Promise<PublicJournal> {
+    const amount = Number(input.amount);
+    if (!Number.isFinite(amount) || amount < 0.01) {
+      throw badRequest('Opening balance must be at least 0.01');
+    }
+
+    const code = input.accountCode.trim().toUpperCase();
+    const entityRequiredCodes = [
+      SystemAccountCode.ACCOUNTS_RECEIVABLE,
+      SystemAccountCode.ACCOUNTS_PAYABLE,
+      SystemAccountCode.SUBCONTRACTOR_PAYABLE,
+      SystemAccountCode.EMPLOYEE_ADVANCES,
+      SystemAccountCode.EMPLOYEE_PAYABLES,
+    ] as const;
+    if ((entityRequiredCodes as readonly string[]).includes(code)) {
+      throw badRequest(
+        `Opening balance on ${code} needs a customer/supplier/employee. Create the account without amount, then post an Opening Balance journal with the entity selected.`,
+      );
+    }
+
+    const account = await this.accountsService.findByCodeOrFail(code);
+    if (!account.isPostable) {
+      throw badRequest('Opening balance is only allowed on postable (leaf) accounts');
+    }
+    if (!account.isActive) {
+      throw badRequest(`Account ${code} is inactive`);
+    }
+
+    const capitalCode = SystemAccountCode.OWNER_CAPITAL;
+    const cashCode = SystemAccountCode.CASH;
+    let lines: JournalLineDto[];
+
+    if (code === capitalCode) {
+      await this.accountsService.findByCodeOrFail(cashCode);
+      lines = [
+        {
+          accountCode: cashCode,
+          debit: amount,
+          description: `Opening balance for ${code}`,
+        },
+        {
+          accountCode: capitalCode,
+          credit: amount,
+          description: `Opening capital ${code}`,
+        },
+      ];
+    } else {
+      await this.accountsService.findByCodeOrFail(capitalCode);
+      const isDebitNormal =
+        input.accountType === AccountType.ASSET ||
+        input.accountType === AccountType.EXPENSE;
+      if (isDebitNormal) {
+        lines = [
+          {
+            accountCode: code,
+            debit: amount,
+            description: `Opening balance ${code}`,
+          },
+          {
+            accountCode: capitalCode,
+            credit: amount,
+            description: `Opening equity offset for ${code}`,
+          },
+        ];
+      } else {
+        lines = [
+          {
+            accountCode: capitalCode,
+            debit: amount,
+            description: `Opening equity offset for ${code}`,
+          },
+          {
+            accountCode: code,
+            credit: amount,
+            description: `Opening balance ${code}`,
+          },
+        ];
+      }
+    }
+
+    const date =
+      input.date && !Number.isNaN(new Date(input.date).getTime())
+        ? new Date(input.date).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+
+    return this.post(
+      {
+        date,
+        memo: `Opening balance for account ${code}`,
+        reference: `OB-${code}`,
+        journalType: JournalType.OPENING_BALANCE,
+        lines,
+        intent: 'post',
+      },
+      input.userId,
+      'manual',
+    );
   }
 
   /** Save/update draft — may be unbalanced; no ledger impact. */

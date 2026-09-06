@@ -31,6 +31,10 @@ export function InventoryPage() {
   const [sku, setSku] = useState('')
   const [itemName, setItemName] = useState('')
   const [unit, setUnit] = useState('bag')
+  const [brand, setBrand] = useState('')
+  const [model, setModel] = useState('')
+  const [countryOfOrigin, setCountryOfOrigin] = useState('')
+  const [technicalSpecification, setTechnicalSpecification] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [itemModalOpen, setItemModalOpen] = useState(false)
@@ -73,10 +77,22 @@ export function InventoryPage() {
     setSaving(true)
     setError(null)
     try {
-      const created = await api.createItem({ sku, name: itemName, unit })
+      const created = await api.createItem({
+        sku,
+        name: itemName,
+        unit,
+        brand: brand || undefined,
+        model: model || undefined,
+        countryOfOrigin: countryOfOrigin || undefined,
+        technicalSpecification: technicalSpecification || undefined,
+      })
       setSku('')
       setItemName('')
       setUnit('bag')
+      setBrand('')
+      setModel('')
+      setCountryOfOrigin('')
+      setTechnicalSpecification('')
       setItemModalOpen(false)
       setItemId(created.id)
       await load()
@@ -167,21 +183,60 @@ export function InventoryPage() {
           onClose={() => setItemModalOpen(false)}
         >
           <form className="stack-form" onSubmit={(event) => void onCreateItem(event)}>
+            <div className="name-row">
+              <label>
+                SKU
+                <input value={sku} onChange={(e) => setSku(e.target.value)} required />
+              </label>
+              <label>
+                Name
+                <input
+                  value={itemName}
+                  onChange={(e) => setItemName(e.target.value)}
+                  required
+                />
+              </label>
+            </div>
+            <div className="name-row">
+              <label>
+                Unit
+                <input value={unit} onChange={(e) => setUnit(e.target.value)} required />
+              </label>
+              <label>
+                Brand
+                <input
+                  value={brand}
+                  onChange={(e) => setBrand(e.target.value)}
+                  placeholder="Optional"
+                />
+              </label>
+            </div>
+            <div className="name-row">
+              <label>
+                Model
+                <input
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="Optional"
+                />
+              </label>
+              <label>
+                Country of origin
+                <input
+                  value={countryOfOrigin}
+                  onChange={(e) => setCountryOfOrigin(e.target.value)}
+                  placeholder="Optional"
+                />
+              </label>
+            </div>
             <label>
-              SKU
-              <input value={sku} onChange={(e) => setSku(e.target.value)} required />
-            </label>
-            <label>
-              Name
-              <input
-                value={itemName}
-                onChange={(e) => setItemName(e.target.value)}
-                required
+              Technical specification
+              <textarea
+                value={technicalSpecification}
+                onChange={(e) => setTechnicalSpecification(e.target.value)}
+                rows={3}
+                placeholder="Materials, capacity, standards…"
               />
-            </label>
-            <label>
-              Unit
-              <input value={unit} onChange={(e) => setUnit(e.target.value)} required />
             </label>
             <div className="form-actions">
               <button type="submit" disabled={saving}>
@@ -204,6 +259,8 @@ export function InventoryPage() {
             <tr>
               <th>SKU</th>
               <th>Item</th>
+              <th>Brand / Model</th>
+              <th>Origin</th>
               <th>Unit</th>
               <th>On hand</th>
             </tr>
@@ -216,7 +273,19 @@ export function InventoryPage() {
               return (
                 <tr key={row.id}>
                   <td>{row.sku}</td>
-                  <td>{row.name}</td>
+                  <td>
+                    <div>{row.name}</div>
+                    {row.technicalSpecification ? (
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {row.technicalSpecification.slice(0, 80)}
+                        {row.technicalSpecification.length > 80 ? '…' : ''}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td>
+                    {[row.brand, row.model].filter(Boolean).join(' · ') || '—'}
+                  </td>
+                  <td>{row.countryOfOrigin || '—'}</td>
                   <td>{row.unit}</td>
                   <td>
                     {onHand > 0 ? `${qty(onHand)} ${row.unit}` : '—'}
@@ -226,7 +295,7 @@ export function InventoryPage() {
             })}
             {items.length === 0 ? (
               <tr>
-                <td colSpan={4} className="muted">
+                <td colSpan={6} className="muted">
                   No catalog items yet. Use Add item to create one.
                 </td>
               </tr>

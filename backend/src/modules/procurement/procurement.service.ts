@@ -70,6 +70,10 @@ export type PublicItem = {
   sku: string;
   name: string;
   unit: string;
+  brand: string | null;
+  model: string | null;
+  countryOfOrigin: string | null;
+  technicalSpecification: string | null;
   isActive: boolean;
 };
 
@@ -189,6 +193,10 @@ export class ProcurementService {
       sku: row.sku,
       name: row.name,
       unit: row.unit,
+      brand: row.brand ?? null,
+      model: row.model ?? null,
+      countryOfOrigin: row.countryOfOrigin ?? null,
+      technicalSpecification: row.technicalSpecification ?? null,
       isActive: row.isActive,
     };
   }
@@ -330,6 +338,10 @@ export class ProcurementService {
       sku,
       name: dto.name.trim(),
       unit: dto.unit.trim(),
+      brand: dto.brand?.trim() || undefined,
+      model: dto.model?.trim() || undefined,
+      countryOfOrigin: dto.countryOfOrigin?.trim() || undefined,
+      technicalSpecification: dto.technicalSpecification?.trim() || undefined,
       isActive: true,
     });
     return this.toPublicItem(created);

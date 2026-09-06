@@ -232,8 +232,14 @@ export const api = {
     description?: string
     parentCode?: string
     isPostable?: boolean
+    openingBalance?: number
   }) =>
-    request<Account>('/accounts', {
+    request<
+      Account & {
+        openingJournalId?: string
+        openingJournalNumber?: string
+      }
+    >('/accounts', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -615,7 +621,15 @@ export const api = {
       body: JSON.stringify(body),
     }),
   items: () => request<Item[]>('/items'),
-  createItem: (body: { sku: string; name: string; unit: string }) =>
+  createItem: (body: {
+    sku: string
+    name: string
+    unit: string
+    brand?: string
+    model?: string
+    countryOfOrigin?: string
+    technicalSpecification?: string
+  }) =>
     request<Item>('/items', {
       method: 'POST',
       body: JSON.stringify(body),

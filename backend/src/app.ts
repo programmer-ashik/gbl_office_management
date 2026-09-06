@@ -179,7 +179,12 @@ export async function createApp(): Promise<Express> {
   );
   app.use(
     '/api/v1/accounts',
-    createAccountsRouter(accountsService, authService, usersService),
+    createAccountsRouter(
+      accountsService,
+      authService,
+      usersService,
+      journalService,
+    ),
   );
   app.use(
     '/api/v1/journals',

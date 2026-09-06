@@ -64,6 +64,10 @@ export type Item = {
   sku: string
   name: string
   unit: string
+  brand: string | null
+  model: string | null
+  countryOfOrigin: string | null
+  technicalSpecification: string | null
   isActive: boolean
 }
 

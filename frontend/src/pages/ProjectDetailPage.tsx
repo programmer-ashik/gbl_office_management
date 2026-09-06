@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { MetricCard } from '../components/MetricCard'
 import { money } from '../types/accounting'
@@ -11,6 +11,7 @@ import { qty } from '../types/procurement'
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [project, setProject] = useState<Project | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -70,6 +71,9 @@ export function ProjectDetailPage() {
     try {
       await api.updateProjectStatus(id, status)
       await load()
+      if (status === 'completed') {
+        navigate(`/projects/${id}/invoice`)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to change status')
     }
@@ -90,9 +94,16 @@ export function ProjectDetailPage() {
           <h1>{project.name}</h1>
           <p className="muted">{project.client.name}</p>
         </div>
-        <Link to="/projects" className="ghost-link">
-          All projects
-        </Link>
+        <div className="form-actions">
+          {project.status === 'completed' ? (
+            <Link to={`/projects/${id}/invoice`} className="ghost-link">
+              Project invoice
+            </Link>
+          ) : null}
+          <Link to="/projects" className="ghost-link">
+            All projects
+          </Link>
+        </div>
       </header>
 
       <section className="status-row">
