@@ -72,6 +72,7 @@ const clientInvoiceSchema = new Schema<IClientInvoice>(
 );
 
 clientInvoiceSchema.index({ status: 1, dueDate: 1 });
+clientInvoiceSchema.index({ journalId: 1 });
 
 export const ClientInvoiceModel =
   (models.ClientInvoice as Model<IClientInvoice> | undefined) ??

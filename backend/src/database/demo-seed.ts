@@ -1,9 +1,14 @@
+import { BillPaymentType, InvoiceType } from '../common/enums/ar-ap.enum';
 import { Role } from '../common/enums/role.enum';
 import { ProjectStatus } from '../common/enums/project-status.enum';
+import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { hashPassword } from '../common/utils/crypto.util';
 import { toMinorUnits } from '../common/utils/money';
 import { CounterModel } from '../modules/accounting/counter.model';
 import type { JournalService } from '../modules/accounting/journal.service';
+import type { ArApService } from '../modules/ar-ap/ar-ap.service';
+import { ClientInvoiceModel } from '../modules/ar-ap/client-invoice.model';
+import { SupplierBillModel } from '../modules/ar-ap/supplier-bill.model';
 import type { BankingService } from '../modules/banking/banking.service';
 import { CustomerModel } from '../modules/customers/customer.model';
 import { ItemModel } from '../modules/procurement/item.model';
@@ -16,6 +21,7 @@ type SeedDeps = {
   usersService: UsersService;
   bankingService: BankingService;
   journalService: JournalService;
+  arApService: ArApService;
 };
 
 const DEMO_USERS: Array<{
@@ -177,5 +183,46 @@ export async function seedDemoData(deps: SeedDeps): Promise<void> {
       admin._id.toString(),
     );
     console.log('Seeded opening cash and bank balances (balanced BS)');
+  }
+
+  if (admin) {
+    const actor: AuthenticatedUser = {
+      userId: admin._id.toString(),
+      email: admin.email,
+      role: admin.role,
+    };
+
+    const project = await ProjectModel.findOne().sort({ createdAt: 1 }).exec();
+    if (project && (await ClientInvoiceModel.countDocuments().exec()) === 0) {
+      await deps.arApService.createInvoice(
+        {
+          projectId: project._id.toString(),
+          type: InvoiceType.MILESTONE,
+          date: '2026-08-01',
+          dueDate: '2026-08-20',
+          amount: 75_000,
+          description: 'Demo milestone — foundation complete',
+          milestoneLabel: 'Foundation',
+        },
+        actor,
+      );
+      console.log('Seeded demo client invoice (AR)');
+    }
+
+    const supplier = await SupplierModel.findOne().sort({ createdAt: 1 }).exec();
+    if (supplier && (await SupplierBillModel.countDocuments().exec()) === 0) {
+      await deps.arApService.createBill(
+        {
+          supplierId: supplier._id.toString(),
+          paymentType: BillPaymentType.CREDIT,
+          date: '2026-08-05',
+          dueDate: '2026-09-05',
+          amount: 18_500,
+          description: 'Demo credit bill — office supplies',
+        },
+        actor,
+      );
+      console.log('Seeded demo supplier bill (AP)');
+    }
   }
 }

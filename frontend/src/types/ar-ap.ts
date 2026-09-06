@@ -37,6 +37,7 @@ export const BILL_PAYMENT_LABEL: Record<BillPaymentType, string> = {
 export const BillStatus = {
   PAID: 'paid',
   OPEN: 'open',
+  VOID: 'void',
 } as const
 export type BillStatus = (typeof BillStatus)[keyof typeof BillStatus]
 
@@ -64,7 +65,7 @@ export type ApLedgerEntryType =
 export const AP_LEDGER_LABEL: Record<ApLedgerEntryType, string> = {
   receipt: 'Goods receipt',
   return: 'Return',
-  bill: 'Credit bill',
+  bill: 'Supplier bill',
   payment: 'Payment',
 }
 

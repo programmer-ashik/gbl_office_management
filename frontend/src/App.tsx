@@ -110,6 +110,7 @@ export default function App() {
             <Route path="/banking/:id" element={<TreasuryDetailPage />} />
 
             <Route path="/advances" element={<AdvancesPage />} />
+            <Route path="/dashboard/advances" element={<AdvancesPage />} />
             <Route
               path="/advances/settlements"
               element={<AdvanceSettlementsPage />}

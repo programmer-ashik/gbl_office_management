@@ -77,6 +77,7 @@ const supplierBillSchema = new Schema<ISupplierBill>(
 );
 
 supplierBillSchema.index({ status: 1, dueDate: 1 });
+supplierBillSchema.index({ journalId: 1 });
 
 export const SupplierBillModel =
   (models.SupplierBill as Model<ISupplierBill> | undefined) ??

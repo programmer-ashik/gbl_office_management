@@ -208,7 +208,9 @@ describe('Phase 8 payroll and project cost allocation (e2e)', () => {
       .get('/api/v1/advances')
       .set('Authorization', `Bearer ${employeeToken}`)
       .expect(200);
-    const row = (advance.body.data as Array<{ status: string }>)[0];
+    const row = (
+      advance.body.data as { items: Array<{ status: string }> }
+    ).items[0];
     expect(row.status).toBe(AdvanceStatus.SETTLED);
 
     const laborLedger = await request(app)

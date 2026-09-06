@@ -524,20 +524,36 @@ export class ProcurementService {
       });
 
       if (po.destination === PurchaseDestination.WAREHOUSE) {
-        await StockLotModel.create({
+        // Same SKU + same unit cost → top up the open FIFO lot so on-hand
+        // shows one combined quantity instead of many zero/partial lots.
+        const openLot = await StockLotModel.findOne({
           warehouseId: po.warehouseId,
           itemId: line.itemId,
-          sku: line.sku,
-          itemName: line.name,
-          unit: line.unit,
-          purchaseOrderId: po._id,
-          poNumber: po.poNumber,
-          poLineId: line._id,
           unitCostMinor: line.unitCostMinor,
-          receivedMilli: quantityMilli,
-          remainingMilli: quantityMilli,
-          receivedAt: date,
-        });
+          remainingMilli: { $gt: 0 },
+        })
+          .sort({ receivedAt: 1 })
+          .exec();
+        if (openLot) {
+          openLot.receivedMilli += quantityMilli;
+          openLot.remainingMilli += quantityMilli;
+          await openLot.save();
+        } else {
+          await StockLotModel.create({
+            warehouseId: po.warehouseId,
+            itemId: line.itemId,
+            sku: line.sku,
+            itemName: line.name,
+            unit: line.unit,
+            purchaseOrderId: po._id,
+            poNumber: po.poNumber,
+            poLineId: line._id,
+            unitCostMinor: line.unitCostMinor,
+            receivedMilli: quantityMilli,
+            remainingMilli: quantityMilli,
+            receivedAt: date,
+          });
+        }
       }
     }
 
@@ -576,6 +592,7 @@ export class ProcurementService {
           description: `Goods received ${po.poNumber}`,
           settlement,
           creditAccountCode,
+          supplierId: po.supplierId.toString(),
         }),
       },
       actor.userId,
@@ -726,20 +743,26 @@ export class ProcurementService {
       grouped.set(key, current);
     }
 
-    return [...grouped.values()].map((row) => {
-      const warehouse = warehouseById.get(row.warehouseId);
-      return {
-        warehouseId: row.warehouseId,
-        warehouseCode: warehouse?.code ?? '',
-        warehouseName: warehouse?.name ?? '',
-        itemId: row.itemId,
-        sku: row.sku,
-        name: row.name,
-        unit: row.unit,
-        quantity: fromMilliQty(row.quantityMilli),
-        value: fromMinorUnits(row.valueMinor),
-      };
-    });
+    return [...grouped.values()]
+      .map((row) => {
+        const warehouse = warehouseById.get(row.warehouseId);
+        return {
+          warehouseId: row.warehouseId,
+          warehouseCode: warehouse?.code ?? '',
+          warehouseName: warehouse?.name ?? '',
+          itemId: row.itemId,
+          sku: row.sku,
+          name: row.name,
+          unit: row.unit,
+          quantity: fromMilliQty(row.quantityMilli),
+          value: fromMinorUnits(row.valueMinor),
+        };
+      })
+      .sort((a, b) =>
+        a.sku === b.sku
+          ? a.warehouseCode.localeCompare(b.warehouseCode)
+          : a.sku.localeCompare(b.sku),
+      );
   }
 
   async issueStock(
@@ -759,9 +782,18 @@ export class ProcurementService {
 
     const issueLines = [];
     let amountMinor = 0;
+    // Merge duplicate item lines in one request into a single consume.
+    const mergedLines = new Map<string, number>();
     for (const input of dto.lines) {
-      const item = await this.findItemOrFail(input.itemId);
       const quantityMilli = toMilliQty(input.quantity);
+      mergedLines.set(
+        input.itemId,
+        (mergedLines.get(input.itemId) ?? 0) + quantityMilli,
+      );
+    }
+
+    for (const [itemId, quantityMilli] of mergedLines) {
+      const item = await this.findItemOrFail(itemId);
       const consumed = await this.consumeLotsFifo(
         warehouse._id,
         item._id,
@@ -783,7 +815,7 @@ export class ProcurementService {
         date: date.toISOString(),
         memo: `Issue stock to ${project.code}`,
         reference: project.code,
-        projectId: project._id.toString(),
+        // Do not set header projectId — only the materials debit is project-tagged.
         lines: buildIssueJournalLines({
           amountMinor,
           projectId: project._id.toString(),
@@ -825,17 +857,39 @@ export class ProcurementService {
       .sort({ date: -1, issueNumber: -1 })
       .limit(50)
       .exec();
-    return rows.map((row) => ({
-      id: row._id.toString(),
-      issueNumber: row.issueNumber,
-      warehouseCode: row.warehouseCode,
-      warehouseName: row.warehouseName,
-      projectCode: row.projectCode,
-      projectName: row.projectName,
-      date: row.date.toISOString(),
-      amount: fromMinorUnits(row.amountMinor),
-      journalNumber: row.journalNumber,
-    }));
+    return rows.map((row) => {
+      const quantityMilli = row.lines.reduce(
+        (sum, line) => sum + line.quantityMilli,
+        0,
+      );
+      const lines = row.lines.map((line) => {
+        const quantity = fromMilliQty(line.quantityMilli);
+        const amount = fromMinorUnits(line.amountMinor);
+        return {
+          itemId: line.itemId.toString(),
+          sku: line.sku,
+          name: line.name,
+          unit: line.unit,
+          quantity,
+          amount,
+          unitCost: quantity > 0 ? Number((amount / quantity).toFixed(4)) : 0,
+        };
+      });
+      return {
+        id: row._id.toString(),
+        issueNumber: row.issueNumber,
+        warehouseCode: row.warehouseCode,
+        warehouseName: row.warehouseName,
+        projectId: row.projectId.toString(),
+        projectCode: row.projectCode,
+        projectName: row.projectName,
+        date: row.date.toISOString(),
+        quantity: fromMilliQty(quantityMilli),
+        amount: fromMinorUnits(row.amountMinor),
+        journalNumber: row.journalNumber,
+        lines,
+      };
+    });
   }
 
   private async consumeLotsFifo(

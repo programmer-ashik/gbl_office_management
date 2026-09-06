@@ -220,7 +220,10 @@ export type AccountLedger = {
     id: string
     date: string
     entryNumber: string
+    journalEntryId?: string
     memo: string
+    description: string
+    reference: string | null
     debit: number
     credit: number
     entityType?: string | null
@@ -270,7 +273,7 @@ const DIMENSION_RULES: Record<string, DimensionRule> = {
   '1131': {
     entityType: JournalEntityType.EMPLOYEE,
     entityRequired: true,
-    projectRequired: false,
+    projectRequired: true,
     label: 'Employee',
   },
   '2121': {

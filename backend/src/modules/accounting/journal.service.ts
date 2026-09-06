@@ -149,6 +149,16 @@ export type JournalSummary = {
 };
 
 export class JournalService {
+  private onManualPosted:
+    | ((journal: PublicJournal, userId: string) => Promise<void>)
+    | null = null;
+  private onJournalReversed:
+    | ((originalJournalId: string, userId: string) => Promise<void>)
+    | null = null;
+  private assertJournalReversible:
+    | ((originalJournalId: string) => Promise<void>)
+    | null = null;
+
   constructor(
     private readonly accountsService: AccountsService,
     private readonly projectsService: ProjectsService,
@@ -156,6 +166,42 @@ export class JournalService {
     private readonly usersService?: UsersService,
     private readonly customersService?: CustomersService,
   ) {}
+
+  /** Wire AR/AP sub-ledger sync without a circular constructor dependency. */
+  setArApHooks(hooks: {
+    onManualPosted?: (journal: PublicJournal, userId: string) => Promise<void>;
+    onJournalReversed?: (
+      originalJournalId: string,
+      userId: string,
+    ) => Promise<void>;
+    assertJournalReversible?: (originalJournalId: string) => Promise<void>;
+  }): void {
+    this.onManualPosted = hooks.onManualPosted ?? null;
+    this.onJournalReversed = hooks.onJournalReversed ?? null;
+    this.assertJournalReversible = hooks.assertJournalReversible ?? null;
+  }
+
+  private async notifyManualPosted(
+    journal: PublicJournal,
+    userId: string,
+  ): Promise<void> {
+    if (
+      journal.source !== 'manual' ||
+      journal.status !== JournalStatus.POSTED ||
+      !this.onManualPosted
+    ) {
+      return;
+    }
+    await this.onManualPosted(journal, userId);
+  }
+
+  private async notifyReversed(
+    originalJournalId: string,
+    userId: string,
+  ): Promise<void> {
+    if (!this.onJournalReversed) return;
+    await this.onJournalReversed(originalJournalId, userId);
+  }
 
   toPublic(entry: JournalEntryDocument): PublicJournal {
     return {
@@ -397,6 +443,10 @@ export class JournalService {
       throw badRequest('Only posted journals can be reversed');
     }
 
+    if (this.assertJournalReversible) {
+      await this.assertJournalReversible(original._id.toString());
+    }
+
     const reversing = await this.post(
       {
         date: new Date().toISOString(),
@@ -442,6 +492,8 @@ export class JournalService {
         status: 'posted',
       },
     );
+
+    await this.notifyReversed(original._id.toString(), userId);
 
     return reversing;
   }
@@ -585,6 +637,15 @@ export class JournalService {
         ? `Journal posted: ${publicEntry.entryNumber}`
         : `Journal draft saved: ${publicEntry.entryNumber}`,
     );
+    if (options.writeLedger) {
+      try {
+        await this.notifyManualPosted(publicEntry, userId);
+      } catch (error) {
+        await LedgerLineModel.deleteMany({ journalEntryId: entry._id }).exec();
+        await JournalEntryModel.deleteOne({ _id: entry._id }).exec();
+        throw error;
+      }
+    }
     return publicEntry;
   }
 
@@ -665,6 +726,9 @@ export class JournalService {
         : `Journal updated: ${publicEntry.entryNumber}`,
       before as unknown as Record<string, unknown>,
     );
+    if (options.postNow) {
+      await this.notifyManualPosted(publicEntry, userId);
+    }
     return publicEntry;
   }
 
@@ -836,12 +900,13 @@ export class JournalService {
   private async writeLedgerLines(
     entry: JournalEntryDocument,
     byCode: Map<string, { _id: Types.ObjectId; code: string; name: string; type: string }>,
-    memo: string,
+    _memo: string,
     session: ClientSession,
   ): Promise<void> {
     await LedgerLineModel.insertMany(
       entry.lines.map((line) => {
         const account = byCode.get(line.accountCode)!;
+        const lineDescription = line.description?.trim();
         return {
           journalEntryId: entry._id,
           journalEntryNumber: entry.entryNumber,
@@ -850,7 +915,9 @@ export class JournalService {
           accountName: line.accountName,
           accountType: account.type,
           date: entry.date,
-          memo: line.description || memo,
+          memo: entry.memo,
+          description: lineDescription || entry.memo,
+          reference: entry.reference,
           debitMinor: line.debitMinor,
           creditMinor: line.creditMinor,
           projectId: line.projectId,

@@ -24,8 +24,8 @@ export function AdvanceSettlementsPage() {
 
   useEffect(() => {
     api
-      .advances()
-      .then(setRows)
+      .advances({ pageSize: 200 })
+      .then((result) => setRows(result.items))
       .catch((err: unknown) => {
         setError(
           err instanceof Error ? err.message : "Unable to load settlements",

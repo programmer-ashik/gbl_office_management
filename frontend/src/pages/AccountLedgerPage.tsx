@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom'
 import { api } from '../api/client'
+import { MetricCard } from '../components/MetricCard'
 import { Select } from '../components/ui'
 import {
   JournalEntityType,
@@ -15,18 +21,22 @@ import type { PublicUser } from '../types/auth'
 import type { TreasuryAccount } from '../types/banking'
 import type { Supplier } from '../types/procurement'
 import type { Project } from '../types/project'
-import { MetricCard } from '../components/MetricCard'
 
 type EntityOption = { value: string; label: string }
 
 export function AccountLedgerPage() {
   const { accountCode: routeCode } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
 
   const [accounts, setAccounts] = useState<Account[]>([])
   const [accountCode, setAccountCode] = useState(routeCode ?? '')
-  const [entityId, setEntityId] = useState('')
-  const [projectId, setProjectId] = useState('')
+  const [entityId, setEntityId] = useState(
+    () => searchParams.get('entityId') ?? '',
+  )
+  const [projectId, setProjectId] = useState(
+    () => searchParams.get('projectId') ?? '',
+  )
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -46,6 +56,8 @@ export function AccountLedgerPage() {
   const entityType: EntityType | null = dimension?.entityType ?? null
   const showEntityFilter = Boolean(entityType)
   const showProjectFilter = Boolean(dimension?.projectRequired)
+  const isSupplierPayable =
+    accountCode === '2111' || accountCode === '2113'
 
   useEffect(() => {
     api
@@ -66,6 +78,14 @@ export function AccountLedgerPage() {
   useEffect(() => {
     if (routeCode) setAccountCode(routeCode)
   }, [routeCode])
+
+  useEffect(() => {
+    const fromUrl = searchParams.get('entityId') ?? ''
+    if (fromUrl !== entityId) setEntityId(fromUrl)
+    const projectFromUrl = searchParams.get('projectId') ?? ''
+    if (projectFromUrl !== projectId) setProjectId(projectFromUrl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   useEffect(() => {
     if (!showEntityFilter && !showProjectFilter) return
@@ -189,12 +209,16 @@ export function AccountLedgerPage() {
   }, [ledger, showProjectFilter, projectId])
 
   const running = useMemo(() => {
+    const creditNormal = ledger?.account.normalBalance === 'credit'
     let balance = 0
     return filteredEntries.map((row) => {
-      balance += row.debit - row.credit
+      // Liabilities / equity / revenue: credits increase the balance.
+      balance += creditNormal
+        ? row.credit - row.debit
+        : row.debit - row.credit
       return { ...row, runningBalance: balance }
     })
-  }, [filteredEntries])
+  }, [filteredEntries, ledger?.account.normalBalance])
 
   const filteredTotals = useMemo(() => {
     const debit = filteredEntries.reduce((sum, row) => sum + row.debit, 0)
@@ -222,11 +246,57 @@ export function AccountLedgerPage() {
     return `All ${entityFilterLabel.toLowerCase()}`
   }, [entityType, entityFilterLabel])
 
+  const selectedSupplier = useMemo(
+    () =>
+      entityType === JournalEntityType.SUPPLIER
+        ? suppliers.find((row) => row.id === entityId)
+        : undefined,
+    [entityType, suppliers, entityId],
+  )
+
+  function syncFilterParams(nextEntityId: string, nextProjectId: string) {
+    const params = new URLSearchParams()
+    if (nextEntityId) params.set('entityId', nextEntityId)
+    if (nextProjectId) params.set('projectId', nextProjectId)
+    if (entityType && nextEntityId) params.set('entityType', entityType)
+    setSearchParams(params, { replace: true })
+  }
+
   function onAccountChange(next: string) {
     setAccountCode(next)
     setEntityId('')
     setProjectId('')
     navigate(`/ledgers/${encodeURIComponent(next)}`, { replace: true })
+  }
+
+  function onEntityChange(next: string) {
+    setEntityId(next)
+    syncFilterParams(next, projectId)
+  }
+
+  function onProjectChange(next: string) {
+    setProjectId(next)
+    syncFilterParams(entityId, next)
+  }
+
+  function entityCell(row: (typeof running)[number]) {
+    if (
+      row.entityType === JournalEntityType.SUPPLIER &&
+      row.entityId
+    ) {
+      return (
+        <Link to={`/suppliers/${row.entityId}`}>
+          {row.entityName ?? 'Supplier'}
+        </Link>
+      )
+    }
+    if (
+      row.entityType === JournalEntityType.CUSTOMER &&
+      row.entityId
+    ) {
+      return row.entityName ?? 'Customer'
+    }
+    return row.entityName ?? '—'
   }
 
   return (
@@ -235,17 +305,26 @@ export function AccountLedgerPage() {
         <div>
           <h1>General ledger</h1>
         </div>
-        <Link to="/journals" className="ghost-link">
-          Journals
-        </Link>
+        <div className="form-actions">
+          {isSupplierPayable && entityId ? (
+            <Link to={`/suppliers/${entityId}`} className="ghost-link">
+              Supplier details
+            </Link>
+          ) : null}
+          <Link to="/journals" className="ghost-link">
+            Journals
+          </Link>
+        </div>
       </header>
 
       <section className="table-card">
         <div className="table-head">
           <h2>Account inquiry</h2>
           <p className="muted">
-            Posted journal lines for one GL account. Party filters appear for
-            receivable, payable, advance, and treasury control accounts.
+            Supplier bills always hit <strong>2111</strong>: credit bills leave
+            an open Cr; cash bills also Cr then Dr 2111 (cleared same day). The
+            expense debit still posts to <strong>5240</strong> (or the chosen
+            expense account).
           </p>
         </div>
 
@@ -253,47 +332,56 @@ export function AccountLedgerPage() {
           className="filter-bar ledger-filter-bar"
           onSubmit={(event) => event.preventDefault()}
         >
-          <label className="ledger-filter-account">
-            Account
-            <Select
-              value={accountCode}
-              onChange={onAccountChange}
-              options={accountOptions}
-              searchable
-              placeholder="Select account"
-            />
-          </label>
-
-          {showEntityFilter ? (
-            <label className="ledger-filter-party">
-              {entityFilterLabel}
+          <div className="ledger-filter-row">
+            <label className="ledger-filter-account">
+              Account
               <Select
-                value={entityId}
-                onChange={setEntityId}
-                options={[
-                  { value: '', label: allEntitiesLabel },
-                  ...entityOptions,
-                ]}
+                value={accountCode}
+                onChange={onAccountChange}
+                options={accountOptions}
                 searchable
-                placeholder={allEntitiesLabel}
+                portal
+                placeholder="Select account"
               />
             </label>
-          ) : null}
+
+            {showEntityFilter ? (
+              <label className="ledger-filter-party">
+                {isSupplierPayable ? 'Supplier' : entityFilterLabel}
+                <Select
+                  value={entityId}
+                  onChange={onEntityChange}
+                  options={[
+                    { value: '', label: allEntitiesLabel },
+                    ...entityOptions,
+                  ]}
+                  searchable
+                  portal
+                  placeholder={
+                    isSupplierPayable ? 'All suppliers' : allEntitiesLabel
+                  }
+                />
+              </label>
+            ) : null}
+          </div>
 
           {showProjectFilter ? (
-            <label className="ledger-filter-party">
-              Project
-              <Select
-                value={projectId}
-                onChange={setProjectId}
-                options={[
-                  { value: '', label: 'All projects' },
-                  ...projectOptions,
-                ]}
-                searchable
-                placeholder="All projects"
-              />
-            </label>
+            <div className="ledger-filter-row">
+              <label className="ledger-filter-project">
+                Project
+                <Select
+                  value={projectId}
+                  onChange={onProjectChange}
+                  options={[
+                    { value: '', label: 'All projects' },
+                    ...projectOptions,
+                  ]}
+                  searchable
+                  portal
+                  placeholder="All projects"
+                />
+              </label>
+            </div>
           ) : null}
 
           {showEntityFilter || showProjectFilter ? (
@@ -303,12 +391,26 @@ export function AccountLedgerPage() {
               onClick={() => {
                 setEntityId('')
                 setProjectId('')
+                setSearchParams({}, { replace: true })
               }}
             >
               Clear filters
             </button>
           ) : null}
         </form>
+
+        {selectedSupplier ? (
+          <p className="muted ledger-supplier-hint">
+            Showing transactions for{' '}
+            <Link to={`/suppliers/${selectedSupplier.id}`}>
+              {selectedSupplier.supplierNumber} · {selectedSupplier.name}
+            </Link>
+            {' · '}
+            <Link to={`/suppliers/${selectedSupplier.id}`}>
+              Open vendor ledger / history
+            </Link>
+          </p>
+        ) : null}
 
         {error ? <p className="form-error">{error}</p> : null}
         {loading ? <p className="muted">Loading ledger…</p> : null}
@@ -345,12 +447,14 @@ export function AccountLedgerPage() {
             </section>
 
             <div className="journal-lines-scroll">
-              <table className="journal-lines-table">
+              <table className="journal-lines-table ledger-inquiry-table">
                 <thead>
                   <tr>
                     <th>Date</th>
                     <th>Journal</th>
-                    <th>Memo</th>
+                    <th>Memo No</th>
+                    <th>Description</th>
+                    <th>Reference</th>
                     <th>Entity</th>
                     <th className="num">Debit</th>
                     <th className="num">Credit</th>
@@ -362,10 +466,27 @@ export function AccountLedgerPage() {
                     <tr key={row.id}>
                       <td>{row.date.slice(0, 10)}</td>
                       <td>
-                        <Link to="/journals">{row.entryNumber}</Link>
+                        <Link
+                          to={
+                            row.journalEntryId
+                              ? `/journals/${row.journalEntryId}`
+                              : '/journals'
+                          }
+                        >
+                          {row.entryNumber}
+                        </Link>
                       </td>
-                      <td>{row.memo}</td>
-                      <td>{row.entityName ?? '—'}</td>
+                      <td className="ledger-memo-cell" title={row.memo}>
+                        {row.memo}
+                      </td>
+                      <td
+                        className="ledger-description-cell"
+                        title={row.description || row.memo}
+                      >
+                        {row.description || row.memo}
+                      </td>
+                      <td>{row.reference ?? '—'}</td>
+                      <td>{entityCell(row)}</td>
                       <td className="num amount-debit-cell">
                         {row.debit > 0 ? money(row.debit) : '—'}
                       </td>
@@ -377,9 +498,11 @@ export function AccountLedgerPage() {
                   ))}
                   {running.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="muted">
+                      <td colSpan={9} className="muted">
                         No posted lines for this account
-                        {entityId || projectId ? ' with the selected filters' : ''}
+                        {entityId || projectId
+                          ? ' with the selected filters'
+                          : ''}
                         .
                       </td>
                     </tr>

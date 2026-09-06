@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, Fragment } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { JournalRegister } from "../components/JournalRegister";
@@ -68,6 +68,9 @@ export function JournalsPage() {
   const [saving, setSaving] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [bootError, setBootError] = useState<string | null>(null);
+  const [advanceBalances, setAdvanceBalances] = useState<Record<string, number>>(
+    {},
+  );
 
   const accountByCode = useMemo(() => {
     const map = new Map<string, Account>();
@@ -192,6 +195,47 @@ export function JournalsPage() {
       }),
     );
   }
+
+  useEffect(() => {
+    const employeeIds = [
+      ...new Set(
+        lines
+          .filter(
+            (line) =>
+              line.accountCode === "1131" &&
+              line.entityType === "employee" &&
+              line.entityId,
+          )
+          .map((line) => line.entityId),
+      ),
+    ].filter((id) => advanceBalances[id] === undefined);
+
+    if (employeeIds.length === 0) return;
+
+    let cancelled = false;
+    void Promise.all(
+      employeeIds.map(async (id) => {
+        try {
+          const row = await api.employeeAdvanceBalance(id);
+          return [id, row.unsettledAdvanceBalance] as const;
+        } catch {
+          return [id, 0] as const;
+        }
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      setAdvanceBalances((current) => {
+        const next = { ...current };
+        for (const [id, balance] of results) next[id] = balance;
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines]);
 
   function buildBody(intent: "draft" | "post"): JournalWriteBody {
     return {
@@ -392,6 +436,13 @@ export function JournalsPage() {
               />
             </label>
           </div>
+          <p className='muted'>
+            Posting <strong>1121 Client Receivables</strong> with a customer (+
+            project) also creates a Client Invoice (AR). Posting{' '}
+            <strong>2111 Supplier Payables</strong> with a supplier also creates
+            a Supplier Bill (AP). Reversing the journal voids that linked
+            invoice/bill. Add invoice / Add bill screens still work separately.
+          </p>
 
           <div className='journal-lines-scroll journal-entry-lines-scroll'>
             <table className='journal-lines-table journal-entry-lines'>
@@ -416,8 +467,13 @@ export function JournalsPage() {
                     journalType === JournalType.PROJECT_REVENUE ||
                     Boolean(line.projectId) ||
                     Boolean(projectId);
+                  const unsettled =
+                    line.accountCode === "1131" && line.entityId
+                      ? advanceBalances[line.entityId]
+                      : undefined;
                   return (
-                    <tr key={index}>
+                    <Fragment key={index}>
+                      <tr>
                       <td>
                         <Select
                           value={line.accountCode}
@@ -542,6 +598,24 @@ export function JournalsPage() {
                         ) : null}
                       </td>
                     </tr>
+                    {line.accountCode === "1131" ? (
+                      <tr className="journal-dimension-hint">
+                        <td colSpan={7}>
+                          <div className="callout callout-info">
+                            Account 1131 requires <strong>Employee</strong> and{" "}
+                            <strong>Project</strong>.
+                            {unsettled !== undefined
+                              ? unsettled > 0
+                                ? ` Live unsettled advance balance: ${money(unsettled)}.`
+                                : " No unsettled advance balance for this employee."
+                              : line.entityId
+                                ? " Loading unsettled balance…"
+                                : " Select an employee to see unsettled advance balance."}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                    </Fragment>
                   );
                 })}
               </tbody>

@@ -12,6 +12,14 @@ import {
 import type { Project } from '../types/project'
 import { MetricCard } from '../components/MetricCard'
 
+function asList<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value : []
+}
+
+function formatDate(value: string | null | undefined): string {
+  return value ? value.slice(0, 10) : '—'
+}
+
 export function ReceivablesPage() {
   const [rows, setRows] = useState<ClientInvoice[]>([])
   const [overdue, setOverdue] = useState<OverdueNotice[]>([])
@@ -26,6 +34,7 @@ export function ReceivablesPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   async function load() {
     const [invoices, notices, projectRows] = await Promise.all([
@@ -33,18 +42,24 @@ export function ReceivablesPage() {
       api.overdueInvoices(),
       api.projects(),
     ])
-    setRows(invoices)
-    setOverdue(notices)
-    setProjects(projectRows)
-    if (!projectId && projectRows[0]) {
-      setProjectId(projectRows[0].id)
+    const invoiceRows = asList<ClientInvoice>(invoices)
+    const overdueRows = asList<OverdueNotice>(notices)
+    const projectList = asList<Project>(projectRows)
+    setRows(invoiceRows)
+    setOverdue(overdueRows)
+    setProjects(projectList)
+    if (!projectId && projectList[0]) {
+      setProjectId(projectList[0].id)
     }
   }
 
   useEffect(() => {
-    load().catch((err: unknown) => {
-      setError(err instanceof Error ? err.message : 'Unable to load receivables')
-    })
+    setLoading(true)
+    load()
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Unable to load receivables')
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   async function onCreate(event: FormEvent) {
@@ -74,7 +89,7 @@ export function ReceivablesPage() {
     }
   }
 
-  const openTotal = rows.reduce((sum, row) => sum + row.openAmount, 0)
+  const openTotal = rows.reduce((sum, row) => sum + (row.openAmount ?? 0), 0)
 
   return (
     <>
@@ -97,7 +112,7 @@ export function ReceivablesPage() {
           variant="teal"
           title="Open AR"
           value={money(openTotal)}
-          meta="Outstanding client balances (1100)"
+          meta="Outstanding client balances (1121)"
         />
         <MetricCard
           variant="red"
@@ -144,9 +159,9 @@ export function ReceivablesPage() {
                       <span className="muted"> · {row.clientEmail}</span>
                     ) : null}
                   </td>
-                  <td>{row.dueDate.slice(0, 10)}</td>
+                  <td>{formatDate(row.dueDate)}</td>
                   <td>{row.daysPastDue}</td>
-                  <td>{money(row.openAmount)}</td>
+                  <td>{money(row.openAmount ?? 0)}</td>
                 </tr>
               ))}
             </tbody>
@@ -157,7 +172,7 @@ export function ReceivablesPage() {
       <Modal
         open={modalOpen}
         title="New client invoice"
-        description="Posts Dr Accounts Receivable (1100) / Cr Project Revenue (4000) on issue."
+        description="Posts Dr Accounts Receivable (1121) / Cr Project Revenue (4110) on issue."
         onClose={() => setModalOpen(false)}
         wide
       >
@@ -267,13 +282,13 @@ export function ReceivablesPage() {
                 </td>
                 <td>{row.projectCode}</td>
                 <td>{row.clientName}</td>
-                <td>{INVOICE_TYPE_LABEL[row.type]}</td>
-                <td>{row.dueDate.slice(0, 10)}</td>
-                <td>{money(row.amount)}</td>
-                <td>{money(row.openAmount)}</td>
+                <td>{INVOICE_TYPE_LABEL[row.type] ?? row.type}</td>
+                <td>{formatDate(row.dueDate)}</td>
+                <td>{money(row.amount ?? 0)}</td>
+                <td>{money(row.openAmount ?? 0)}</td>
                 <td>
                   <span className={`status-pill status-${row.status}`}>
-                    {INVOICE_STATUS_LABEL[row.status]}
+                    {INVOICE_STATUS_LABEL[row.status] ?? row.status}
                   </span>
                 </td>
               </tr>
@@ -281,7 +296,11 @@ export function ReceivablesPage() {
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={8} className="muted">
-                  No invoices yet.
+                  {loading
+                    ? 'Loading invoices…'
+                    : error
+                      ? 'Unable to load invoices. Check the error below.'
+                      : 'No invoices yet. Use Add invoice to issue one against a project.'}
                 </td>
               </tr>
             ) : null}

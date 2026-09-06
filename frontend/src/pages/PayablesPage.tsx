@@ -1,6 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { MetricCard } from '../components/MetricCard'
 import { Modal, Select } from '../components/ui'
 import { money } from '../types/accounting'
 import {
@@ -9,8 +10,24 @@ import {
   type SupplierBill,
   type SupplierPayment,
 } from '../types/ar-ap'
-import type { TreasuryAccount } from '../types/banking'
+import {
+  TREASURY_KIND_LABEL,
+  type TreasuryAccount,
+} from '../types/banking'
 import type { Supplier } from '../types/procurement'
+
+function asList<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value : []
+}
+
+function formatDate(value: string | null | undefined): string {
+  return value ? value.slice(0, 10) : '—'
+}
+
+function treasuryOptionLabel(row: TreasuryAccount): string {
+  const kind = TREASURY_KIND_LABEL[row.kind] ?? row.kind
+  return `${row.name} · ${kind} · ${row.glAccountCode} · ${money(row.bookBalance ?? 0)}`
+}
 
 export function PayablesPage() {
   const [bills, setBills] = useState<SupplierBill[]>([])
@@ -35,6 +52,7 @@ export function PayablesPage() {
   const [saving, setSaving] = useState(false)
   const [billModalOpen, setBillModalOpen] = useState(false)
   const [payModalOpen, setPayModalOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   async function load() {
     const [billRows, paymentRows, supplierRows, channels] = await Promise.all([
@@ -43,25 +61,42 @@ export function PayablesPage() {
       api.suppliers(),
       api.treasury(),
     ])
-    setBills(billRows)
-    setPayments(paymentRows)
-    setSuppliers(supplierRows)
-    setTreasury(channels)
-    if (!supplierId && supplierRows[0]) {
-      setSupplierId(supplierRows[0].id)
+    const billsList = asList<SupplierBill>(billRows)
+    const paymentsList = asList<SupplierPayment>(paymentRows)
+    const supplierList = asList<Supplier>(supplierRows)
+    const treasuryList = asList<TreasuryAccount>(channels)
+
+    setBills(billsList)
+    setPayments(paymentsList)
+    setSuppliers(supplierList)
+    setTreasury(treasuryList)
+    if (!supplierId && supplierList[0]) {
+      setSupplierId(supplierList[0].id)
     }
-    if (!billTreasuryId && channels[0]) {
-      setBillTreasuryId(channels[0].id)
+    const preferredCash =
+      treasuryList.find(
+        (row) =>
+          row.isActive &&
+          (row.kind === 'cash' ||
+            row.kind === 'petty_cash' ||
+            row.glAccountCode === '1111' ||
+            row.glAccountCode === '1115'),
+      ) ?? treasuryList.find((row) => row.isActive)
+    if (!billTreasuryId && preferredCash) {
+      setBillTreasuryId(preferredCash.id)
     }
-    if (!payTreasuryId && channels[0]) {
-      setPayTreasuryId(channels[0].id)
+    if (!payTreasuryId && preferredCash) {
+      setPayTreasuryId(preferredCash.id)
     }
   }
 
   useEffect(() => {
-    load().catch((err: unknown) => {
-      setError(err instanceof Error ? err.message : 'Unable to load payables')
-    })
+    setLoading(true)
+    load()
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Unable to load payables')
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   async function onCreateBill(event: FormEvent) {
@@ -129,6 +164,8 @@ export function PayablesPage() {
   }
 
   const scheduled = payments.filter((row) => row.status === 'scheduled')
+  const openBills = bills.filter((row) => row.status === 'open')
+  const openBillTotal = openBills.reduce((sum, row) => sum + (row.amount ?? 0), 0)
   const supplierOptions = suppliers.map((row) => ({
     value: row.id,
     label: `${row.supplierNumber} · ${row.name}`,
@@ -137,10 +174,21 @@ export function PayablesPage() {
     value: row.id,
     label: row.name,
   }))
-  const treasuryOptions = treasury.map((row) => ({
-    value: row.id,
-    label: row.name,
-  }))
+  const treasuryOptions = useMemo(
+    () =>
+      treasury
+        .filter((row) => row.isActive)
+        .map((row) => ({
+          value: row.id,
+          label: treasuryOptionLabel(row),
+        })),
+    [treasury],
+  )
+
+  const selectedBillTreasury = useMemo(
+    () => treasury.find((row) => row.id === billTreasuryId),
+    [treasury, billTreasuryId],
+  )
 
   return (
     <>
@@ -161,10 +209,31 @@ export function PayablesPage() {
         </div>
       </header>
 
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="amber"
+          title="Open AP bills"
+          value={money(openBillTotal)}
+          meta="Credit bills outstanding (2111)"
+        />
+        <MetricCard
+          variant="blue"
+          title="Bills"
+          value={bills.length}
+          meta="Cash and credit supplier bills"
+        />
+        <MetricCard
+          variant="teal"
+          title="Payments"
+          value={payments.length}
+          meta={`${scheduled.length} scheduled`}
+        />
+      </section>
+
       <Modal
         open={billModalOpen}
         title="Supplier bill"
-        description="Credit bills accrue AP (2000). Cash bills pay immediately from treasury. GRN receipts from procurement also build AP."
+        description="Credit bills: Dr expense (5240) / Cr 2111. Cash bills: Dr expense / Cr 2111 then Dr 2111 / Cr bank (paid immediately — still visible on 2111). GRN receipts also credit 2111."
         onClose={() => setBillModalOpen(false)}
         wide
       >
@@ -218,9 +287,18 @@ export function PayablesPage() {
                   value={billTreasuryId}
                   onChange={setBillTreasuryId}
                   options={treasuryOptions}
-                  placeholder="Select treasury"
+                  searchable
+                  placeholder="Select treasury (Hand cash / Bank)"
                   required
                 />
+                {selectedBillTreasury ? (
+                  <span className="muted">
+                    Pays from {selectedBillTreasury.name} (
+                    {selectedBillTreasury.glAccountCode}) — balance{' '}
+                    {money(selectedBillTreasury.bookBalance ?? 0)}. Cash bills
+                    credit this account.
+                  </span>
+                ) : null}
               </label>
             )}
             <label>
@@ -284,7 +362,8 @@ export function PayablesPage() {
                 value={payTreasuryId}
                 onChange={setPayTreasuryId}
                 options={treasuryOptions}
-                placeholder="Select treasury"
+                searchable
+                placeholder="Select treasury (Hand cash / Bank)"
                 required
               />
             </label>
@@ -342,8 +421,8 @@ export function PayablesPage() {
                   <td>
                     <Link to={`/suppliers/${row.supplierId}`}>{row.supplierName}</Link>
                   </td>
-                  <td>{row.scheduledDate?.slice(0, 10) ?? '—'}</td>
-                  <td>{money(row.amount)}</td>
+                  <td>{formatDate(row.scheduledDate)}</td>
+                  <td>{money(row.amount ?? 0)}</td>
                   <td>
                     <button
                       type="button"
@@ -381,16 +460,24 @@ export function PayablesPage() {
                 <td>
                   <Link to={`/suppliers/${row.supplierId}`}>{row.supplierName}</Link>
                 </td>
-                <td>{BILL_PAYMENT_LABEL[row.paymentType]}</td>
-                <td>{row.dueDate.slice(0, 10)}</td>
-                <td>{money(row.amount)}</td>
-                <td>{row.status}</td>
+                <td>{BILL_PAYMENT_LABEL[row.paymentType] ?? row.paymentType}</td>
+                <td>{formatDate(row.dueDate)}</td>
+                <td>{money(row.amount ?? 0)}</td>
+                <td>
+                  <span className={`status-pill status-${row.status}`}>
+                    {row.status}
+                  </span>
+                </td>
               </tr>
             ))}
             {bills.length === 0 ? (
               <tr>
                 <td colSpan={6} className="muted">
-                  No supplier bills yet.
+                  {loading
+                    ? 'Loading bills…'
+                    : error
+                      ? 'Unable to load bills. Check the error below.'
+                      : 'No supplier bills yet. Use Add bill, or receive a PO to accrue AP.'}
                 </td>
               </tr>
             ) : null}
@@ -417,17 +504,19 @@ export function PayablesPage() {
                 <td>{row.supplierName}</td>
                 <td>
                   <span className={`status-pill status-${row.status}`}>
-                    {PAYMENT_STATUS_LABEL[row.status]}
+                    {PAYMENT_STATUS_LABEL[row.status] ?? row.status}
                   </span>
                 </td>
-                <td>{row.executedDate?.slice(0, 10) ?? '—'}</td>
-                <td>{money(row.amount)}</td>
+                <td>{formatDate(row.executedDate)}</td>
+                <td>{money(row.amount ?? 0)}</td>
               </tr>
             ))}
             {payments.length === 0 ? (
               <tr>
                 <td colSpan={5} className="muted">
-                  No payments yet.
+                  {loading
+                    ? 'Loading payments…'
+                    : 'No payments yet. Schedule a payment against open supplier balances.'}
                 </td>
               </tr>
             ) : null}

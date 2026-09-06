@@ -97,10 +97,11 @@ export function ProcurementPage() {
     setSaving(true)
     setError(null)
     try {
-      await api.createItem({ sku, name: itemName, unit })
+      const created = await api.createItem({ sku, name: itemName, unit })
       setSku('')
       setItemName('')
       setItemModalOpen(false)
+      setItemId(created.id)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create item')
@@ -397,6 +398,35 @@ export function ProcurementPage() {
               <tr>
                 <td colSpan={5} className="muted">
                   No purchase orders yet.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="table-card">
+        <h2>Items</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Name</th>
+              <th>Unit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((row) => (
+              <tr key={row.id}>
+                <td>{row.sku}</td>
+                <td>{row.name}</td>
+                <td>{row.unit}</td>
+              </tr>
+            ))}
+            {items.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="muted">
+                  No items yet. Use Add item to create a catalog SKU.
                 </td>
               </tr>
             ) : null}

@@ -15,6 +15,7 @@ import type {
   OverdueNotice,
   SupplierBill,
   SupplierPayment,
+  VendorLedger,
 } from '../types/ar-ap'
 import type {
   ApprovalRequest,
@@ -53,7 +54,6 @@ import type {
   StockIssue,
   StockRow,
   Supplier,
-  VendorLedger,
   Warehouse,
 } from '../types/procurement'
 
@@ -146,6 +146,46 @@ async function request<T>(
   }
 
   return json.data
+}
+
+async function downloadBlob(path: string, fallbackName: string): Promise<void> {
+  const headers = new Headers()
+  const token = getAccessToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  let res = await fetch(`${API_BASE}${path}`, {
+    headers,
+    credentials: 'include',
+  })
+
+  if (res.status === 401) {
+    const refreshed = await tryRefresh()
+    if (refreshed) {
+      const retryHeaders = new Headers()
+      const next = getAccessToken()
+      if (next) retryHeaders.set('Authorization', `Bearer ${next}`)
+      res = await fetch(`${API_BASE}${path}`, {
+        headers: retryHeaders,
+        credentials: 'include',
+      })
+    }
+  }
+
+  if (!res.ok) {
+    const err = (await res.json().catch(() => null)) as ApiError | null
+    throw new ApiRequestError(err?.message ?? 'Download failed', res.status)
+  }
+
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') ?? ''
+  const match = /filename="?([^"]+)"?/i.exec(disposition)
+  const filename = match?.[1] ?? fallbackName
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 export const api = {
@@ -472,7 +512,53 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({}),
     }),
-  advances: () => request<Advance[]>('/advances'),
+  advances: (params?: {
+    projectId?: string
+    employeeId?: string
+    startDate?: string
+    endDate?: string
+    status?: string
+    page?: number
+    pageSize?: number
+  }) => {
+    const query = new URLSearchParams()
+    if (params?.projectId) query.set('projectId', params.projectId)
+    if (params?.employeeId) query.set('employeeId', params.employeeId)
+    if (params?.startDate) query.set('startDate', params.startDate)
+    if (params?.endDate) query.set('endDate', params.endDate)
+    if (params?.status) query.set('status', params.status)
+    if (params?.page) query.set('page', String(params.page))
+    if (params?.pageSize) query.set('pageSize', String(params.pageSize))
+    const qs = query.toString()
+    return request<{
+      items: Advance[]
+      total: number
+      page: number
+      pageSize: number
+    }>(qs ? `/advances?${qs}` : '/advances')
+  },
+  downloadAdvancePdf: (id: string) =>
+    downloadBlob(`/advances/${id}/pdf`, `advance-${id}.pdf`),
+  downloadProjectAdvanceReportPdf: (params: {
+    projectId: string
+    employeeId?: string
+    startDate?: string
+    endDate?: string
+  }) => {
+    const query = new URLSearchParams()
+    query.set('projectId', params.projectId)
+    if (params.employeeId) query.set('employeeId', params.employeeId)
+    if (params.startDate) query.set('startDate', params.startDate)
+    if (params.endDate) query.set('endDate', params.endDate)
+    return downloadBlob(
+      `/advances/project-report/pdf?${query.toString()}`,
+      'project-advance-report.pdf',
+    )
+  },
+  employeeAdvanceBalance: (id: string) =>
+    request<{ employeeId: string; unsettledAdvanceBalance: number }>(
+      `/employees/${id}/advance-balance`,
+    ),
   advance: (id: string) => request<Advance>(`/advances/${id}`),
   advanceProjects: () => request<AdvanceProjectOption[]>('/advances/projects'),
   expenseAccounts: () =>

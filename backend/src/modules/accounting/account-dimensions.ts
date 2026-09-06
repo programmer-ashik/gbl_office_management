@@ -35,7 +35,7 @@ const RULES_BY_CODE: Record<string, DimensionRule> = {
   [SystemAccountCode.EMPLOYEE_ADVANCES]: {
     entityType: JournalEntityType.EMPLOYEE,
     entityRequired: true,
-    projectRequired: false,
+    projectRequired: true,
     label: 'Employee Advances',
   },
   [SystemAccountCode.EMPLOYEE_PAYABLES]: {

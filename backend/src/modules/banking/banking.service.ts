@@ -14,6 +14,7 @@ import { CounterModel } from '../accounting/counter.model';
 import type { JournalService } from '../accounting/journal.service';
 import { LedgerLineModel } from '../accounting/ledger.model';
 import { LedgerService } from '../accounting/ledger.service';
+import { SystemAccountCode } from '../accounting/system-account-codes';
 import {
   autoMatchStatementLines,
   parseStatementCsv,
@@ -109,17 +110,26 @@ const DEFAULT_TREASURY: Array<{
   glAccountCode: string;
   institution?: string;
 }> = [
-  { name: 'Petty Cash (Hand Cash)', kind: TreasuryKind.CASH, glAccountCode: '1111' },
+  {
+    name: 'Hand Cash',
+    kind: TreasuryKind.CASH,
+    glAccountCode: SystemAccountCode.CASH,
+  },
+  {
+    name: 'Cash in Hand',
+    kind: TreasuryKind.PETTY_CASH,
+    glAccountCode: SystemAccountCode.CASH_IN_HAND,
+  },
   {
     name: 'BRAC Bank',
     kind: TreasuryKind.COMMERCIAL_BANK,
-    glAccountCode: '1112',
+    glAccountCode: SystemAccountCode.BANK,
     institution: 'BRAC Bank',
   },
   {
     name: 'Mobile Banking (bKash / Nagad)',
     kind: TreasuryKind.MOBILE_BANKING,
-    glAccountCode: '1114',
+    glAccountCode: SystemAccountCode.MOBILE_BANKING,
     institution: 'bKash / Nagad',
   },
 ];
@@ -132,12 +142,23 @@ export class BankingService {
   ) {}
 
   async seedDefaults(): Promise<void> {
-    const count = await TreasuryAccountModel.countDocuments().exec();
-    if (count > 0) {
-      return;
-    }
-
+    let created = 0;
     for (const row of DEFAULT_TREASURY) {
+      const existing = await TreasuryAccountModel.findOne({
+        glAccountCode: row.glAccountCode,
+      }).exec();
+      if (existing) {
+        // Keep GL link; refresh display name for Hand Cash clarity.
+        if (
+          row.glAccountCode === SystemAccountCode.CASH &&
+          existing.name !== row.name
+        ) {
+          existing.name = row.name;
+          existing.kind = row.kind;
+          await existing.save();
+        }
+        continue;
+      }
       const gl = await this.accountsService.findByCodeOrFail(row.glAccountCode);
       await TreasuryAccountModel.create({
         name: row.name,
@@ -149,8 +170,11 @@ export class BankingService {
         isActive: true,
         isSystem: true,
       });
+      created += 1;
     }
-    console.log(`Seeded ${DEFAULT_TREASURY.length} treasury accounts`);
+    if (created > 0) {
+      console.log(`Seeded ${created} treasury account(s)`);
+    }
   }
 
   async create(

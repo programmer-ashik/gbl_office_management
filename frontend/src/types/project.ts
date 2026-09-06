@@ -51,6 +51,29 @@ export type ProjectFinancials = {
   breakdown: CostBreakdownRow[]
 }
 
+export type ProjectMaterialIssue = {
+  id: string
+  issueNumber: string
+  date: string
+  sku: string
+  name: string
+  unit: string
+  quantity: number
+  unitCost: number
+  amount: number
+  journalNumber: string
+}
+
+export type ProjectMaterialSummary = {
+  itemId: string
+  sku: string
+  name: string
+  unit: string
+  quantity: number
+  unitCost: number
+  amount: number
+}
+
 export type Project = {
   id: string
   code: string
@@ -65,6 +88,8 @@ export type Project = {
   description: string | null
   createdAt: string | null
   financials: ProjectFinancials
+  materialIssues?: ProjectMaterialIssue[]
+  materialsSummary?: ProjectMaterialSummary[]
 }
 
 export type CreateProjectBody = {

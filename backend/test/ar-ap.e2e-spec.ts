@@ -137,7 +137,7 @@ describe('Phase 7 accounts payable and receivable (e2e)', () => {
     expect(invoice.body.data.openAmount).toBe(200_000);
 
     const arLedger = await request(app)
-      .get('/api/v1/ledgers/1100')
+      .get('/api/v1/ledgers/1121')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
     expect(arLedger.body.data.account.balance).toBe(200_000);
@@ -159,7 +159,7 @@ describe('Phase 7 accounts payable and receivable (e2e)', () => {
     expect(collected.body.data.openAmount).toBe(120_000);
 
     const arLedger = await request(app)
-      .get('/api/v1/ledgers/1100')
+      .get('/api/v1/ledgers/1121')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
     expect(arLedger.body.data.account.balance).toBe(120_000);
@@ -204,7 +204,7 @@ describe('Phase 7 accounts payable and receivable (e2e)', () => {
       .expect(201);
 
     const apBefore = await request(app)
-      .get('/api/v1/ledgers/2000')
+      .get('/api/v1/ledgers/2111')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
     expect(apBefore.body.data.account.balance).toBe(30_000);
@@ -231,7 +231,7 @@ describe('Phase 7 accounts payable and receivable (e2e)', () => {
     expect(executed.body.data.status).toBe('executed');
 
     const apAfter = await request(app)
-      .get('/api/v1/ledgers/2000')
+      .get('/api/v1/ledgers/2111')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
     expect(apAfter.body.data.account.balance).toBe(0);
@@ -248,9 +248,9 @@ describe('Phase 7 accounts payable and receivable (e2e)', () => {
     ).toBe(true);
   });
 
-  it('records a cash supplier bill without touching AP', async () => {
+  it('records a cash supplier bill through AP then clears it', async () => {
     const before = await request(app)
-      .get('/api/v1/ledgers/2000')
+      .get('/api/v1/ledgers/2111')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
 
@@ -270,10 +270,22 @@ describe('Phase 7 accounts payable and receivable (e2e)', () => {
     expect(bill.body.data.status).toBe('paid');
 
     const after = await request(app)
-      .get('/api/v1/ledgers/2000')
+      .get(`/api/v1/ledgers/2111?entityType=supplier&entityId=${supplierId}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
+
+    // Net AP balance unchanged (Cr then Dr), but both AP legs are visible.
     expect(after.body.data.account.balance).toBe(before.body.data.account.balance);
+    const billLines = after.body.data.entries.filter(
+      (row: { reference?: string | null; credit: number; debit: number }) =>
+        row.reference === bill.body.data.billNumber,
+    );
+    expect(billLines.some((row: { credit: number }) => row.credit === 5_000)).toBe(
+      true,
+    );
+    expect(billLines.some((row: { debit: number }) => row.debit === 5_000)).toBe(
+      true,
+    );
   });
 
   it('generates AR and AP aging buckets', async () => {

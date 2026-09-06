@@ -83,6 +83,8 @@ type JournalRegisterProps = {
   refreshKey?: number | string
 }
 
+const PAGE_SIZE = 15
+
 export function JournalRegister({
   title = 'Journal register',
   description,
@@ -104,6 +106,7 @@ export function JournalRegister({
   const [searchDebounced, setSearchDebounced] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearchDebounced(search.trim()), 350)
@@ -133,6 +136,7 @@ export function JournalRegister({
     ])
     setEntries(journals)
     setProjects(projectRows)
+    setPage(1)
   }
 
   useEffect(() => {
@@ -248,6 +252,15 @@ export function JournalRegister({
     })),
   ]
 
+  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pageEntries = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE
+    return entries.slice(start, start + PAGE_SIZE)
+  }, [entries, currentPage])
+  const rangeStart = entries.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1
+  const rangeEnd = Math.min(currentPage * PAGE_SIZE, entries.length)
+
   return (
     <section className="table-card report-section" id="report">
       <div className="table-head">
@@ -359,7 +372,7 @@ export function JournalRegister({
             </tr>
           </thead>
           <tbody>
-            {entries.map((entry) => {
+            {pageEntries.map((entry) => {
               const editReason = journalEditDisabledReason(entry)
               const deleteReason = journalDeleteDisabledReason(entry)
               const reverseReason = journalReverseDisabledReason(entry)
@@ -450,6 +463,35 @@ export function JournalRegister({
           </tbody>
         </table>
       </div>
+
+      {entries.length > 0 ? (
+        <div className="table-pagination">
+          <p className="muted">
+            Showing {rangeStart}–{rangeEnd} of {entries.length}
+          </p>
+          <div className="form-actions">
+            <button
+              type="button"
+              className="ghost"
+              disabled={currentPage <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </button>
+            <span className="pagination-page">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              type="button"
+              className="ghost"
+              disabled={currentPage >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

@@ -38,6 +38,7 @@ type PopoverCoords = {
   left: number
   width: number
   maxHeight: number
+  listMaxHeight: number
   openUp: boolean
 }
 
@@ -87,39 +88,50 @@ export function Select({
     const rect = trigger.getBoundingClientRect()
     const gap = 4
     const pad = 8
-    const width = Math.min(window.innerWidth - pad * 2, Math.max(rect.width, 160))
-    const estimated =
-      panelRef.current?.offsetHeight ||
-      Math.min(filtered.length * 40 + (searchable ? 44 : 8), 240)
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const searchH = searchable ? 44 : 0
 
-    const spaceBelow = window.innerHeight - rect.bottom - pad
+    // Never wider than the viewport; match trigger on small screens.
+    const width = Math.min(Math.max(rect.width, 160), vw - pad * 2)
+
+    const spaceBelow = vh - rect.bottom - pad
     const spaceAbove = rect.top - pad
-    const openUp = spaceBelow < estimated + gap && spaceAbove > spaceBelow
-    const available = openUp ? spaceAbove : spaceBelow
-    const maxHeight = Math.max(120, Math.min(240, available - gap))
+    const openUp = spaceBelow < 160 && spaceAbove > spaceBelow
+    const available = Math.max(0, (openUp ? spaceAbove : spaceBelow) - gap)
+
+    // Cap list to viewport so options never spill off-screen.
+    const maxHeight = Math.max(140, Math.min(available, Math.floor(vh * 0.5)))
+    const listMaxHeight = Math.max(96, maxHeight - searchH - 8)
 
     if (!usePortal) {
       setCoords({
         top: 0,
         left: 0,
-        width: rect.width,
+        width: Math.min(rect.width, vw - pad * 2),
         maxHeight,
+        listMaxHeight,
         openUp,
       })
       return
     }
 
-    let top = openUp ? rect.top - gap - Math.min(estimated, maxHeight) : rect.bottom + gap
-    // Clamp so the menu stays on-screen
-    top = Math.min(Math.max(pad, top), window.innerHeight - Math.min(estimated, maxHeight) - pad)
-
     let left = rect.left
-    if (left + width > window.innerWidth - pad) {
-      left = window.innerWidth - width - pad
-    }
+    if (left + width > vw - pad) left = vw - width - pad
     if (left < pad) left = pad
 
-    setCoords({ top, left, width, maxHeight, openUp })
+    // Prefer opening in the direction with more room; keep fully on-screen.
+    const usedHeight = Math.min(
+      maxHeight,
+      panelRef.current?.offsetHeight || maxHeight,
+    )
+    let top = openUp ? rect.top - gap - usedHeight : rect.bottom + gap
+    if (top < pad) top = pad
+    if (top + usedHeight > vh - pad) {
+      top = Math.max(pad, vh - pad - usedHeight)
+    }
+
+    setCoords({ top, left, width, maxHeight, listMaxHeight, openUp })
   }
 
   useLayoutEffect(() => {
@@ -128,10 +140,13 @@ export function Select({
       return
     }
     placePopover()
-    // Second pass after paint — measure real menu height
-    const id = window.requestAnimationFrame(() => placePopover())
-    return () => window.cancelAnimationFrame(id)
-  }, [open, options.length, filtered.length, usePortal, searchable])
+    const frame = window.requestAnimationFrame(() => {
+      placePopover()
+      // Third pass after fonts/layout settle
+      window.requestAnimationFrame(() => placePopover())
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [open, options.length, filtered.length, usePortal, searchable, query])
 
   useEffect(() => {
     if (!open) return
@@ -179,7 +194,7 @@ export function Select({
       window.removeEventListener('resize', onReposition)
       window.removeEventListener('scroll', onReposition, true)
     }
-  }, [open, options.length, usePortal, searchable, filtered.length])
+  }, [open, options.length, usePortal, searchable, filtered.length, query])
 
   useEffect(() => {
     if (open && searchable) {
@@ -216,16 +231,26 @@ export function Select({
             : 'ui-select-popover is-local'
       }
       style={
-        usePortal && coords
+        usePortal
           ? ({
-              top: coords.top,
-              left: coords.left,
-              width: coords.width,
-              maxHeight: coords.maxHeight,
+              top: coords?.top ?? 0,
+              left: coords?.left ?? 0,
+              width: coords?.width ?? undefined,
+              maxWidth: 'calc(100vw - 16px)',
+              maxHeight:
+                coords?.maxHeight ??
+                (typeof window !== 'undefined'
+                  ? Math.floor(window.innerHeight * 0.5)
+                  : 280),
+              visibility: coords ? 'visible' : 'hidden',
               zIndex: 10050,
             } satisfies CSSProperties)
           : coords
-            ? ({ maxHeight: coords.maxHeight } satisfies CSSProperties)
+            ? ({
+                maxHeight: coords.maxHeight,
+                maxWidth: '100%',
+                width: '100%',
+              } satisfies CSSProperties)
             : undefined
       }
       role="presentation"
@@ -240,7 +265,22 @@ export function Select({
           aria-label="Search options"
         />
       ) : null}
-      <ul id={listId} role="listbox" className="ui-select-menu">
+      <ul
+        id={listId}
+        role="listbox"
+        className="ui-select-menu"
+        style={
+          coords
+            ? ({
+                maxHeight: coords.listMaxHeight,
+                overflowY: 'auto',
+              } satisfies CSSProperties)
+            : ({
+                maxHeight: 200,
+                overflowY: 'auto',
+              } satisfies CSSProperties)
+        }
+      >
         {filtered.map((option) => (
           <li key={option.value || '__empty'}>
             <button
@@ -300,7 +340,7 @@ export function Select({
         </span>
       </button>
       {usePortal
-        ? open && coords && typeof document !== 'undefined'
+        ? open && typeof document !== 'undefined'
           ? createPortal(menu, document.body)
           : null
         : menu}

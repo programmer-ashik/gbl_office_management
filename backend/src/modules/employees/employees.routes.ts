@@ -54,5 +54,18 @@ export function createEmployeesRouter(
     }),
   );
 
+  router.get(
+    '/:id/advance-balance',
+    auth,
+    requireRoles(Role.ADMIN, Role.ACCOUNTANT, Role.EMPLOYEE, Role.PROJECT_MANAGER),
+    asyncHandler(async (req, res) => {
+      const balance = await advancesService.getEmployeeAdvanceBalance(
+        String(req.params.id),
+        req.user!,
+      );
+      sendSuccess(res, balance, 'Employee advance balance retrieved');
+    }),
+  );
+
   return router;
 }

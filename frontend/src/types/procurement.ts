@@ -123,16 +123,29 @@ export type StockRow = {
   value: number
 }
 
+export type StockIssueLine = {
+  itemId: string
+  sku: string
+  name: string
+  unit: string
+  quantity: number
+  unitCost: number
+  amount: number
+}
+
 export type StockIssue = {
   id: string
   issueNumber: string
   warehouseCode: string
   warehouseName: string
+  projectId?: string
   projectCode: string
   projectName: string
   date: string
+  quantity: number
   amount: number
   journalNumber: string
+  lines: StockIssueLine[]
 }
 
 export type VendorLedger = {

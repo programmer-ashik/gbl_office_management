@@ -7,6 +7,7 @@ import {
   PROJECT_STATUS_LABEL,
   type Project,
 } from '../types/project'
+import { qty } from '../types/procurement'
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -154,6 +155,85 @@ export function ProjectDetailPage() {
         <p className="muted">
           Spent {money(financials.totalCost)} of {money(financials.totalBudget)} · remaining{' '}
           {money(financials.budgetRemaining)}
+        </p>
+      </section>
+
+      <section className="table-card">
+        <h2>Materials issued from warehouse</h2>
+        <p className="muted">
+          Stock issued to this project (FIFO cost). Totals post to materials
+          expense 5110.
+        </p>
+        {(project.materialsSummary?.length ?? 0) > 0 ? (
+          <>
+            <h3>By item</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Item</th>
+                  <th>Qty</th>
+                  <th>Avg unit cost</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {project.materialsSummary?.map((row) => (
+                  <tr key={row.itemId}>
+                    <td>{row.sku}</td>
+                    <td>{row.name}</td>
+                    <td>
+                      {qty(row.quantity)} {row.unit}
+                    </td>
+                    <td>{money(row.unitCost)}</td>
+                    <td>{money(row.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        ) : null}
+        <h3>Issue history</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Issue</th>
+              <th>SKU</th>
+              <th>Item</th>
+              <th>Qty</th>
+              <th>Unit cost</th>
+              <th>Amount</th>
+              <th>Journal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(project.materialIssues ?? []).map((row) => (
+              <tr key={row.id}>
+                <td>{row.date.slice(0, 10)}</td>
+                <td>{row.issueNumber}</td>
+                <td>{row.sku}</td>
+                <td>{row.name}</td>
+                <td>
+                  {qty(row.quantity)} {row.unit}
+                </td>
+                <td>{money(row.unitCost)}</td>
+                <td>{money(row.amount)}</td>
+                <td>{row.journalNumber}</td>
+              </tr>
+            ))}
+            {(project.materialIssues?.length ?? 0) === 0 ? (
+              <tr>
+                <td colSpan={8} className="muted">
+                  No warehouse issues yet. Receive stock into inventory, then use
+                  Inventory → Issue to project.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+        <p className="muted">
+          <Link to="/inventory">Open inventory</Link>
         </p>
       </section>
 

@@ -119,6 +119,14 @@ export async function createApp(): Promise<Express> {
     accountsService,
     bankingService,
   );
+  journalService.setArApHooks({
+    onManualPosted: (journal, userId) =>
+      arApService.syncFromManualJournal(journal, userId),
+    assertJournalReversible: (journalId) =>
+      arApService.assertLinkedJournalReversible(journalId),
+    onJournalReversed: (journalId, userId) =>
+      arApService.voidLinkedToJournal(journalId, userId),
+  });
   const payrollService = new PayrollService(
     journalService,
     projectsService,
@@ -130,7 +138,12 @@ export async function createApp(): Promise<Express> {
   const templatesService = new ReportTemplatesService();
 
   if (!config.mongodb.memory) {
-    await seedDemoData({ usersService, bankingService, journalService });
+    await seedDemoData({
+      usersService,
+      bankingService,
+      journalService,
+      arApService,
+    });
   }
 
   const app = express();

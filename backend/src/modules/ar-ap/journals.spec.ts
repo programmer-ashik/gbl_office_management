@@ -45,23 +45,42 @@ describe('ar-ap journal builders', () => {
       amountMinor: 12_000,
       expenseAccountCode: '5240',
       description: 'Consultancy',
+      supplierId: 'sup-1',
     });
     expect(lines).toEqual([
       expect.objectContaining({ accountCode: '5240', debit: 120 }),
-      expect.objectContaining({ accountCode: '2111', credit: 120 }),
+      expect.objectContaining({
+        accountCode: '2111',
+        credit: 120,
+        entityType: 'supplier',
+        entityId: 'sup-1',
+      }),
     ]);
   });
 
-  it('pays a cash supplier bill immediately', () => {
+  it('pays a cash supplier bill through AP then treasury', () => {
     const lines = buildCashBillJournalLines({
       amountMinor: 8_000,
       expenseAccountCode: '5240',
-      treasuryAccountCode: '1111',
+      treasuryAccountCode: '1112',
       description: 'Stationery',
+      supplierId: 'sup-1',
     });
     expect(lines).toEqual([
       expect.objectContaining({ accountCode: '5240', debit: 80 }),
-      expect.objectContaining({ accountCode: '1111', credit: 80 }),
+      expect.objectContaining({
+        accountCode: '2111',
+        credit: 80,
+        entityType: 'supplier',
+        entityId: 'sup-1',
+      }),
+      expect.objectContaining({
+        accountCode: '2111',
+        debit: 80,
+        entityType: 'supplier',
+        entityId: 'sup-1',
+      }),
+      expect.objectContaining({ accountCode: '1112', credit: 80 }),
     ]);
   });
 
@@ -70,9 +89,15 @@ describe('ar-ap journal builders', () => {
       amountMinor: 30_000,
       treasuryAccountCode: '1112',
       description: 'Vendor settlement',
+      supplierId: 'sup-1',
     });
     expect(lines).toEqual([
-      expect.objectContaining({ accountCode: '2111', debit: 300 }),
+      expect.objectContaining({
+        accountCode: '2111',
+        debit: 300,
+        entityType: 'supplier',
+        entityId: 'sup-1',
+      }),
       expect.objectContaining({ accountCode: '1112', credit: 300 }),
     ]);
   });

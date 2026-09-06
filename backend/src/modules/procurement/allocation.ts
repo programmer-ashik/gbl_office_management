@@ -2,6 +2,7 @@ import { PurchaseDestination } from '../../common/enums/procurement.enum';
 import { badRequest } from '../../common/errors/app-error';
 import { fromMinorUnits } from '../../common/utils/money';
 import type { JournalLineDto } from '../accounting/dto/journal.dto';
+import { JournalEntityType } from '../accounting/journal.enums';
 import { SystemAccountCode } from '../accounting/system-account-codes';
 
 export const INVENTORY_CODE = SystemAccountCode.INVENTORY;
@@ -18,12 +19,19 @@ function creditLine(input: {
   amount: number;
   description: string;
   creditAccountCode?: string;
+  supplierId?: string;
 }): JournalLineDto {
   if (input.settlement === 'due') {
     return {
       accountCode: AP_CODE,
       credit: input.amount,
       description: input.description,
+      ...(input.supplierId
+        ? {
+            entityType: JournalEntityType.SUPPLIER,
+            entityId: input.supplierId,
+          }
+        : {}),
     };
   }
   const code = input.creditAccountCode?.trim();
@@ -48,6 +56,7 @@ export function buildReceiptJournalLines(input: {
   description: string;
   settlement?: ReceiptSettlement;
   creditAccountCode?: string;
+  supplierId?: string;
 }): JournalLineDto[] {
   if (input.amountMinor <= 0) {
     throw badRequest('Receipt amount must be greater than zero');
@@ -59,6 +68,7 @@ export function buildReceiptJournalLines(input: {
     amount,
     description: input.description,
     creditAccountCode: input.creditAccountCode,
+    supplierId: input.supplierId,
   });
 
   if (input.destination === PurchaseDestination.DIRECT_TO_SITE) {

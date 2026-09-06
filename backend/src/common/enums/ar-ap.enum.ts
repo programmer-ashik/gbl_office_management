@@ -19,6 +19,7 @@ export enum BillPaymentType {
 export enum BillStatus {
   PAID = 'paid',
   OPEN = 'open',
+  VOID = 'void',
 }
 
 export enum SupplierPaymentStatus {

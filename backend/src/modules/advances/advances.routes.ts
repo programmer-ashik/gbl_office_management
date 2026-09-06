@@ -32,8 +32,26 @@ export function createAdvancesRouter(
     auth,
     requireRoles(...ALL_ROLES),
     asyncHandler(async (req, res) => {
-      const rows = await advancesService.list(req.user!);
-      sendSuccess(res, rows, 'Advances retrieved successfully');
+      const page = req.query.page ? Number(req.query.page) : undefined;
+      const pageSize = req.query.pageSize
+        ? Number(req.query.pageSize)
+        : undefined;
+      const result = await advancesService.list(req.user!, {
+        projectId: req.query.projectId
+          ? String(req.query.projectId)
+          : undefined,
+        employeeId: req.query.employeeId
+          ? String(req.query.employeeId)
+          : undefined,
+        startDate: req.query.startDate
+          ? String(req.query.startDate)
+          : undefined,
+        endDate: req.query.endDate ? String(req.query.endDate) : undefined,
+        status: req.query.status ? String(req.query.status) : undefined,
+        page: Number.isFinite(page) ? page : undefined,
+        pageSize: Number.isFinite(pageSize) ? pageSize : undefined,
+      });
+      sendSuccess(res, result, 'Advances retrieved successfully');
     }),
   );
 
@@ -65,6 +83,52 @@ export function createAdvancesRouter(
     asyncHandler(async (_req, res) => {
       const rows = await advancesService.expenseAccountOptions();
       sendSuccess(res, rows, 'Expense accounts retrieved successfully');
+    }),
+  );
+
+  router.get(
+    '/project-report/pdf',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const projectId = String(req.query.projectId ?? '');
+      const pdf = await advancesService.buildProjectReportPdf(
+        projectId,
+        req.user!,
+        {
+          employeeId: req.query.employeeId
+            ? String(req.query.employeeId)
+            : undefined,
+          startDate: req.query.startDate
+            ? String(req.query.startDate)
+            : undefined,
+          endDate: req.query.endDate ? String(req.query.endDate) : undefined,
+        },
+      );
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${pdf.filename}"`,
+      );
+      res.send(pdf.buffer);
+    }),
+  );
+
+  router.get(
+    '/:id/pdf',
+    auth,
+    requireRoles(...ALL_ROLES),
+    asyncHandler(async (req, res) => {
+      const pdf = await advancesService.buildVoucherPdf(
+        String(req.params.id),
+        req.user!,
+      );
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${pdf.filename}"`,
+      );
+      res.send(pdf.buffer);
     }),
   );
 

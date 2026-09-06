@@ -2,16 +2,23 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { Select } from '../components/ui'
+import { MetricCard } from '../components/MetricCard'
+import { Modal, Select } from '../components/ui'
 import { money } from '../types/accounting'
 import { Role } from '../types/auth'
 import type { Project } from '../types/project'
-import { qty, type StockIssue, type StockRow, type Warehouse } from '../types/procurement'
-import { MetricCard } from '../components/MetricCard'
+import {
+  qty,
+  type Item,
+  type StockIssue,
+  type StockRow,
+  type Warehouse,
+} from '../types/procurement'
 
 export function InventoryPage() {
   const { user } = useAuth()
   const isFinance = user?.role === Role.ADMIN || user?.role === Role.ACCOUNTANT
+  const [items, setItems] = useState<Item[]>([])
   const [stock, setStock] = useState<StockRow[]>([])
   const [issues, setIssues] = useState<StockIssue[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
@@ -21,23 +28,37 @@ export function InventoryPage() {
   const [itemId, setItemId] = useState('')
   const [quantity, setQuantity] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [sku, setSku] = useState('')
+  const [itemName, setItemName] = useState('')
+  const [unit, setUnit] = useState('bag')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [itemModalOpen, setItemModalOpen] = useState(false)
 
   async function load() {
-    const [rows, issueRows, warehouseRows, projectRows] = await Promise.all([
-      api.inventory(),
-      api.stockIssues(),
-      api.warehouses(),
-      api.projects(),
-    ])
-    setStock(rows)
-    setIssues(issueRows)
-    setWarehouses(warehouseRows)
-    setProjects(projectRows)
-    if (!warehouseId && warehouseRows[0]) setWarehouseId(warehouseRows[0].id)
-    if (!projectId && projectRows[0]) setProjectId(projectRows[0].id)
-    if (!itemId && rows[0]) setItemId(rows[0].itemId)
+    const [itemRows, rows, issueRows, warehouseRows, projectRows] =
+      await Promise.all([
+        api.items(),
+        api.inventory(),
+        api.stockIssues(),
+        api.warehouses(),
+        api.projects(),
+      ])
+    const catalog = Array.isArray(itemRows) ? itemRows : []
+    const onHand = Array.isArray(rows) ? rows : []
+    const issueList = Array.isArray(issueRows) ? issueRows : []
+    const warehouseList = Array.isArray(warehouseRows) ? warehouseRows : []
+    const projectList = Array.isArray(projectRows) ? projectRows : []
+
+    setItems(catalog)
+    setStock(onHand)
+    setIssues(issueList)
+    setWarehouses(warehouseList)
+    setProjects(projectList)
+    if (!warehouseId && warehouseList[0]) setWarehouseId(warehouseList[0].id)
+    if (!projectId && projectList[0]) setProjectId(projectList[0].id)
+    if (!itemId && onHand[0]) setItemId(onHand[0].itemId)
+    else if (!itemId && catalog[0]) setItemId(catalog[0].id)
   }
 
   useEffect(() => {
@@ -45,6 +66,26 @@ export function InventoryPage() {
       setError(err instanceof Error ? err.message : 'Unable to load inventory')
     })
   }, [])
+
+  async function onCreateItem(event: FormEvent) {
+    event.preventDefault()
+    if (!isFinance) return
+    setSaving(true)
+    setError(null)
+    try {
+      const created = await api.createItem({ sku, name: itemName, unit })
+      setSku('')
+      setItemName('')
+      setUnit('bag')
+      setItemModalOpen(false)
+      setItemId(created.id)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create item')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function onIssue(event: FormEvent) {
     event.preventDefault()
@@ -68,6 +109,16 @@ export function InventoryPage() {
   }
 
   const totalValue = stock.reduce((sum, row) => sum + row.value, 0)
+  const issueItemOptions =
+    stock.length > 0
+      ? stock.map((row) => ({
+          value: row.itemId,
+          label: `${row.sku} · ${row.name} (${qty(row.quantity)} ${row.unit})`,
+        }))
+      : items.map((row) => ({
+          value: row.id,
+          label: `${row.sku} · ${row.name} (${row.unit})`,
+        }))
 
   return (
     <>
@@ -75,9 +126,16 @@ export function InventoryPage() {
         <div>
           <h1>Central warehouse</h1>
         </div>
-        <Link to="/procurement" className="ghost-link">
-          Procurement
-        </Link>
+        <div className="form-actions">
+          <Link to="/procurement" className="ghost-link">
+            Procurement
+          </Link>
+          {isFinance ? (
+            <button type="button" onClick={() => setItemModalOpen(true)}>
+              Add item
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <section className="grid metric-card-grid">
@@ -93,6 +151,88 @@ export function InventoryPage() {
           value={stock.length}
           meta="FIFO lots from warehouse receipts"
         />
+        <MetricCard
+          variant="amber"
+          title="Catalog items"
+          value={items.length}
+          meta="Active SKUs available for POs"
+        />
+      </section>
+
+      {isFinance ? (
+        <Modal
+          open={itemModalOpen}
+          title="New inventory item"
+          description="Adds a catalog SKU. Stock quantity appears after a warehouse PO is received."
+          onClose={() => setItemModalOpen(false)}
+        >
+          <form className="stack-form" onSubmit={(event) => void onCreateItem(event)}>
+            <label>
+              SKU
+              <input value={sku} onChange={(e) => setSku(e.target.value)} required />
+            </label>
+            <label>
+              Name
+              <input
+                value={itemName}
+                onChange={(e) => setItemName(e.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Unit
+              <input value={unit} onChange={(e) => setUnit(e.target.value)} required />
+            </label>
+            <div className="form-actions">
+              <button type="submit" disabled={saving}>
+                {saving ? 'Saving…' : 'Add item'}
+              </button>
+            </div>
+            {error ? <p className="form-error">{error}</p> : null}
+          </form>
+        </Modal>
+      ) : null}
+
+      <section className="table-card">
+        <h2>Catalog items</h2>
+        <p className="muted">
+          Items added here are available on purchase orders. On-hand quantity stays
+          at zero until goods are received into a warehouse.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Item</th>
+              <th>Unit</th>
+              <th>On hand</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((row) => {
+              const onHand = stock
+                .filter((s) => s.itemId === row.id)
+                .reduce((sum, s) => sum + s.quantity, 0)
+              return (
+                <tr key={row.id}>
+                  <td>{row.sku}</td>
+                  <td>{row.name}</td>
+                  <td>{row.unit}</td>
+                  <td>
+                    {onHand > 0 ? `${qty(onHand)} ${row.unit}` : '—'}
+                  </td>
+                </tr>
+              )
+            })}
+            {items.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="muted">
+                  No catalog items yet. Use Add item to create one.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
       </section>
 
       {isFinance ? (
@@ -146,10 +286,7 @@ export function InventoryPage() {
                 <Select
                   value={itemId}
                   onChange={setItemId}
-                  options={stock.map((row) => ({
-                    value: row.itemId,
-                    label: `${row.sku} · ${row.name} (${qty(row.quantity)} ${row.unit})`,
-                  }))}
+                  options={issueItemOptions}
                   placeholder="Select item"
                   required
                 />
@@ -219,27 +356,69 @@ export function InventoryPage() {
           <thead>
             <tr>
               <th>Number</th>
+              <th>Date</th>
               <th>Project</th>
+              <th>Item</th>
+              <th>Qty</th>
               <th>Amount</th>
               <th>Journal</th>
             </tr>
           </thead>
           <tbody>
-            {issues.map((row) => (
-              <tr key={row.id}>
-                <td>{row.issueNumber}</td>
-                <td>
-                  {row.projectCode} · {row.projectName}
+            {issues.flatMap((row) => {
+              const lines =
+                row.lines?.length > 0
+                  ? row.lines
+                  : [
+                      {
+                        sku: '—',
+                        name: '—',
+                        unit: '',
+                        quantity: row.quantity ?? 0,
+                        amount: row.amount,
+                      },
+                    ]
+              return lines.map((line, index) => (
+                <tr key={`${row.id}-${index}`}>
+                  <td>{index === 0 ? row.issueNumber : ''}</td>
+                  <td>{index === 0 ? row.date.slice(0, 10) : ''}</td>
+                  <td>
+                  {index === 0
+                    ? row.projectId
+                      ? (
+                          <Link to={`/projects/${row.projectId}`}>
+                            {row.projectCode} · {row.projectName}
+                          </Link>
+                        )
+                      : (
+                          `${row.projectCode} · ${row.projectName}`
+                        )
+                    : ''}
                 </td>
-                <td>{money(row.amount)}</td>
-                <td>{row.journalNumber}</td>
+                  <td>
+                    {line.sku} · {line.name}
+                  </td>
+                  <td>
+                    {qty(line.quantity)}
+                    {line.unit ? ` ${line.unit}` : ''}
+                  </td>
+                  <td>{money(line.amount)}</td>
+                  <td>{index === 0 ? row.journalNumber : ''}</td>
+                </tr>
+              ))
+            })}
+            {issues.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="muted">
+                  No stock issues yet.
+                </td>
               </tr>
-            ))}
+            ) : null}
           </tbody>
         </table>
       </section>
 
-      {error ? <p className="form-error">{error}</p> : null}
+      {!itemModalOpen && error ? <p className="form-error">{error}</p> : null}
     </>
   )
 }

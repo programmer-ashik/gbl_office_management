@@ -8,6 +8,8 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 import { fromMinorUnits, toMinorUnits } from '../../common/utils/money';
 import { LedgerLineModel } from '../accounting/ledger.model';
 import { CounterModel } from '../accounting/counter.model';
+import { fromMilliQty } from '../../common/utils/quantity';
+import { StockIssueModel } from '../procurement/stock-issue.model';
 import { UserModel } from '../users/user.model';
 import type {
   CreateProjectDto,
@@ -29,6 +31,29 @@ export type PublicClient = {
   address: string | null;
 };
 
+export type PublicProjectMaterialIssue = {
+  id: string;
+  issueNumber: string;
+  date: string;
+  sku: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitCost: number;
+  amount: number;
+  journalNumber: string;
+};
+
+export type PublicProjectMaterialSummary = {
+  itemId: string;
+  sku: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitCost: number;
+  amount: number;
+};
+
 export type PublicProject = {
   id: string;
   code: string;
@@ -43,12 +68,18 @@ export type PublicProject = {
   description: string | null;
   createdAt: string | null;
   financials: ProjectFinancials;
+  materialIssues: PublicProjectMaterialIssue[];
+  materialsSummary: PublicProjectMaterialSummary[];
 };
 
 export class ProjectsService {
   toPublic(
     project: ProjectDocument,
     financials?: ProjectFinancials,
+    materials?: {
+      materialIssues: PublicProjectMaterialIssue[];
+      materialsSummary: PublicProjectMaterialSummary[];
+    },
   ): PublicProject {
     return {
       id: project._id.toString(),
@@ -74,6 +105,8 @@ export class ProjectsService {
       financials:
         financials ??
         emptyFinancials(project.contractValueMinor, project.totalBudgetMinor),
+      materialIssues: materials?.materialIssues ?? [],
+      materialsSummary: materials?.materialsSummary ?? [],
     };
   }
 
@@ -127,11 +160,15 @@ export class ProjectsService {
     if (actor) {
       this.assertCanAccessProject(actor, project);
     }
-    const financialsById = await this.aggregateFinancials([project._id]);
+    const [financialsById, materials] = await Promise.all([
+      this.aggregateFinancials([project._id]),
+      this.aggregateMaterialIssues(project._id),
+    ]);
     return this.toPublic(
       project,
       financialsById.get(project._id.toString()) ??
         emptyFinancials(project.contractValueMinor, project.totalBudgetMinor),
+      materials,
     );
   }
 
@@ -352,6 +389,62 @@ export class ProjectsService {
     );
     const seq = counter?.seq ?? 1;
     return `PRJ-${year}-${String(seq).padStart(5, '0')}`;
+  }
+
+  private async aggregateMaterialIssues(projectId: Types.ObjectId): Promise<{
+    materialIssues: PublicProjectMaterialIssue[];
+    materialsSummary: PublicProjectMaterialSummary[];
+  }> {
+    const rows = await StockIssueModel.find({ projectId })
+      .sort({ date: 1, issueNumber: 1 })
+      .exec();
+
+    const materialIssues: PublicProjectMaterialIssue[] = rows.flatMap((row) =>
+      row.lines.map((line) => {
+        const quantity = fromMilliQty(line.quantityMilli);
+        const amount = fromMinorUnits(line.amountMinor);
+        return {
+          id: `${row._id.toString()}:${line.itemId.toString()}`,
+          issueNumber: row.issueNumber,
+          date: row.date.toISOString(),
+          sku: line.sku,
+          name: line.name,
+          unit: line.unit,
+          quantity,
+          unitCost:
+            quantity > 0 ? Number((amount / quantity).toFixed(4)) : 0,
+          amount,
+          journalNumber: row.journalNumber,
+        };
+      }),
+    );
+
+    const byItem = new Map<string, PublicProjectMaterialSummary>();
+    for (const entry of materialIssues) {
+      const key = `${entry.sku}::${entry.name}::${entry.unit}`;
+      const current = byItem.get(key) ?? {
+        itemId: key,
+        sku: entry.sku,
+        name: entry.name,
+        unit: entry.unit,
+        quantity: 0,
+        unitCost: 0,
+        amount: 0,
+      };
+      current.quantity += entry.quantity;
+      current.amount += entry.amount;
+      byItem.set(key, current);
+    }
+
+    const materialsSummary = [...byItem.values()].map((row) => ({
+      ...row,
+      unitCost:
+        row.quantity > 0
+          ? Number((row.amount / row.quantity).toFixed(4))
+          : 0,
+    }));
+
+    return { materialIssues, materialsSummary };
   }
 
   private async aggregateFinancials(

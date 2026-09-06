@@ -29,7 +29,7 @@ export function createSuppliersRouter(
   procurementService: ProcurementService,
   authService: AuthService,
   usersService: UsersService,
-  arApService?: ArApService,
+  arApService: ArApService,
 ) {
   const router = Router();
   const auth = requireAuth(authService, usersService);
@@ -60,9 +60,8 @@ export function createSuppliersRouter(
     auth,
     requireRoles(...FINANCE),
     asyncHandler(async (req, res) => {
-      const row = arApService
-        ? await arApService.vendorLedger(String(req.params.id), req.user!)
-        : await procurementService.vendorLedger(String(req.params.id), req.user!);
+      // Always use AR/AP ledger so Add bill / payments appear (not GRN-only).
+      const row = await arApService.vendorLedger(String(req.params.id), req.user!);
       sendSuccess(res, row, 'Vendor ledger retrieved successfully');
     }),
   );

@@ -18,6 +18,10 @@ import type { ProjectsService } from '../projects/projects.service';
 import type { UsersService } from '../users/users.service';
 import { AdvanceModel, type AdvanceDocument } from './advance.model';
 import {
+  buildAdvanceVoucherPdf,
+  buildProjectAdvanceReportPdf,
+} from './advance-pdf';
+import {
   ADVANCE_ASSET_CODE,
   EMPLOYEE_PAYABLE_CODE,
   assertExpenseAccount,
@@ -211,25 +215,190 @@ export class AdvancesService {
     return this.toPublic(created);
   }
 
-  async list(actor: AuthenticatedUser): Promise<PublicAdvance[]> {
-    let filter: Record<string, unknown> = {};
+  async list(
+    actor: AuthenticatedUser,
+    filters?: {
+      projectId?: string
+      employeeId?: string
+      startDate?: string
+      endDate?: string
+      status?: string
+      page?: number
+      pageSize?: number
+    },
+  ): Promise<{
+    items: PublicAdvance[]
+    total: number
+    page: number
+    pageSize: number
+  }> {
+    const and: Record<string, unknown>[] = []
+
     if (this.isFinance(actor)) {
-      filter = {};
+      // no ownership restriction
     } else if (actor.role === Role.PROJECT_MANAGER) {
-      const projectIds = await this.projectsService.managedProjectIds(actor);
-      filter = {
+      const projectIds = await this.projectsService.managedProjectIds(actor)
+      and.push({
         $or: [
           { employeeId: new Types.ObjectId(actor.userId) },
           { projectId: { $in: projectIds } },
         ],
-      };
+      })
     } else {
-      filter = { employeeId: new Types.ObjectId(actor.userId) };
+      and.push({ employeeId: new Types.ObjectId(actor.userId) })
     }
-    const rows = await AdvanceModel.find(filter)
-      .sort({ requestedAt: -1, advanceNumber: -1 })
-      .exec();
-    return rows.map((row) => this.toPublic(row));
+
+    if (filters?.projectId && Types.ObjectId.isValid(filters.projectId)) {
+      and.push({ projectId: new Types.ObjectId(filters.projectId) })
+    }
+    if (filters?.employeeId && Types.ObjectId.isValid(filters.employeeId)) {
+      and.push({ employeeId: new Types.ObjectId(filters.employeeId) })
+    }
+    if (filters?.status) {
+      and.push({ status: filters.status })
+    }
+    if (filters?.startDate || filters?.endDate) {
+      const range: Record<string, Date> = {}
+      if (filters.startDate) {
+        const start = new Date(filters.startDate)
+        if (!Number.isNaN(start.getTime())) range.$gte = start
+      }
+      if (filters.endDate) {
+        const end = new Date(filters.endDate)
+        if (!Number.isNaN(end.getTime())) {
+          end.setUTCHours(23, 59, 59, 999)
+          range.$lte = end
+        }
+      }
+      if (Object.keys(range).length > 0) {
+        and.push({ requestedAt: range })
+      }
+    }
+
+    const query = and.length > 0 ? { $and: and } : {}
+    const page = Math.max(1, filters?.page ?? 1)
+    const pageSize = Math.min(100, Math.max(1, filters?.pageSize ?? 50))
+    const skip = (page - 1) * pageSize
+
+    const [total, rows] = await Promise.all([
+      AdvanceModel.countDocuments(query).exec(),
+      AdvanceModel.find(query)
+        .sort({ requestedAt: -1, advanceNumber: -1 })
+        .skip(skip)
+        .limit(pageSize)
+        .exec(),
+    ])
+
+    return {
+      items: rows.map((row) => this.toPublic(row)),
+      total,
+      page,
+      pageSize,
+    }
+  }
+
+  async listDocumentsForProject(
+    projectId: string,
+    actor: AuthenticatedUser,
+    filters?: { employeeId?: string; startDate?: string; endDate?: string },
+  ): Promise<AdvanceDocument[]> {
+    const listed = await this.list(actor, {
+      projectId,
+      employeeId: filters?.employeeId,
+      startDate: filters?.startDate,
+      endDate: filters?.endDate,
+      page: 1,
+      pageSize: 100,
+    })
+    if (listed.total === 0) return []
+    // Load all matching pages for the PDF (cap 500)
+    const allIds: string[] = [...listed.items.map((row) => row.id)]
+    const pages = Math.min(5, Math.ceil(listed.total / listed.pageSize))
+    for (let page = 2; page <= pages; page += 1) {
+      const next = await this.list(actor, {
+        projectId,
+        employeeId: filters?.employeeId,
+        startDate: filters?.startDate,
+        endDate: filters?.endDate,
+        page,
+        pageSize: listed.pageSize,
+      })
+      allIds.push(...next.items.map((row) => row.id))
+    }
+    return AdvanceModel.find({
+      _id: { $in: allIds.map((id) => new Types.ObjectId(id)) },
+    })
+      .sort({ requestedAt: -1 })
+      .exec()
+  }
+
+  async buildVoucherPdf(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<{ filename: string; buffer: Buffer }> {
+    const row = await this.findVisibleOrFail(id, actor)
+    const buffer = await buildAdvanceVoucherPdf(row)
+    return {
+      filename: `${row.advanceNumber}-voucher.pdf`,
+      buffer,
+    }
+  }
+
+  async buildProjectReportPdf(
+    projectId: string,
+    actor: AuthenticatedUser,
+    filters?: { employeeId?: string; startDate?: string; endDate?: string },
+  ): Promise<{ filename: string; buffer: Buffer }> {
+    if (!Types.ObjectId.isValid(projectId)) {
+      throw notFound('Project not found')
+    }
+    const project = await this.projectsService.findByIdOrFail(projectId)
+    if (actor.role === Role.PROJECT_MANAGER) {
+      this.projectsService.assertCanAccessProject(actor, project)
+    } else if (!this.isFinance(actor) && actor.role !== Role.ADMIN) {
+      // employees can only export projects they have advances on — still require finance for summary
+      this.assertFinance(actor)
+    }
+
+    const rows = await this.listDocumentsForProject(projectId, actor, filters)
+    const buffer = await buildProjectAdvanceReportPdf({
+      projectCode: project.code,
+      projectName: project.name,
+      rows,
+    })
+    return {
+      filename: `${project.code}-advance-report.pdf`,
+      buffer,
+    }
+  }
+
+  async getEmployeeAdvanceBalance(
+    employeeId: string,
+    actor: AuthenticatedUser,
+  ): Promise<{ employeeId: string; unsettledAdvanceBalance: number }> {
+    this.assertCanViewEmployeeLedger(employeeId, actor)
+    if (!Types.ObjectId.isValid(employeeId)) {
+      throw notFound('Employee not found')
+    }
+    const rows = await LedgerLineModel.aggregate<{ balance: number }>([
+      {
+        $match: {
+          entityType: JournalEntityType.EMPLOYEE,
+          entityId: new Types.ObjectId(employeeId),
+          accountCode: ADVANCE_ASSET_CODE,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          balance: { $sum: { $subtract: ['$debitMinor', '$creditMinor'] } },
+        },
+      },
+    ])
+    return {
+      employeeId,
+      unsettledAdvanceBalance: fromMinorUnits(rows[0]?.balance ?? 0),
+    }
   }
 
   async getById(id: string, actor: AuthenticatedUser): Promise<PublicAdvance> {
