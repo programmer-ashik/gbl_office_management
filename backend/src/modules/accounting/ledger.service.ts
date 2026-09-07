@@ -50,19 +50,36 @@ export type TrialBalance = {
 export class LedgerService {
   async listForAccount(
     accountCode: string,
-    asOf?: Date,
-    entity?: { entityType?: string; entityId?: string },
+    options: {
+      asOf?: Date;
+      fromDate?: Date;
+      toDate?: Date;
+      entity?: { entityType?: string; entityId?: string };
+    } = {},
   ): Promise<{
     account: AccountBalance;
+    openingBalance: number;
+    closingBalance: number;
+    periodDebit: number;
+    periodCredit: number;
+    fromDate: string | null;
+    toDate: string | null;
     entries: Array<
       LedgerEntry & {
         entityType: string | null;
         entityId: string | null;
         entityName: string | null;
         projectId: string | null;
+        runningBalance: number;
       }
     >;
   }> {
+    const entity = options.entity;
+    let fromDate = options.fromDate;
+    let toDate = options.toDate ?? options.asOf;
+    if (fromDate && Number.isNaN(fromDate.getTime())) fromDate = undefined;
+    if (toDate && Number.isNaN(toDate.getTime())) toDate = undefined;
+
     const account = await AccountModel.findOne({
       code: accountCode.trim().toUpperCase(),
     }).exec();
@@ -74,8 +91,10 @@ export class LedgerService {
       $or: [{ accountId: account._id }, { accountCode: account.code }],
     };
     const andClauses: Record<string, unknown>[] = [accountMatch];
-    if (asOf) {
-      andClauses.push({ date: { $lte: asOf } });
+    if (toDate) {
+      const end = new Date(toDate);
+      end.setUTCHours(23, 59, 59, 999);
+      andClauses.push({ date: { $lte: end } });
     }
 
     let supplierMetaByJournal = new Map<
@@ -288,8 +307,83 @@ export class LedgerService {
       );
     }
 
-    const debitMinor = lines.reduce((sum, line) => sum + line.debitMinor, 0);
-    const creditMinor = lines.reduce((sum, line) => sum + line.creditMinor, 0);
+    const rangeStart = fromDate
+      ? (() => {
+          const d = new Date(fromDate);
+          d.setUTCHours(0, 0, 0, 0);
+          return d;
+        })()
+      : null;
+
+    const openingLines = rangeStart
+      ? lines.filter((line) => line.date.getTime() < rangeStart.getTime())
+      : [];
+    const periodLines = rangeStart
+      ? lines.filter((line) => line.date.getTime() >= rangeStart.getTime())
+      : lines;
+
+    const openingDebitMinor = openingLines.reduce(
+      (sum, line) => sum + line.debitMinor,
+      0,
+    );
+    const openingCreditMinor = openingLines.reduce(
+      (sum, line) => sum + line.creditMinor,
+      0,
+    );
+    const periodDebitMinor = periodLines.reduce(
+      (sum, line) => sum + line.debitMinor,
+      0,
+    );
+    const periodCreditMinor = periodLines.reduce(
+      (sum, line) => sum + line.creditMinor,
+      0,
+    );
+    const allDebitMinor = openingDebitMinor + periodDebitMinor;
+    const allCreditMinor = openingCreditMinor + periodCreditMinor;
+
+    const openingBalance = fromMinorUnits(
+      netBalanceMinor(account.type, openingDebitMinor, openingCreditMinor),
+    );
+    const closingBalance = fromMinorUnits(
+      netBalanceMinor(account.type, allDebitMinor, allCreditMinor),
+    );
+
+    const creditNormal = normalBalanceOf(account.type) === 'credit';
+    let running = openingBalance;
+    const chronoEntries = periodLines.map((line) => {
+      const journal = journalById.get(line.journalEntryId.toString());
+      const supplierMeta = supplierMetaByJournal.get(
+        line.journalEntryId.toString(),
+      );
+      const memo = journal?.memo || line.memo;
+      const description =
+        line.description?.trim() ||
+        (line.memo !== memo ? line.memo : undefined) ||
+        memo;
+      const debit = fromMinorUnits(line.debitMinor);
+      const credit = fromMinorUnits(line.creditMinor);
+      running += creditNormal ? credit - debit : debit - credit;
+      return {
+        id: line._id.toString(),
+        date: line.date.toISOString(),
+        entryNumber: line.journalEntryNumber,
+        journalEntryId: line.journalEntryId.toString(),
+        memo,
+        description,
+        reference: line.reference ?? journal?.reference ?? null,
+        debit,
+        credit,
+        entityType:
+          line.entityType ??
+          (supplierMeta ? JournalEntityType.SUPPLIER : null),
+        entityId: line.entityId
+          ? line.entityId.toString()
+          : (supplierMeta?.entityId ?? null),
+        entityName: line.entityName ?? supplierMeta?.entityName ?? null,
+        projectId: line.projectId ? line.projectId.toString() : null,
+        runningBalance: Number(running.toFixed(2)),
+      };
+    });
 
     return {
       account: {
@@ -298,42 +392,18 @@ export class LedgerService {
         accountName: account.name,
         type: account.type,
         normalBalance: account.normalBalance,
-        debitTotal: fromMinorUnits(debitMinor),
-        creditTotal: fromMinorUnits(creditMinor),
-        balance: fromMinorUnits(
-          netBalanceMinor(account.type, debitMinor, creditMinor),
-        ),
+        debitTotal: fromMinorUnits(allDebitMinor),
+        creditTotal: fromMinorUnits(allCreditMinor),
+        balance: closingBalance,
       },
-      entries: lines.map((line) => {
-        const journal = journalById.get(line.journalEntryId.toString());
-        const supplierMeta = supplierMetaByJournal.get(
-          line.journalEntryId.toString(),
-        );
-        const memo = journal?.memo || line.memo;
-        const description =
-          line.description?.trim() ||
-          (line.memo !== memo ? line.memo : undefined) ||
-          memo;
-        return {
-          id: line._id.toString(),
-          date: line.date.toISOString(),
-          entryNumber: line.journalEntryNumber,
-          journalEntryId: line.journalEntryId.toString(),
-          memo,
-          description,
-          reference: line.reference ?? journal?.reference ?? null,
-          debit: fromMinorUnits(line.debitMinor),
-          credit: fromMinorUnits(line.creditMinor),
-          entityType:
-            line.entityType ??
-            (supplierMeta ? JournalEntityType.SUPPLIER : null),
-          entityId: line.entityId
-            ? line.entityId.toString()
-            : (supplierMeta?.entityId ?? null),
-          entityName: line.entityName ?? supplierMeta?.entityName ?? null,
-          projectId: line.projectId ? line.projectId.toString() : null,
-        };
-      }),
+      openingBalance,
+      closingBalance,
+      periodDebit: fromMinorUnits(periodDebitMinor),
+      periodCredit: fromMinorUnits(periodCreditMinor),
+      fromDate: rangeStart ? rangeStart.toISOString().slice(0, 10) : null,
+      toDate: toDate ? new Date(toDate).toISOString().slice(0, 10) : null,
+      // Newest first so page 1 shows the latest activity.
+      entries: [...chronoEntries].reverse(),
     };
   }
 

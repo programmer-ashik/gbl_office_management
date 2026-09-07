@@ -187,6 +187,77 @@ export class AccountsService {
     return this.toPublic(account);
   }
 
+  /**
+   * Suggest next free account code under a parent (or within the type series).
+   * Does not create an account — safe for UI preview.
+   */
+  async suggestNextCode(
+    type: AccountType,
+    parentCode?: string,
+  ): Promise<{ code: string }> {
+    const parent = parentCode?.trim().toUpperCase() || undefined;
+    if (parent) {
+      const parentAccount = await this.findByCodeOrFail(parent);
+      if (parentAccount.type !== type) {
+        throw badRequest('Parent account must be the same type');
+      }
+      if (parentAccount.isPostable) {
+        throw badRequest('Parent must be a header (non-postable) account');
+      }
+    }
+
+    const siblings = await AccountModel.find(
+      parent
+        ? { parentCode: parent }
+        : {
+            type,
+            $or: [{ parentCode: null }, { parentCode: { $exists: false } }, { parentCode: '' }],
+          },
+    )
+      .select('code')
+      .exec();
+
+    const used = new Set(
+      (await AccountModel.find().select('code').exec()).map((row) => row.code),
+    );
+
+    const siblingNums = siblings
+      .map((row) => Number.parseInt(row.code, 10))
+      .filter((n) => Number.isFinite(n));
+
+    let candidate: number;
+    if (parent) {
+      const parentNum = Number.parseInt(parent, 10);
+      candidate = siblingNums.length
+        ? Math.max(...siblingNums) + 1
+        : Number.isFinite(parentNum)
+          ? parentNum + 1
+          : 1000;
+    } else {
+      const seriesStart =
+        type === AccountType.ASSET
+          ? 1000
+          : type === AccountType.LIABILITY
+            ? 2000
+            : type === AccountType.EQUITY
+              ? 3000
+              : type === AccountType.REVENUE
+                ? 4000
+                : 5000;
+      candidate = siblingNums.length
+        ? Math.max(...siblingNums) + 1
+        : seriesStart;
+    }
+
+    for (let i = 0; i < 500; i += 1) {
+      const code = String(candidate + i);
+      if (!used.has(code) && /^[A-Z0-9-]{3,12}$/i.test(code)) {
+        return { code };
+      }
+    }
+    throw badRequest('Unable to suggest a free account code');
+  }
+
   async list(type?: AccountType): Promise<PublicAccount[]> {
     const filter = type ? { type } : {};
     const accounts = await AccountModel.find(filter).sort({ code: 1 }).exec();

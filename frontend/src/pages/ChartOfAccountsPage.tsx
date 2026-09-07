@@ -1,30 +1,71 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { ActionMenu, Modal, Select } from '../components/ui'
 import {
   ACCOUNT_TYPE_LABEL,
   AccountType,
+  money,
   type Account,
+  type Customer,
 } from '../types/accounting'
+import type { PublicUser } from '../types/auth'
+import type { Project } from '../types/project'
+import type { Supplier } from '../types/procurement'
 
-function depthOf(account: Account, byCode: Map<string, Account>): number {
-  let depth = 0
-  let parent = account.parentCode
-  const seen = new Set<string>()
-  while (parent) {
-    if (seen.has(parent)) break
-    seen.add(parent)
-    depth += 1
-    parent = byCode.get(parent)?.parentCode ?? null
+const PARTY_CONTROL_ACCOUNTS: Record<
+  string,
+  { entityType: 'customer' | 'supplier' | 'employee'; label: string }
+> = {
+  '1121': { entityType: 'customer', label: 'Customers' },
+  '2111': { entityType: 'supplier', label: 'Suppliers' },
+  '2113': { entityType: 'supplier', label: 'Subcontractors' },
+  '1131': { entityType: 'employee', label: 'Employees' },
+  '2121': { entityType: 'employee', label: 'Employees' },
+}
+
+type TreeRow =
+  | {
+      kind: 'account'
+      account: Account
+      depth: number
+      hasChildren: boolean
+    }
+  | {
+      kind: 'party'
+      id: string
+      parentCode: string
+      depth: number
+      entityType: 'customer' | 'supplier' | 'employee'
+      entityId: string
+      name: string
+      meta?: string
+    }
+
+function buildChildrenMap(accounts: Account[]): Map<string | null, Account[]> {
+  const map = new Map<string | null, Account[]>()
+  for (const account of accounts) {
+    const key = account.parentCode || null
+    const list = map.get(key) ?? []
+    list.push(account)
+    map.set(key, list)
   }
-  return depth
+  for (const [, list] of map) {
+    list.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }))
+  }
+  return map
 }
 
 export function ChartOfAccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [employees, setEmployees] = useState<PublicUser[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [type, setType] = useState<Account['type']>(AccountType.ASSET)
@@ -39,10 +80,29 @@ export function ChartOfAccountsPage() {
   const [editDescription, setEditDescription] = useState('')
   const [editActive, setEditActive] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [partyModal, setPartyModal] = useState<{
+    accountCode: string
+    entityType: 'customer' | 'supplier' | 'employee'
+    entityId: string
+    name: string
+  } | null>(null)
+  const [partyAmount, setPartyAmount] = useState('')
+  const [partyProjectId, setPartyProjectId] = useState('')
 
   async function load() {
-    const rows = await api.accounts()
+    const [rows, customerRows, supplierRows, employeeRows, projectRows] =
+      await Promise.all([
+        api.accounts(),
+        api.customers(true).catch(() => [] as Customer[]),
+        api.suppliers().catch(() => [] as Supplier[]),
+        api.employees().catch(() => [] as PublicUser[]),
+        api.projects().catch(() => [] as Project[]),
+      ])
     setAccounts(rows)
+    setCustomers(customerRows)
+    setSuppliers(supplierRows)
+    setEmployees(employeeRows)
+    setProjects(projectRows)
   }
 
   useEffect(() => {
@@ -51,26 +111,104 @@ export function ChartOfAccountsPage() {
     })
   }, [])
 
-  const byCode = useMemo(() => {
-    const map = new Map<string, Account>()
-    for (const account of accounts) map.set(account.code, account)
-    return map
-  }, [accounts])
+  const childrenMap = useMemo(() => buildChildrenMap(accounts), [accounts])
 
-  const visible = useMemo(() => {
+  const matchingCodes = useMemo(() => {
     const needle = search.trim().toLowerCase()
-    return accounts
-      .filter((account) => {
-        if (typeFilter && account.type !== typeFilter) return false
-        if (!needle) return true
-        return (
-          account.code.toLowerCase().includes(needle) ||
-          account.name.toLowerCase().includes(needle) ||
-          (account.parentCode ?? '').toLowerCase().includes(needle)
-        )
-      })
-      .sort((a, b) => a.code.localeCompare(b.code))
+    if (!needle && !typeFilter) return null
+    const codes = new Set<string>()
+    for (const account of accounts) {
+      if (typeFilter && account.type !== typeFilter) continue
+      const hit =
+        !needle ||
+        account.code.toLowerCase().includes(needle) ||
+        account.name.toLowerCase().includes(needle) ||
+        (account.parentCode ?? '').toLowerCase().includes(needle)
+      if (hit) codes.add(account.code)
+    }
+    // include ancestors so tree path stays visible
+    for (const code of [...codes]) {
+      let parent = accounts.find((row) => row.code === code)?.parentCode
+      while (parent) {
+        codes.add(parent)
+        parent = accounts.find((row) => row.code === parent)?.parentCode ?? null
+      }
+    }
+    return codes
   }, [accounts, search, typeFilter])
+
+  const treeRows = useMemo(() => {
+    const rows: TreeRow[] = []
+    const walk = (parent: string | null, depth: number) => {
+      const children = childrenMap.get(parent) ?? []
+      for (const account of children) {
+        if (matchingCodes && !matchingCodes.has(account.code)) continue
+        const accountChildren = childrenMap.get(account.code) ?? []
+        const partyMeta = PARTY_CONTROL_ACCOUNTS[account.code]
+        const parties =
+          partyMeta?.entityType === 'customer'
+            ? customers.map((row) => ({
+                id: row.id,
+                name: row.name,
+                meta: row.email ?? undefined,
+              }))
+            : partyMeta?.entityType === 'supplier'
+              ? suppliers.map((row) => ({
+                  id: row.id,
+                  name: row.name,
+                  meta: row.supplierNumber,
+                }))
+              : partyMeta?.entityType === 'employee'
+                ? employees.map((row) => ({
+                    id: row.id,
+                    name: `${row.firstName} ${row.lastName}`.trim(),
+                    meta: row.email,
+                  }))
+                : []
+        const hasChildren = accountChildren.length > 0 || parties.length > 0
+        rows.push({
+          kind: 'account',
+          account,
+          depth,
+          hasChildren,
+        })
+        const isCollapsed = collapsed.has(account.code) && !matchingCodes
+        if (isCollapsed) continue
+        walk(account.code, depth + 1)
+        if (partyMeta && (!collapsed.has(account.code) || matchingCodes)) {
+          for (const party of parties) {
+            if (
+              search.trim() &&
+              !party.name.toLowerCase().includes(search.trim().toLowerCase()) &&
+              !account.name.toLowerCase().includes(search.trim().toLowerCase())
+            ) {
+              continue
+            }
+            rows.push({
+              kind: 'party',
+              id: `${account.code}:${party.id}`,
+              parentCode: account.code,
+              depth: depth + 1,
+              entityType: partyMeta.entityType,
+              entityId: party.id,
+              name: party.name,
+              meta: party.meta,
+            })
+          }
+        }
+      }
+    }
+    walk(null, 0)
+    return rows
+  }, [
+    childrenMap,
+    collapsed,
+    customers,
+    employees,
+    matchingCodes,
+    search,
+    suppliers,
+  ])
 
   const parentOptions = useMemo(() => {
     return [
@@ -84,9 +222,23 @@ export function ChartOfAccountsPage() {
     ]
   }, [accounts, type])
 
+  async function refreshSuggestedCode(
+    nextType: Account['type'],
+    nextParent: string,
+  ) {
+    try {
+      const suggested = await api.nextAccountCode(
+        nextType,
+        nextParent || undefined,
+      )
+      setCode(suggested.code)
+    } catch {
+      // keep current code if suggestion fails
+    }
+  }
+
   function openCreate() {
     setEditing(null)
-    setCode('')
     setName('')
     setDescription('')
     setParentCode('')
@@ -95,6 +247,7 @@ export function ChartOfAccountsPage() {
     setError(null)
     setMessage(null)
     setModalOpen(true)
+    void refreshSuggestedCode(AccountType.ASSET, '')
   }
 
   function openEdit(account: Account) {
@@ -103,6 +256,26 @@ export function ChartOfAccountsPage() {
     setEditDescription(account.description ?? '')
     setEditActive(account.isActive)
     setModalOpen(true)
+  }
+
+  function toggleCollapse(code: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(code)) next.delete(code)
+      else next.add(code)
+      return next
+    })
+  }
+
+  function expandAll() {
+    setCollapsed(new Set())
+  }
+
+  function collapseAll() {
+    const headers = accounts
+      .filter((row) => !row.isPostable || PARTY_CONTROL_ACCOUNTS[row.code])
+      .map((row) => row.code)
+    setCollapsed(new Set(headers))
   }
 
   async function onCreate(event: FormEvent) {
@@ -124,7 +297,6 @@ export function ChartOfAccountsPage() {
         parentCode: parentCode || undefined,
         openingBalance: amount,
       })
-      setCode('')
       setName('')
       setDescription('')
       setParentCode('')
@@ -134,6 +306,8 @@ export function ChartOfAccountsPage() {
         setMessage(
           `Account ${created.code} created. Opening Balance journal ${created.openingJournalNumber} posted.`,
         )
+      } else {
+        setMessage(`Account ${created.code} created.`)
       }
       await load()
     } catch (err) {
@@ -181,6 +355,42 @@ export function ChartOfAccountsPage() {
     }
   }
 
+  async function onPartyOpening(event: FormEvent) {
+    event.preventDefault()
+    if (!partyModal) return
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+    try {
+      const amount = Number(partyAmount)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Enter a positive opening amount')
+      }
+      if (partyModal.accountCode === '1131' && !partyProjectId) {
+        throw new Error('Employee advances require a project')
+      }
+      const journal = await api.postPartyOpeningBalance({
+        accountCode: partyModal.accountCode,
+        entityType: partyModal.entityType,
+        entityId: partyModal.entityId,
+        amount,
+        projectId: partyProjectId || undefined,
+      })
+      setMessage(
+        `Opening balance for ${partyModal.name} posted as ${journal.entryNumber}.`,
+      )
+      setPartyModal(null)
+      setPartyAmount('')
+      setPartyProjectId('')
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Unable to post party opening balance',
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const typeOptions = [
     { value: '', label: 'All types' },
     ...Object.values(AccountType).map((value) => ({
@@ -194,20 +404,32 @@ export function ChartOfAccountsPage() {
       <header className="workspace-header">
         <div>
           <h1>Chart of Accounts</h1>
+          
         </div>
-        <button type="button" onClick={openCreate}>
-          Add account
-        </button>
+        <div className="form-actions">
+          <button type="button" className="ghost" onClick={expandAll}>
+            Expand all
+          </button>
+          <button type="button" className="ghost" onClick={collapseAll}>
+            Collapse all
+          </button>
+          <button type="button" onClick={openCreate}>
+            Add account
+          </button>
+        </div>
       </header>
 
       {message ? <p className="muted">{message}</p> : null}
-      {!modalOpen && error ? <p className="form-error">{error}</p> : null}
+      {!modalOpen && !partyModal && error ? (
+        <p className="form-error">{error}</p>
+      ) : null}
 
       <section className="table-card">
         <div className="table-head">
           <h2>Account hierarchy</h2>
           <p className="muted">
-            {accounts.length} accounts · header rows are non-postable parents
+            {accounts.length} accounts · expand Client Receivables / Supplier
+            Payables to see party names
           </p>
         </div>
         <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
@@ -216,7 +438,7 @@ export function ChartOfAccountsPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Code or name…"
+              placeholder="Code, account, or party name…"
             />
           </label>
           <label>
@@ -236,17 +458,67 @@ export function ChartOfAccountsPage() {
               <tr>
                 <th>Code</th>
                 <th>Name</th>
-                <th>Parent</th>
                 <th>Type</th>
-                <th>Normal</th>
                 <th>Kind</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {visible.map((account) => {
-                const depth = depthOf(account, byCode)
+              {treeRows.map((row) => {
+                if (row.kind === 'party') {
+                  return (
+                    <tr key={row.id} className="coa-party-row">
+                      <td>
+                        <span
+                          className="coa-code coa-party-code"
+                          style={{ paddingLeft: `${row.depth * 16 + 8}px` }}
+                        >
+                          ·
+                        </span>
+                      </td>
+                      <td>
+                        <span className="coa-party-name">{row.name}</span>
+                        {row.meta ? (
+                          <span className="muted"> · {row.meta}</span>
+                        ) : null}
+                      </td>
+                      <td className="muted">
+                        {row.entityType === 'customer'
+                          ? 'Receivable party'
+                          : row.entityType === 'supplier'
+                            ? 'Payable party'
+                            : 'Employee party'}
+                      </td>
+                      <td>
+                        <span className="status-pill status-draft">Party</span>
+                      </td>
+                      <td className="muted">—</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => {
+                            setError(null)
+                            setPartyModal({
+                              accountCode: row.parentCode,
+                              entityType: row.entityType,
+                              entityId: row.entityId,
+                              name: row.name,
+                            })
+                            setPartyAmount('')
+                            setPartyProjectId('')
+                          }}
+                        >
+                          Opening balance
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                }
+
+                const { account, depth, hasChildren } = row
+                const expanded = !collapsed.has(account.code) || Boolean(matchingCodes)
                 return (
                   <tr
                     key={account.id}
@@ -254,16 +526,34 @@ export function ChartOfAccountsPage() {
                   >
                     <td>
                       <span
-                        className="coa-code"
-                        style={{ paddingLeft: `${depth * 14}px` }}
+                        className="coa-tree-cell"
+                        style={{ paddingLeft: `${depth * 16}px` }}
                       >
-                        {account.code}
+                        {hasChildren ? (
+                          <button
+                            type="button"
+                            className="coa-toggle"
+                            aria-label={expanded ? 'Collapse' : 'Expand'}
+                            onClick={() => toggleCollapse(account.code)}
+                          >
+                            {expanded ? '▾' : '▸'}
+                          </button>
+                        ) : (
+                          <span className="coa-toggle-spacer" />
+                        )}
+                        <span className="coa-code">{account.code}</span>
                       </span>
                     </td>
-                    <td>{account.name}</td>
-                    <td>{account.parentCode ?? '—'}</td>
+                    <td>
+                      {account.name}
+                      {PARTY_CONTROL_ACCOUNTS[account.code] ? (
+                        <span className="muted">
+                          {' '}
+                          · {PARTY_CONTROL_ACCOUNTS[account.code]?.label}
+                        </span>
+                      ) : null}
+                    </td>
                     <td>{ACCOUNT_TYPE_LABEL[account.type]}</td>
-                    <td>{account.normalBalance}</td>
                     <td>
                       {account.isPostable ? (
                         <span className="status-pill status-posted">Postable</span>
@@ -281,6 +571,14 @@ export function ChartOfAccountsPage() {
                             onSelect: () => openEdit(account),
                           },
                           {
+                            label: 'Ledger',
+                            onSelect: () => {
+                              window.location.assign(
+                                `/ledgers/${encodeURIComponent(account.code)}`,
+                              )
+                            },
+                          },
+                          {
                             label: 'Delete',
                             danger: true,
                             disabled: account.isSystem,
@@ -295,9 +593,9 @@ export function ChartOfAccountsPage() {
                   </tr>
                 )
               })}
-              {visible.length === 0 ? (
+              {treeRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="muted">
+                  <td colSpan={6} className="muted">
                     No accounts match the current filters.
                   </td>
                 </tr>
@@ -357,20 +655,14 @@ export function ChartOfAccountsPage() {
         ) : (
           <form className="stack-form" onSubmit={(event) => void onCreate(event)}>
             <label>
-              Code
-              <input value={code} onChange={(e) => setCode(e.target.value)} required />
-            </label>
-            <label>
-              Name
-              <input value={name} onChange={(e) => setName(e.target.value)} required />
-            </label>
-            <label>
               Type
               <Select
                 value={type}
                 onChange={(value) => {
-                  setType(value as Account['type'])
+                  const nextType = value as Account['type']
+                  setType(nextType)
                   setParentCode('')
+                  void refreshSuggestedCode(nextType, '')
                 }}
                 options={Object.values(AccountType).map((value) => ({
                   value,
@@ -382,11 +674,30 @@ export function ChartOfAccountsPage() {
               Parent (header)
               <Select
                 value={parentCode}
-                onChange={setParentCode}
+                onChange={(value) => {
+                  setParentCode(value)
+                  void refreshSuggestedCode(type, value)
+                }}
                 options={parentOptions}
                 searchable
                 placeholder="None (top level)"
               />
+            </label>
+            <label>
+              Code (auto)
+              <input
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                required
+              />
+            </label>
+            <p className="muted">
+              Suggested sequentially from existing codes. You can override if
+              needed.
+            </p>
+            <label>
+              Name
+              <input value={name} onChange={(e) => setName(e.target.value)} required />
             </label>
             <label>
               Description
@@ -405,8 +716,9 @@ export function ChartOfAccountsPage() {
               />
             </label>
             <p className="muted">
-              If set, posts a balanced Opening Balance journal against Owner
-              Capital (3100). Not for AR/AP/advances that need a party.
+              For cash/bank/assets etc. vs capital 3100. For customers/suppliers,
+              expand the control account in the tree and use party Opening
+              balance.
             </p>
             <div className="form-actions">
               <button type="submit" disabled={saving}>
@@ -416,6 +728,66 @@ export function ChartOfAccountsPage() {
             {error ? <p className="form-error">{error}</p> : null}
           </form>
         )}
+      </Modal>
+
+      <Modal
+        open={Boolean(partyModal)}
+        title={
+          partyModal
+            ? `Opening balance · ${partyModal.name}`
+            : 'Party opening balance'
+        }
+        description={
+          partyModal
+            ? `Posts Opening Balance on ${partyModal.accountCode} for this ${partyModal.entityType}. Does not create a live invoice/bill.`
+            : undefined
+        }
+        onClose={() => {
+          setPartyModal(null)
+          setError(null)
+        }}
+      >
+        <form className="stack-form" onSubmit={(event) => void onPartyOpening(event)}>
+          <label>
+            Amount
+            <input
+              inputMode="decimal"
+              value={partyAmount}
+              onChange={(e) => setPartyAmount(e.target.value)}
+              required
+              placeholder="0.00"
+            />
+          </label>
+          {partyModal?.accountCode === '1131' ? (
+            <label>
+              Project
+              <Select
+                value={partyProjectId}
+                onChange={setPartyProjectId}
+                options={projects.map((row) => ({
+                  value: row.id,
+                  label: `${row.code} · ${row.name}`,
+                }))}
+                searchable
+                placeholder="Select project"
+                required
+              />
+            </label>
+          ) : null}
+          <p className="muted">
+            Offset posts to Owner Capital (3100). Example display amount:{' '}
+            {money(Number(partyAmount) || 0)}
+          </p>
+          <div className="form-actions">
+            <button type="submit" disabled={saving}>
+              {saving ? 'Posting…' : 'Post opening balance'}
+            </button>
+          </div>
+          {error ? <p className="form-error">{error}</p> : null}
+          <p className="muted">
+            Related: <Link to="/journals">Journals</Link>
+          </p>
+        </form>
       </Modal>
     </>
   )

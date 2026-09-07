@@ -225,6 +225,23 @@ export const api = {
       body: JSON.stringify(body),
     }),
   accounts: () => request<Account[]>('/accounts'),
+  nextAccountCode: (type: Account['type'], parentCode?: string) => {
+    const query = new URLSearchParams({ type })
+    if (parentCode) query.set('parentCode', parentCode)
+    return request<{ code: string }>(`/accounts/next-code?${query}`)
+  },
+  postPartyOpeningBalance: (body: {
+    accountCode: string
+    entityType: 'customer' | 'supplier' | 'employee'
+    entityId: string
+    amount: number
+    projectId?: string
+    date?: string
+  }) =>
+    request<JournalEntry>('/accounts/party-opening-balance', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   createAccount: (body: {
     code: string
     name: string
@@ -408,10 +425,18 @@ export const api = {
   },
   ledger: (
     accountCode: string,
-    params?: { asOf?: string; entityType?: string; entityId?: string },
+    params?: {
+      asOf?: string
+      fromDate?: string
+      toDate?: string
+      entityType?: string
+      entityId?: string
+    },
   ) => {
     const query = new URLSearchParams()
     if (params?.asOf) query.set('asOf', params.asOf)
+    if (params?.fromDate) query.set('fromDate', params.fromDate)
+    if (params?.toDate) query.set('toDate', params.toDate)
     if (params?.entityType) query.set('entityType', params.entityType)
     if (params?.entityId) query.set('entityId', params.entityId)
     const qs = query.toString()
@@ -613,7 +638,9 @@ export const api = {
   createSupplier: (body: {
     name: string
     contactName?: string
+    email?: string
     phone?: string
+    address?: string
     paymentTermsDays?: number
   }) =>
     request<Supplier>('/suppliers', {

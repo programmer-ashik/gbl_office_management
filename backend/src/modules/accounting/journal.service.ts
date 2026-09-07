@@ -373,6 +373,93 @@ export class JournalService {
     );
   }
 
+  /**
+   * Party opening balance under control accounts (AR / AP / employee).
+   * Does not create AR invoices or AP bills (opening_balance sync is skipped).
+   */
+  async postPartyOpeningBalance(input: {
+    accountCode: string;
+    entityType: 'customer' | 'supplier' | 'employee';
+    entityId: string;
+    amount: number;
+    userId: string;
+    projectId?: string;
+    date?: string;
+  }): Promise<PublicJournal> {
+    const amount = Number(input.amount);
+    if (!Number.isFinite(amount) || amount < 0.01) {
+      throw badRequest('Opening balance must be at least 0.01');
+    }
+
+    const code = input.accountCode.trim().toUpperCase();
+    const capitalCode = SystemAccountCode.OWNER_CAPITAL;
+    await this.accountsService.findByCodeOrFail(code);
+    await this.accountsService.findByCodeOrFail(capitalCode);
+
+    const isReceivableLike =
+      code === SystemAccountCode.ACCOUNTS_RECEIVABLE ||
+      code === SystemAccountCode.EMPLOYEE_ADVANCES;
+    const isPayableLike =
+      code === SystemAccountCode.ACCOUNTS_PAYABLE ||
+      code === SystemAccountCode.SUBCONTRACTOR_PAYABLE ||
+      code === SystemAccountCode.EMPLOYEE_PAYABLES;
+
+    if (!isReceivableLike && !isPayableLike) {
+      throw badRequest(
+        'Party opening balance is only supported on receivable / payable control accounts',
+      );
+    }
+
+    const partyLine: JournalLineDto = isReceivableLike
+      ? {
+          accountCode: code,
+          debit: amount,
+          description: `Opening balance`,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          projectId: input.projectId,
+        }
+      : {
+          accountCode: code,
+          credit: amount,
+          description: `Opening balance`,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          projectId: input.projectId,
+        };
+
+    const offsetLine: JournalLineDto = isReceivableLike
+      ? {
+          accountCode: capitalCode,
+          credit: amount,
+          description: `Opening equity offset`,
+        }
+      : {
+          accountCode: capitalCode,
+          debit: amount,
+          description: `Opening equity offset`,
+        };
+
+    const date =
+      input.date && !Number.isNaN(new Date(input.date).getTime())
+        ? new Date(input.date).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+
+    return this.post(
+      {
+        date,
+        memo: `Opening balance · ${code} · ${input.entityType}`,
+        reference: `OB-${code}-${input.entityId.slice(-6)}`,
+        journalType: JournalType.OPENING_BALANCE,
+        projectId: input.projectId,
+        lines: [partyLine, offsetLine],
+        intent: 'post',
+      },
+      input.userId,
+      'manual',
+    );
+  }
+
   /** Save/update draft — may be unbalanced; no ledger impact. */
   async saveDraft(dto: PostJournalDto, userId: string): Promise<PublicJournal> {
     return this.persistJournal(dto, userId, {
@@ -512,7 +599,7 @@ export class JournalService {
   ): Promise<PublicJournal[]> {
     const filter = this.buildListFilter(filters);
     const entries = await JournalEntryModel.find(filter)
-      .sort({ date: -1, entryNumber: -1 })
+      .sort({ createdAt: -1, date: -1, entryNumber: -1 })
       .limit(limit)
       .exec();
     return entries.map((entry) => this.toPublic(entry));

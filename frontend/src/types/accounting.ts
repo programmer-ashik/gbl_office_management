@@ -215,7 +215,14 @@ export type AccountLedger = {
     accountName: string
     type: AccountType
     balance: number
+    normalBalance?: 'debit' | 'credit'
   }
+  openingBalance: number
+  closingBalance: number
+  periodDebit: number
+  periodCredit: number
+  fromDate: string | null
+  toDate: string | null
   entries: Array<{
     id: string
     date: string
@@ -226,6 +233,7 @@ export type AccountLedger = {
     reference: string | null
     debit: number
     credit: number
+    runningBalance?: number
     entityType?: string | null
     entityId?: string | null
     entityName?: string | null

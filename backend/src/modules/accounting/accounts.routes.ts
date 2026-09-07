@@ -11,6 +11,7 @@ import type { AuthService } from '../auth/auth.service';
 import type { UsersService } from '../users/users.service';
 import type { AccountsService } from './accounts.service';
 import { CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
+import { PartyOpeningBalanceDto } from './dto/party-opening-balance.dto';
 import type { JournalService } from './journal.service';
 
 const FINANCE = [Role.ADMIN, Role.ACCOUNTANT] as const;
@@ -32,6 +33,52 @@ export function createAccountsRouter(
       const type = req.query.type as AccountType | undefined;
       const accounts = await accountsService.list(type);
       sendSuccess(res, accounts, 'Chart of accounts retrieved successfully');
+    }),
+  );
+
+  router.get(
+    '/next-code',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const type = String(req.query.type || '') as AccountType;
+      if (!Object.values(AccountType).includes(type)) {
+        throw badRequest('type query must be a valid account type');
+      }
+      const parentCode =
+        typeof req.query.parentCode === 'string' && req.query.parentCode.trim()
+          ? req.query.parentCode.trim()
+          : undefined;
+      const result = await accountsService.suggestNextCode(type, parentCode);
+      sendSuccess(res, result, 'Next account code suggested');
+    }),
+  );
+
+  router.post(
+    '/party-opening-balance',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(PartyOpeningBalanceDto),
+    asyncHandler(async (req, res) => {
+      if (!journalService) {
+        throw badRequest('Journal service unavailable');
+      }
+      const dto = req.body as PartyOpeningBalanceDto;
+      const journal = await journalService.postPartyOpeningBalance({
+        accountCode: dto.accountCode,
+        entityType: dto.entityType,
+        entityId: dto.entityId,
+        amount: dto.amount,
+        projectId: dto.projectId,
+        date: dto.date,
+        userId: req.user!.userId,
+      });
+      sendSuccess(
+        res,
+        journal,
+        `Opening balance journal ${journal.entryNumber} posted`,
+        201,
+      );
     }),
   );
 

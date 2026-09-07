@@ -1001,6 +1001,10 @@ export class ArApService {
     if (journal.source !== 'manual' || journal.status !== 'posted') {
       return;
     }
+    // Go-live opening balances must not create live AR invoices / AP bills.
+    if (journal.journalType === 'opening_balance') {
+      return;
+    }
 
     const arDebits = journal.lines.filter(
       (line) =>

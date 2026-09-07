@@ -2,6 +2,11 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import {
+  AddSupplierForm,
+  emptyAddSupplierValues,
+  type AddSupplierFormValues,
+} from '../components/AddSupplierForm'
 import { MetricCard } from '../components/MetricCard'
 import { Modal, Select } from '../components/ui'
 import { money } from '../types/accounting'
@@ -26,9 +31,12 @@ export function ProcurementPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [orders, setOrders] = useState<PurchaseOrder[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [supplierError, setSupplierError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const [supplierName, setSupplierName] = useState('')
+  const [supplierForm, setSupplierForm] = useState<AddSupplierFormValues>(
+    emptyAddSupplierValues(),
+  )
   const [sku, setSku] = useState('')
   const [itemName, setItemName] = useState('')
   const [unit, setUnit] = useState('bag')
@@ -82,14 +90,23 @@ export function ProcurementPage() {
     event.preventDefault()
     if (!isFinance) return
     setSaving(true)
+    setSupplierError(null)
     setError(null)
     try {
-      await api.createSupplier({ name: supplierName })
-      setSupplierName('')
+      const created = await api.createSupplier({
+        name: supplierForm.name,
+        contactName: supplierForm.contactName || undefined,
+        phone: supplierForm.phone || undefined,
+        address: supplierForm.address || undefined,
+      })
+      setSupplierForm(emptyAddSupplierValues())
       setSupplierModalOpen(false)
+      setSupplierId(created.id)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create supplier')
+      setSupplierError(
+        err instanceof Error ? err.message : 'Unable to create supplier',
+      )
     } finally {
       setSaving(false)
     }
@@ -205,26 +222,23 @@ export function ProcurementPage() {
 
       <Modal
         open={supplierModalOpen}
-        title="New supplier"
-        onClose={() => setSupplierModalOpen(false)}
+        title="Add supplier"
+        description="Creates a vendor record for POs and payables"
+        onClose={() => {
+          setSupplierModalOpen(false)
+          setSupplierError(null)
+        }}
       >
-        <form className="stack-form" onSubmit={(event) => void onCreateSupplier(event)}>
-          <label>
-            Name
-            <input
-              value={supplierName}
-              onChange={(e) => setSupplierName(e.target.value)}
-              required
-              minLength={2}
-            />
-          </label>
-          <div className="form-actions">
-            <button type="submit" disabled={saving}>
-              Add supplier
-            </button>
-          </div>
-          {error ? <p className="form-error">{error}</p> : null}
-        </form>
+        <AddSupplierForm
+          values={supplierForm}
+          onChange={(patch) =>
+            setSupplierForm((prev) => ({ ...prev, ...patch }))
+          }
+          onSubmit={(event) => void onCreateSupplier(event)}
+          saving={saving}
+          error={supplierError}
+          submitLabel="Create supplier"
+        />
       </Modal>
 
       <Modal

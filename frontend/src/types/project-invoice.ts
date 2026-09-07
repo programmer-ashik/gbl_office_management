@@ -43,6 +43,8 @@ export type ProjectInvoiceDraft = {
   address: string
   taxRate: number
   discountRate: number
+  /** Flat = base × rate%. Reverse = base × rate / (100 + rate) (inclusive extract). */
+  percentMode: 'flat' | 'reverse'
   note: string
   showPaymentMethods: boolean
   paymentPaypal: string
@@ -188,16 +190,50 @@ export function lineTotal(line: InvoiceLine): number {
   return Number((line.unitPrice * line.quantity).toFixed(2))
 }
 
+export function applyPercent(
+  base: number,
+  rate: number,
+  mode: 'flat' | 'reverse' = 'flat',
+): number {
+  if (!rate || rate <= 0 || !base) return 0
+  if (mode === 'reverse') {
+    return Number(((base * rate) / (100 + rate)).toFixed(2))
+  }
+  return Number(((base * rate) / 100).toFixed(2))
+}
+
 export function invoiceTotals(draft: ProjectInvoiceDraft) {
   const subtotal = draft.lines.reduce((sum, line) => sum + lineTotal(line), 0)
-  const tax = Number(((subtotal * draft.taxRate) / 100).toFixed(2))
-  const discount = Number(((subtotal * draft.discountRate) / 100).toFixed(2))
-  const grandTotal = Number((subtotal + tax - discount).toFixed(2))
-  return { subtotal, tax, discount, grandTotal }
+  const mode = draft.percentMode === 'reverse' ? 'reverse' : 'flat'
+  const tax = applyPercent(subtotal, draft.taxRate, mode)
+  const discount = applyPercent(subtotal, draft.discountRate, mode)
+  // Flat: tax is added on top. Reverse: tax is extracted from an inclusive
+  // subtotal, so grand total must not add tax again.
+  const grandTotal = Number(
+    (mode === 'reverse'
+      ? subtotal - discount
+      : subtotal + tax - discount
+    ).toFixed(2),
+  )
+  return { subtotal, tax, discount, grandTotal, percentMode: mode }
 }
 
 export function draftStorageKey(projectId: string): string {
-  return `gbl-project-invoice:v6:${projectId}`
+  return `gbl-project-invoice:v7:${projectId}`
+}
+
+/** Prefer v7; fall back to prior keys so existing local drafts still load. */
+export function readStoredInvoiceDraft(projectId: string): string | null {
+  const keys = [
+    draftStorageKey(projectId),
+    `gbl-project-invoice:v6:${projectId}`,
+    `gbl-project-invoice:v5:${projectId}`,
+  ]
+  for (const key of keys) {
+    const raw = localStorage.getItem(key)
+    if (raw) return raw
+  }
+  return null
 }
 
 export const defaultColumnWidths = {
@@ -250,6 +286,7 @@ export function normalizeInvoiceDraft(
     ...raw,
     currencyCode: currency.code,
     currency: currency.symbol,
+    percentMode: raw.percentMode === 'reverse' ? 'reverse' : 'flat',
     note: raw.note?.trim() ? raw.note : extras.note,
     showPaymentMethods: Boolean(raw.showPaymentMethods),
     acceptCard: raw.acceptCard !== false,

@@ -111,18 +111,6 @@ export async function downloadProjectInvoicePdf(
   y += 4
   doc.text(`Address: ${draft.address || '—'}`, margin, y)
 
-  doc.setFont('helvetica', 'bold')
-  doc.setTextColor(...YELLOW)
-  doc.setFontSize(10)
-  doc.text('TOTAL DUE', pageWidth - margin, y - 14, { align: 'right' })
-  doc.setFontSize(16)
-  doc.text(
-    formatInvoiceMoneyForPdf(totals.grandTotal, draft.currencyCode),
-    pageWidth - margin,
-    y - 6,
-    { align: 'right' },
-  )
-
   y += 10
   autoTable(doc, {
     startY: y,
@@ -151,42 +139,50 @@ export async function downloadProjectInvoicePdf(
   })
 
   // @ts-expect-error autotable extension
-  y = (doc.lastAutoTable?.finalY ?? y) + 8
-  const summaryX = pageWidth - margin
-  doc.setFontSize(10)
+  y = (doc.lastAutoTable?.finalY ?? y) + 10
+
+  const summaryWidth = 88
+  const summaryLeft = pageWidth - margin - summaryWidth
+  const labelX = summaryLeft
+  const amountX = pageWidth - margin
+  const rowGap = 7
+
+  function drawSummaryRow(
+    label: string,
+    amount: string,
+    opts?: { bold?: boolean },
+  ) {
+    doc.setFont('helvetica', opts?.bold ? 'bold' : 'normal')
+    doc.setFontSize(10)
+    doc.text(label, labelX, y)
+    doc.text(amount, amountX, y, { align: 'right' })
+    y += rowGap
+  }
+
   doc.setTextColor(...INK)
-  doc.text(
-    `SUBTOTAL  ${formatInvoiceMoneyForPdf(totals.subtotal, draft.currencyCode)}`,
-    summaryX,
-    y,
-    {
-      align: 'right',
-    },
+  drawSummaryRow(
+    'SUBTOTAL',
+    formatInvoiceMoneyForPdf(totals.subtotal, draft.currencyCode),
   )
-  y += 5
-  doc.text(
-    `Tax (VAT @ ${draft.taxRate}%)  ${formatInvoiceMoneyForPdf(totals.tax, draft.currencyCode)}`,
-    summaryX,
-    y,
-    {
-      align: 'right',
-    },
+  drawSummaryRow(
+    `Tax (VAT @ ${draft.taxRate}%)`,
+    formatInvoiceMoneyForPdf(totals.tax, draft.currencyCode),
   )
-  y += 5
-  doc.text(
-    `Discount (${draft.discountRate}%)  -${formatInvoiceMoneyForPdf(totals.discount, draft.currencyCode)}`,
-    summaryX,
-    y,
-    { align: 'right' },
+  drawSummaryRow(
+    `Discount (${draft.discountRate}%)`,
+    `-${formatInvoiceMoneyForPdf(totals.discount, draft.currencyCode)}`,
   )
-  y += 4
+
+  y += 1
   doc.setFillColor(...YELLOW)
-  doc.rect(pageWidth - margin - 78, y, 78, 9, 'F')
+  doc.rect(summaryLeft, y - 1, summaryWidth, 10, 'F')
   doc.setTextColor(255, 255, 255)
   doc.setFont('helvetica', 'bold')
+  doc.setFontSize(10)
+  doc.text('Grand Total', labelX + 3, y + 6)
   doc.text(
-    `Grand Total  ${formatInvoiceMoneyForPdf(totals.grandTotal, draft.currencyCode)}`,
-    summaryX - 2,
+    formatInvoiceMoneyForPdf(totals.grandTotal, draft.currencyCode),
+    amountX - 2,
     y + 6,
     { align: 'right' },
   )

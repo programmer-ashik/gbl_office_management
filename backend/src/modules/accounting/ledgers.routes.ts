@@ -28,6 +28,12 @@ export function createLedgersRouter(
       const asOf = req.query.asOf
         ? new Date(String(req.query.asOf))
         : undefined;
+      const fromDate = req.query.fromDate
+        ? new Date(String(req.query.fromDate))
+        : undefined;
+      const toDate = req.query.toDate
+        ? new Date(String(req.query.toDate))
+        : undefined;
       const entityType =
         typeof req.query.entityType === 'string'
           ? req.query.entityType
@@ -36,8 +42,12 @@ export function createLedgersRouter(
         typeof req.query.entityId === 'string' ? req.query.entityId : undefined;
       const ledger = await ledgerService.listForAccount(
         String(req.params.accountCode),
-        asOf,
-        { entityType, entityId },
+        {
+          asOf,
+          fromDate,
+          toDate,
+          entity: { entityType, entityId },
+        },
       );
       sendSuccess(res, ledger, 'Ledger retrieved successfully');
     }),

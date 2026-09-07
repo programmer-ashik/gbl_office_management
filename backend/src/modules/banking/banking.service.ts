@@ -539,7 +539,7 @@ export class BankingService {
     );
     const ledger = await this.ledgerService.listForAccount(
       session.glAccountCode,
-      session.asOf,
+      { asOf: session.asOf },
     );
     const unmatchedBook = ledger.entries.filter(
       (entry) => !matchedIds.has(entry.id),
@@ -583,7 +583,7 @@ export class BankingService {
   private async applyAutoMatch(session: ReconciliationDocument): Promise<void> {
     const ledger = await this.ledgerService.listForAccount(
       session.glAccountCode,
-      session.asOf,
+      { asOf: session.asOf },
     );
     const book = ledger.entries.map((entry) => ({
       id: entry.id,
