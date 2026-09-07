@@ -69,7 +69,7 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'projects',
     label: 'Projects & Budgeting',
     icon: 'projects',
-    roles: PROJECT_VIEW,
+    roles: ALL,
     items: [
       {
         label: 'All Projects',
@@ -92,6 +92,14 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: 'site',
         hint: 'Site · Material mapping',
         roles: PROJECT_VIEW,
+      },
+      {
+        label: 'Quotations',
+        to: '/quotations',
+        end: true,
+        icon: 'invoice',
+        hint: 'Create · Audit · PDF',
+        roles: ALL,
       },
     ],
   },
@@ -196,6 +204,13 @@ export const NAV_SECTIONS: NavSection[] = [
         end: true,
         icon: 'procurement',
         hint: 'Issuance · Tracking',
+        roles: PROJECT_VIEW,
+      },
+      {
+        label: 'Product Catalog',
+        to: '/procurement/catalog',
+        icon: 'inventory',
+        hint: 'Categories · Products',
         roles: PROJECT_VIEW,
       },
       {

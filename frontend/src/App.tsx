@@ -32,6 +32,9 @@ import { ProjectFinancialsPage } from './pages/ProjectFinancialsPage'
 import { ProjectSitesPage } from './pages/ProjectSitesPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { PurchaseOrderDetailPage } from './pages/PurchaseOrderDetailPage'
+import { PurchaseOrderCreatePage } from './pages/PurchaseOrderCreatePage'
+import { ProcurementCatalogPage } from './pages/ProcurementCatalogPage'
+import { QuotationProductSelectPage } from './pages/QuotationProductSelectPage'
 import { ReceivablesPage } from './pages/ReceivablesPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { SignupPage } from './pages/SignupPage'
@@ -48,6 +51,8 @@ import { VendorsPage } from './pages/VendorsPage'
 import { AppearanceSettingsPage } from './pages/AppearanceSettingsPage'
 import { AdminRoute } from './components/AdminRoute'
 import { EmployeeLedgerPage } from './pages/EmployeeLedgerPage'
+import { QuotationsPage } from './pages/QuotationsPage'
+import { QuotationCreatePage } from './pages/QuotationCreatePage'
 
 export default function App() {
   return (
@@ -102,6 +107,13 @@ export default function App() {
             <Route path="/projects/sites" element={<ProjectSitesPage />} />
             <Route path="/projects/:id/invoice" element={<ProjectInvoicePage />} />
             <Route path="/projects/:id" element={<ProjectDetailPage />} />
+            <Route path="/quotations" element={<QuotationsPage />} />
+            <Route path="/quotations/new" element={<QuotationCreatePage />} />
+            <Route
+              path="/quotations/products/select"
+              element={<QuotationProductSelectPage />}
+            />
+            <Route path="/quotations/:id" element={<QuotationCreatePage />} />
 
             <Route path="/banking" element={<BankingPage />} />
             <Route path="/banking/transfers" element={<BankingTransfersPage />} />
@@ -120,6 +132,8 @@ export default function App() {
             <Route path="/advances/:id" element={<AdvanceDetailPage />} />
 
             <Route path="/procurement" element={<ProcurementPage />} />
+            <Route path="/procurement/new" element={<PurchaseOrderCreatePage />} />
+            <Route path="/procurement/catalog" element={<ProcurementCatalogPage />} />
             <Route path="/procurement/vendors" element={<VendorsPage />} />
             <Route path="/procurement/:id" element={<PurchaseOrderDetailPage />} />
             <Route path="/inventory" element={<InventoryPage />} />

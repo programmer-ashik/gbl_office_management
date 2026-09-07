@@ -27,6 +27,7 @@ import {
 } from './allocation';
 import type {
   CreateItemDto,
+  CreateProductCategoryDto,
   CreatePurchaseOrderDto,
   CreateSupplierDto,
   IssueStockDto,
@@ -35,6 +36,11 @@ import type {
 } from './dto/procurement.dto';
 import { GoodsMovementModel } from './goods-movement.model';
 import { ItemModel, type ItemDocument } from './item.model';
+import {
+  ProductCategoryModel,
+  toPublicProductCategory,
+  type PublicProductCategory,
+} from './product-category.model';
 import {
   PurchaseOrderModel,
   type PurchaseOrderDocument,
@@ -70,10 +76,17 @@ export type PublicItem = {
   sku: string;
   name: string;
   unit: string;
+  description: string | null;
+  unitPrice: number | null;
+  quantity: number | null;
   brand: string | null;
   model: string | null;
   countryOfOrigin: string | null;
   technicalSpecification: string | null;
+  categoryId: string | null;
+  subCategoryId: string | null;
+  supplierId: string | null;
+  supplierName: string | null;
   isActive: boolean;
 };
 
@@ -193,10 +206,20 @@ export class ProcurementService {
       sku: row.sku,
       name: row.name,
       unit: row.unit,
+      description: row.description ?? null,
+      unitPrice:
+        row.unitPriceMinor != null
+          ? fromMinorUnits(row.unitPriceMinor)
+          : null,
+      quantity: row.quantity ?? null,
       brand: row.brand ?? null,
       model: row.model ?? null,
       countryOfOrigin: row.countryOfOrigin ?? null,
       technicalSpecification: row.technicalSpecification ?? null,
+      categoryId: row.categoryId ? row.categoryId.toString() : null,
+      subCategoryId: row.subCategoryId ? row.subCategoryId.toString() : null,
+      supplierId: row.supplierId ? row.supplierId.toString() : null,
+      supplierName: row.supplierName ?? null,
       isActive: row.isActive,
     };
   }
@@ -334,23 +357,143 @@ export class ProcurementService {
     if (existing) {
       throw badRequest(`SKU ${sku} already exists`);
     }
+    const { categoryId, subCategoryId } = await this.resolveCategoryIds(
+      dto.categoryId,
+      dto.subCategoryId,
+    );
+    let supplierId: Types.ObjectId | undefined;
+    let supplierName: string | undefined;
+    if (dto.supplierId) {
+      const supplier = await this.findSupplierOrFail(dto.supplierId);
+      supplierId = supplier._id;
+      supplierName = supplier.name;
+    }
     const created = await ItemModel.create({
       sku,
       name: dto.name.trim(),
       unit: dto.unit.trim(),
+      description: dto.description?.trim() || undefined,
+      unitPriceMinor:
+        dto.unitPrice != null ? toMinorUnits(dto.unitPrice) : undefined,
+      quantity: dto.quantity,
       brand: dto.brand?.trim() || undefined,
       model: dto.model?.trim() || undefined,
       countryOfOrigin: dto.countryOfOrigin?.trim() || undefined,
       technicalSpecification: dto.technicalSpecification?.trim() || undefined,
+      categoryId,
+      subCategoryId,
+      supplierId,
+      supplierName,
       isActive: true,
     });
     return this.toPublicItem(created);
   }
 
-  async listItems(actor: AuthenticatedUser): Promise<PublicItem[]> {
-    this.assertProcurement(actor);
-    const rows = await ItemModel.find({ isActive: true }).sort({ sku: 1 }).exec();
+  async listItems(
+    actor: AuthenticatedUser,
+    filters: {
+      categoryId?: string;
+      subCategoryId?: string;
+      search?: string;
+    } = {},
+  ): Promise<PublicItem[]> {
+    this.assertProcurementOrQuote(actor);
+    const query: Record<string, unknown> = { isActive: true };
+    if (filters.categoryId && Types.ObjectId.isValid(filters.categoryId)) {
+      query.categoryId = new Types.ObjectId(filters.categoryId);
+    }
+    if (filters.subCategoryId && Types.ObjectId.isValid(filters.subCategoryId)) {
+      query.subCategoryId = new Types.ObjectId(filters.subCategoryId);
+    }
+    if (filters.search?.trim()) {
+      const q = filters.search.trim();
+      query.$or = [
+        { sku: new RegExp(q, 'i') },
+        { name: new RegExp(q, 'i') },
+        { brand: new RegExp(q, 'i') },
+      ];
+    }
+    const rows = await ItemModel.find(query).sort({ sku: 1 }).exec();
     return rows.map((row) => this.toPublicItem(row));
+  }
+
+  async listCategories(actor: AuthenticatedUser): Promise<PublicProductCategory[]> {
+    this.assertProcurementOrQuote(actor);
+    const rows = await ProductCategoryModel.find({ isActive: true })
+      .sort({ name: 1 })
+      .exec();
+    return rows.map(toPublicProductCategory);
+  }
+
+  async createCategory(
+    dto: CreateProductCategoryDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicProductCategory> {
+    this.assertFinance(actor);
+    let parentId: Types.ObjectId | undefined;
+    if (dto.parentId) {
+      if (!Types.ObjectId.isValid(dto.parentId)) {
+        throw badRequest('Invalid parent category');
+      }
+      const parent = await ProductCategoryModel.findById(dto.parentId).exec();
+      if (!parent || !parent.isActive) {
+        throw notFound('Parent category not found');
+      }
+      if (parent.parentId) {
+        throw badRequest('Sub-categories cannot have children (max 2 levels)');
+      }
+      parentId = parent._id;
+    }
+    const created = await ProductCategoryModel.create({
+      name: dto.name.trim(),
+      code: dto.code?.trim().toUpperCase() || undefined,
+      parentId: parentId ?? null,
+      isActive: true,
+    });
+    return toPublicProductCategory(created);
+  }
+
+  private async resolveCategoryIds(
+    categoryId?: string,
+    subCategoryId?: string,
+  ): Promise<{
+    categoryId?: Types.ObjectId;
+    subCategoryId?: Types.ObjectId;
+  }> {
+    if (!categoryId && !subCategoryId) return {};
+    if (subCategoryId) {
+      if (!Types.ObjectId.isValid(subCategoryId)) {
+        throw badRequest('Invalid sub-category');
+      }
+      const sub = await ProductCategoryModel.findById(subCategoryId).exec();
+      if (!sub || !sub.isActive || !sub.parentId) {
+        throw badRequest('Sub-category not found');
+      }
+      return {
+        categoryId: sub.parentId,
+        subCategoryId: sub._id,
+      };
+    }
+    if (!Types.ObjectId.isValid(categoryId!)) {
+      throw badRequest('Invalid category');
+    }
+    const cat = await ProductCategoryModel.findById(categoryId).exec();
+    if (!cat || !cat.isActive || cat.parentId) {
+      throw badRequest('Category not found');
+    }
+    return { categoryId: cat._id };
+  }
+
+  private assertProcurementOrQuote(actor: AuthenticatedUser) {
+    if (
+      actor.role === Role.ADMIN ||
+      actor.role === Role.ACCOUNTANT ||
+      actor.role === Role.PROJECT_MANAGER ||
+      actor.role === Role.EMPLOYEE
+    ) {
+      return;
+    }
+    throw forbidden('Procurement access required');
   }
 
   async listWarehouses(actor: AuthenticatedUser): Promise<PublicWarehouse[]> {
@@ -720,7 +863,7 @@ export class ProcurementService {
   }
 
   async inventory(actor: AuthenticatedUser): Promise<PublicStockRow[]> {
-    this.assertProcurement(actor);
+    this.assertProcurementOrQuote(actor);
     const lots = await StockLotModel.find({ remainingMilli: { $gt: 0 } }).exec();
     const warehouses = await WarehouseModel.find().exec();
     const warehouseById = new Map(

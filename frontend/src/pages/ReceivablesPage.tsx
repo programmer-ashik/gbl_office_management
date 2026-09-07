@@ -152,7 +152,7 @@ export function ReceivablesPage() {
                   <td>
                     <Link to={`/receivables/${row.invoiceId}`}>{row.invoiceNumber}</Link>
                   </td>
-                  <td>{row.projectCode}</td>
+                  <td>{row.projectName}</td>
                   <td>
                     {row.clientName}
                     {row.clientEmail ? (
@@ -280,7 +280,7 @@ export function ReceivablesPage() {
                 <td>
                   <Link to={`/receivables/${row.id}`}>{row.invoiceNumber}</Link>
                 </td>
-                <td>{row.projectCode}</td>
+                <td>{row.projectName}</td>
                 <td>{row.clientName}</td>
                 <td>{INVOICE_TYPE_LABEL[row.type] ?? row.type}</td>
                 <td>{formatDate(row.dueDate)}</td>

@@ -166,8 +166,8 @@ export function PurchaseOrderDetailPage() {
           <h1>{row.supplierName}</h1>
           <p className="muted">
             {PURCHASE_DESTINATION_LABEL[row.destination]}
-            {row.projectCode ? ` · ${row.projectCode}` : ''}
-            {row.warehouseCode ? ` · ${row.warehouseCode}` : ''}
+            {row.projectName ? ` · ${row.projectName}` : ''}
+            {row.warehouseName ? ` · ${row.warehouseName}` : row.warehouseCode ? ` · ${row.warehouseCode}` : ''}
           </p>
         </div>
         <Link to="/procurement" className="ghost-link">

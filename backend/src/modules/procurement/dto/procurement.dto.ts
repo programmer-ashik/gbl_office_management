@@ -82,6 +82,21 @@ export class CreateItemDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
+  description?: string;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  unitPrice?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  quantity?: number;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(120)
   brand?: string;
 
@@ -99,6 +114,34 @@ export class CreateItemDto {
   @IsString()
   @MaxLength(2000)
   technicalSpecification?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  categoryId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  subCategoryId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  supplierId?: string;
+}
+
+export class CreateProductCategoryDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  code?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  parentId?: string;
 }
 
 export class PurchaseOrderLineDto {

@@ -28,6 +28,11 @@ import type {
   EmployeeLedgerReport,
   ExpenseAccountOption,
 } from '../types/advance'
+import type {
+  CreateQuotationBody,
+  Quotation,
+  QuotationStatus,
+} from '../types/quotation'
 import type { ApiError, ApiSuccess, AuthResult, HealthStatus, PublicUser, Role } from '../types/auth'
 import type {
   FundTransfer,
@@ -50,6 +55,7 @@ import type {
 import type { BalanceSheetTemplate } from '../types/report-template'
 import type {
   Item,
+  ProductCategory,
   PurchaseOrder,
   StockIssue,
   StockRow,
@@ -459,6 +465,33 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  quotations: (params?: {
+    createdBy?: string
+    projectId?: string
+    status?: QuotationStatus
+    fromDate?: string
+    toDate?: string
+  }) => {
+    const query = new URLSearchParams()
+    if (params?.createdBy) query.set('createdBy', params.createdBy)
+    if (params?.projectId) query.set('projectId', params.projectId)
+    if (params?.status) query.set('status', params.status)
+    if (params?.fromDate) query.set('fromDate', params.fromDate)
+    if (params?.toDate) query.set('toDate', params.toDate)
+    const qs = query.toString()
+    return request<Quotation[]>(qs ? `/quotations?${qs}` : '/quotations')
+  },
+  quotation: (id: string) => request<Quotation>(`/quotations/${id}`),
+  createQuotation: (body: CreateQuotationBody) =>
+    request<Quotation>('/quotations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateQuotationStatus: (id: string, status: QuotationStatus) =>
+    request<Quotation>(`/quotations/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
   projects: (status?: ProjectStatus) =>
     request<Project[]>(status ? `/projects?status=${status}` : '/projects'),
   project: (id: string) => request<Project>(`/projects/${id}`),
@@ -647,17 +680,45 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  items: () => request<Item[]>('/items'),
+  items: (params?: {
+    categoryId?: string
+    subCategoryId?: string
+    search?: string
+  }) => {
+    const query = new URLSearchParams()
+    if (params?.categoryId) query.set('categoryId', params.categoryId)
+    if (params?.subCategoryId) query.set('subCategoryId', params.subCategoryId)
+    if (params?.search) query.set('search', params.search)
+    const qs = query.toString()
+    return request<Item[]>(qs ? `/items?${qs}` : '/items')
+  },
   createItem: (body: {
     sku: string
     name: string
     unit: string
+    description?: string
+    unitPrice?: number
+    quantity?: number
     brand?: string
     model?: string
     countryOfOrigin?: string
     technicalSpecification?: string
+    categoryId?: string
+    subCategoryId?: string
+    supplierId?: string
   }) =>
     request<Item>('/items', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  productCategories: () =>
+    request<ProductCategory[]>('/product-categories'),
+  createProductCategory: (body: {
+    name: string
+    code?: string
+    parentId?: string
+  }) =>
+    request<ProductCategory>('/product-categories', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

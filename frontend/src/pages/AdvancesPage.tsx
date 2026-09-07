@@ -286,7 +286,7 @@ export function AdvancesPage() {
                   <Link to={`/advances/${row.id}`}>{row.advanceNumber}</Link>
                 </td>
                 <td>
-                  {row.projectCode} · {row.projectName}
+                  {row.projectName}
                 </td>
                 <td>{row.employeeName}</td>
                 <td>{money(row.requestedAmount)}</td>

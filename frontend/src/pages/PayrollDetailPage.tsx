@@ -92,7 +92,7 @@ export function PayrollDetailPage() {
                 <tr key={item.projectId}>
                   <td>
                     <Link to={`/projects/${item.projectId}`}>
-                      {item.projectCode} · {item.projectName}
+                      {item.projectName}
                     </Link>
                   </td>
                   <td>{item.quantity}</td>

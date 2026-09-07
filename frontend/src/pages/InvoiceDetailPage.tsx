@@ -79,7 +79,7 @@ export function InvoiceDetailPage() {
           <p className="eyebrow">{row.invoiceNumber}</p>
           <h1>{row.clientName}</h1>
           <p className="muted">
-            {row.projectCode} · {INVOICE_TYPE_LABEL[row.type]}
+            {row.projectName} · {INVOICE_TYPE_LABEL[row.type]}
             {row.milestoneLabel ? ` · ${row.milestoneLabel}` : ''}
           </p>
         </div>

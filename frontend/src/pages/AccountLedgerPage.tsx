@@ -6,6 +6,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { api } from "../api/client";
+import { ExpandableText } from "../components/ExpandableText";
 import { MetricCard } from "../components/MetricCard";
 import { Select } from "../components/ui";
 import {
@@ -368,7 +369,7 @@ export function AccountLedgerPage() {
         </div>
 
         <form
-          className='filter-bar ledger-filter-bar'
+          className='filter-bar filter-bar-compact ledger-filter-bar'
           onSubmit={(event) => event.preventDefault()}
         >
           <div className='ledger-filter-row'>
@@ -545,11 +546,11 @@ export function AccountLedgerPage() {
                           {row.entryNumber}
                         </Link>
                       </td>
-                      <td
-                        className='ledger-description-cell'
-                        title={row.description || row.memo}
-                      >
-                        {row.description || row.memo}
+                      <td className='ledger-description-cell'>
+                        <ExpandableText
+                          text={row.description || row.memo}
+                          maxChars={48}
+                        />
                       </td>
                       <td>{row.reference ?? "—"}</td>
                       <td>{entityCell(row)}</td>

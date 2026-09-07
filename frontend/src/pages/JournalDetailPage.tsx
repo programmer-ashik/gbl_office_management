@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { ExpandableText } from '../components/ExpandableText'
 import {
   journalDeleteDisabledReason,
   journalEditDisabledReason,
@@ -230,10 +231,12 @@ export function JournalDetailPage() {
                   <td>
                     {line.projectId
                       ? (projects.find((project) => project.id === line.projectId)
-                          ?.code ?? 'Tagged')
+                          ?.name ?? 'Tagged')
                       : '—'}
                   </td>
-                  <td>{line.description ?? '—'}</td>
+                  <td>
+                    <ExpandableText text={line.description} maxChars={48} />
+                  </td>
                   <td className="num amount-debit-cell">
                     {line.debit > 0 ? money(line.debit) : '—'}
                   </td>

@@ -10,6 +10,7 @@ import type { UsersService } from '../users/users.service';
 import type { ArApService } from '../ar-ap/ar-ap.service';
 import {
   CreateItemDto,
+  CreateProductCategoryDto,
   CreatePurchaseOrderDto,
   CreateSupplierDto,
   IssueStockDto,
@@ -23,6 +24,12 @@ const PROCUREMENT = [
   Role.ADMIN,
   Role.ACCOUNTANT,
   Role.PROJECT_MANAGER,
+] as const;
+const CATALOG_VIEW = [
+  Role.ADMIN,
+  Role.ACCOUNTANT,
+  Role.PROJECT_MANAGER,
+  Role.EMPLOYEE,
 ] as const;
 
 export function createSuppliersRouter(
@@ -90,9 +97,20 @@ export function createItemsRouter(
   router.get(
     '/',
     auth,
-    requireRoles(...PROCUREMENT),
+    requireRoles(...CATALOG_VIEW),
     asyncHandler(async (req, res) => {
-      const rows = await procurementService.listItems(req.user!);
+      const rows = await procurementService.listItems(req.user!, {
+        categoryId:
+          typeof req.query.categoryId === 'string'
+            ? req.query.categoryId
+            : undefined,
+        subCategoryId:
+          typeof req.query.subCategoryId === 'string'
+            ? req.query.subCategoryId
+            : undefined,
+        search:
+          typeof req.query.search === 'string' ? req.query.search : undefined,
+      });
       sendSuccess(res, rows, 'Items retrieved successfully');
     }),
   );
@@ -105,6 +123,38 @@ export function createItemsRouter(
     asyncHandler(async (req, res) => {
       const row = await procurementService.createItem(req.body, req.user!);
       sendSuccess(res, row, 'Item created successfully', 201);
+    }),
+  );
+
+  return router;
+}
+
+export function createProductCategoriesRouter(
+  procurementService: ProcurementService,
+  authService: AuthService,
+  usersService: UsersService,
+) {
+  const router = Router();
+  const auth = requireAuth(authService, usersService);
+
+  router.get(
+    '/',
+    auth,
+    requireRoles(...CATALOG_VIEW),
+    asyncHandler(async (req, res) => {
+      const rows = await procurementService.listCategories(req.user!);
+      sendSuccess(res, rows, 'Product categories retrieved successfully');
+    }),
+  );
+
+  router.post(
+    '/',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(CreateProductCategoryDto),
+    asyncHandler(async (req, res) => {
+      const row = await procurementService.createCategory(req.body, req.user!);
+      sendSuccess(res, row, 'Product category created successfully', 201);
     }),
   );
 
@@ -231,7 +281,7 @@ export function createInventoryRouter(
   router.get(
     '/',
     auth,
-    requireRoles(...PROCUREMENT),
+    requireRoles(...CATALOG_VIEW),
     asyncHandler(async (req, res) => {
       const rows = await procurementService.inventory(req.user!);
       sendSuccess(res, rows, 'Inventory retrieved successfully');

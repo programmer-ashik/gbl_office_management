@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { ExpandableText } from './ExpandableText'
 import { ActionMenu, Select } from './ui'
 import {
   JOURNAL_STATUS_LABEL,
@@ -274,7 +275,7 @@ export function JournalRegister({
       </div>
 
       {showRangeFilter ? (
-        <form className="filter-bar" onSubmit={(event) => void onFilter(event)}>
+        <form className="filter-bar filter-bar-compact" onSubmit={(event) => void onFilter(event)}>
           <label>
             Search
             <input
@@ -392,11 +393,13 @@ export function JournalRegister({
                       {JOURNAL_STATUS_LABEL[entry.status] ?? entry.status}
                     </span>
                   </td>
-                  <td>{entry.memo}</td>
+                  <td>
+                    <ExpandableText text={entry.memo} maxChars={48} />
+                  </td>
                   <td>
                     {entry.projectId
                       ? (projects.find((project) => project.id === entry.projectId)
-                          ?.code ?? 'Tagged')
+                          ?.name ?? 'Tagged')
                       : '—'}
                   </td>
                   <td className="num">{money(entry.totalDebit)}</td>

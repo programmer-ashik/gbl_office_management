@@ -2,6 +2,13 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import {
+  AddItemForm,
+  addItemBodyFromValues,
+  emptyAddItemValues,
+  type AddItemFormValues,
+} from "../components/AddItemForm";
+import { ExpandableText } from "../components/ExpandableText";
 import { MetricCard } from "../components/MetricCard";
 import { Modal, Select } from "../components/ui";
 import { money } from "../types/accounting";
@@ -10,8 +17,10 @@ import type { Project } from "../types/project";
 import {
   qty,
   type Item,
+  type ProductCategory,
   type StockIssue,
   type StockRow,
+  type Supplier,
   type Warehouse,
 } from "../types/procurement";
 
@@ -23,30 +32,29 @@ export function InventoryPage() {
   const [issues, setIssues] = useState<StockIssue[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [warehouseId, setWarehouseId] = useState("");
   const [projectId, setProjectId] = useState("");
   const [itemId, setItemId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [sku, setSku] = useState("");
-  const [itemName, setItemName] = useState("");
-  const [unit, setUnit] = useState("bag");
-  const [brand, setBrand] = useState("");
-  const [model, setModel] = useState("");
-  const [countryOfOrigin, setCountryOfOrigin] = useState("");
-  const [technicalSpecification, setTechnicalSpecification] = useState("");
+  const [itemForm, setItemForm] = useState<AddItemFormValues>(emptyAddItemValues());
   const [error, setError] = useState<string | null>(null);
+  const [itemError, setItemError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [itemModalOpen, setItemModalOpen] = useState(false);
 
   async function load() {
-    const [itemRows, rows, issueRows, warehouseRows, projectRows] =
+    const [itemRows, rows, issueRows, warehouseRows, projectRows, cats, vendors] =
       await Promise.all([
         api.items(),
         api.inventory(),
         api.stockIssues(),
         api.warehouses(),
         api.projects(),
+        api.productCategories().catch(() => [] as ProductCategory[]),
+        api.suppliers().catch(() => [] as Supplier[]),
       ]);
     const catalog = Array.isArray(itemRows) ? itemRows : [];
     const onHand = Array.isArray(rows) ? rows : [];
@@ -59,6 +67,8 @@ export function InventoryPage() {
     setIssues(issueList);
     setWarehouses(warehouseList);
     setProjects(projectList);
+    setCategories(cats);
+    setSuppliers(vendors);
     if (!warehouseId && warehouseList[0]) setWarehouseId(warehouseList[0].id);
     if (!projectId && projectList[0]) setProjectId(projectList[0].id);
     if (!itemId && onHand[0]) setItemId(onHand[0].itemId);
@@ -75,29 +85,16 @@ export function InventoryPage() {
     event.preventDefault();
     if (!isFinance) return;
     setSaving(true);
+    setItemError(null);
     setError(null);
     try {
-      const created = await api.createItem({
-        sku,
-        name: itemName,
-        unit,
-        brand: brand || undefined,
-        model: model || undefined,
-        countryOfOrigin: countryOfOrigin || undefined,
-        technicalSpecification: technicalSpecification || undefined,
-      });
-      setSku("");
-      setItemName("");
-      setUnit("bag");
-      setBrand("");
-      setModel("");
-      setCountryOfOrigin("");
-      setTechnicalSpecification("");
+      const created = await api.createItem(addItemBodyFromValues(itemForm));
+      setItemForm(emptyAddItemValues());
       setItemModalOpen(false);
       setItemId(created.id);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to create item");
+      setItemError(err instanceof Error ? err.message : "Unable to create item");
     } finally {
       setSaving(false);
     }
@@ -178,84 +175,23 @@ export function InventoryPage() {
       {isFinance ? (
         <Modal
           open={itemModalOpen}
-          title='New inventory item'
-          description='Adds a catalog SKU. Stock quantity appears after a warehouse PO is received.'
-          onClose={() => setItemModalOpen(false)}
+          title="Add item"
+          description="Catalog SKU with price, description, specification, and supplier."
+          onClose={() => {
+            setItemModalOpen(false);
+            setItemError(null);
+          }}
+          wide
         >
-          <form
-            className='stack-form'
+          <AddItemForm
+            values={itemForm}
+            onChange={(patch) => setItemForm((prev) => ({ ...prev, ...patch }))}
             onSubmit={(event) => void onCreateItem(event)}
-          >
-            <div className='name-row'>
-              <label>
-                SKU
-                <input
-                  value={sku}
-                  onChange={(e) => setSku(e.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                Name
-                <input
-                  value={itemName}
-                  onChange={(e) => setItemName(e.target.value)}
-                  required
-                />
-              </label>
-            </div>
-            <div className='name-row'>
-              <label>
-                Unit
-                <input
-                  value={unit}
-                  onChange={(e) => setUnit(e.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                Brand
-                <input
-                  value={brand}
-                  onChange={(e) => setBrand(e.target.value)}
-                  placeholder='Optional'
-                />
-              </label>
-            </div>
-            <div className='name-row'>
-              <label>
-                Model
-                <input
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder='Optional'
-                />
-              </label>
-              <label>
-                Country of origin
-                <input
-                  value={countryOfOrigin}
-                  onChange={(e) => setCountryOfOrigin(e.target.value)}
-                  placeholder='Optional'
-                />
-              </label>
-            </div>
-            <label>
-              Technical specification
-              <textarea
-                value={technicalSpecification}
-                onChange={(e) => setTechnicalSpecification(e.target.value)}
-                rows={3}
-                placeholder='Materials, capacity, standards…'
-              />
-            </label>
-            <div className='form-actions'>
-              <button type='submit' disabled={saving}>
-                {saving ? "Saving…" : "Add item"}
-              </button>
-            </div>
-            {error ? <p className='form-error'>{error}</p> : null}
-          </form>
+            saving={saving}
+            error={itemError}
+            categories={categories}
+            suppliers={suppliers}
+          />
         </Modal>
       ) : null}
 
@@ -270,9 +206,10 @@ export function InventoryPage() {
             <tr>
               <th>SKU</th>
               <th>Item</th>
-              <th>Brand / Model</th>
-              <th>Origin</th>
               <th>Unit</th>
+              <th className='num'>Price</th>
+              <th>Supplier</th>
+              <th>Description</th>
               <th>On hand</th>
             </tr>
           </thead>
@@ -288,23 +225,28 @@ export function InventoryPage() {
                     <div>{row.name}</div>
                     {row.technicalSpecification ? (
                       <div className='muted' style={{ fontSize: 12 }}>
-                        {row.technicalSpecification.slice(0, 80)}
-                        {row.technicalSpecification.length > 80 ? "…" : ""}
+                        <ExpandableText
+                          text={row.technicalSpecification}
+                          maxChars={48}
+                        />
                       </div>
                     ) : null}
                   </td>
-                  <td>
-                    {[row.brand, row.model].filter(Boolean).join(" · ") || "—"}
-                  </td>
-                  <td>{row.countryOfOrigin || "—"}</td>
                   <td>{row.unit}</td>
-                  <td>{onHand > 0 ? `${qty(onHand)} ${row.unit}` : "—"}</td>
+                  <td className='num'>
+                    {row.unitPrice != null ? money(row.unitPrice) : '—'}
+                  </td>
+                  <td>{row.supplierName ?? '—'}</td>
+                  <td>
+                    <ExpandableText text={row.description} maxChars={40} />
+                  </td>
+                  <td>{onHand > 0 ? `${qty(onHand)} ${row.unit}` : '—'}</td>
                 </tr>
               );
             })}
             {items.length === 0 ? (
               <tr>
-                <td colSpan={6} className='muted'>
+                <td colSpan={7} className='muted'>
                   No catalog items yet. Use Add item to create one.
                 </td>
               </tr>
@@ -472,14 +414,11 @@ export function InventoryPage() {
                   <td>
                     {index === 0 ? (
                       row.projectId ? (
-                        // <Link to={`/projects/${row.projectId}`}>
-                        //   {row.projectCode} · {row.projectName}
-                        // </Link>
                         <Link to={`/projects/${row.projectId}`}>
                           {row.projectName}
                         </Link>
                       ) : (
-                        `${row.projectCode} · ${row.projectName}`
+                        row.projectName || '—'
                       )
                     ) : (
                       ""

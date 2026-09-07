@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { ExpandableText } from '../components/ExpandableText'
 import { MetricCard } from '../components/MetricCard'
 import { money } from '../types/accounting'
 import {
@@ -166,7 +167,9 @@ export function TreasuryDetailPage() {
               <tr key={entry.id}>
                 <td>{entry.date.slice(0, 10)}</td>
                 <td>{entry.entryNumber}</td>
-                <td>{entry.memo}</td>
+                <td>
+                  <ExpandableText text={entry.memo} maxChars={48} />
+                </td>
                 <td>{entry.debit ? money(entry.debit) : ''}</td>
                 <td>{entry.credit ? money(entry.credit) : ''}</td>
               </tr>

@@ -184,7 +184,7 @@ export function AdvanceDetailPage() {
           <p className="eyebrow">{row.advanceNumber}</p>
           <h1>{row.projectName}</h1>
           <p className="muted">
-            {row.employeeName} · {row.projectCode}
+            {row.employeeName} · {row.projectName}
           </p>
         </div>
         <Link to="/advances" className="ghost-link">

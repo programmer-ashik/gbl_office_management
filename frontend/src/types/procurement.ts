@@ -64,10 +64,25 @@ export type Item = {
   sku: string
   name: string
   unit: string
+  description: string | null
+  unitPrice: number | null
+  quantity: number | null
   brand: string | null
   model: string | null
   countryOfOrigin: string | null
   technicalSpecification: string | null
+  categoryId: string | null
+  subCategoryId: string | null
+  supplierId: string | null
+  supplierName: string | null
+  isActive: boolean
+}
+
+export type ProductCategory = {
+  id: string
+  name: string
+  code: string | null
+  parentId: string | null
   isActive: boolean
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { ExpandableText } from '../components/ExpandableText'
 import { MetricCard } from '../components/MetricCard'
 import { Modal, Select } from '../components/ui'
 import { money } from '../types/accounting'
@@ -165,7 +166,7 @@ export function EmployeeLedgerPage() {
                   <div className="muted">{line.voucherType}</div>
                 </td>
                 <td>
-                  {line.description}
+                  <ExpandableText text={line.description} maxChars={48} />
                   <div className="muted">
                     {line.accountCode} · {line.accountName}
                   </div>

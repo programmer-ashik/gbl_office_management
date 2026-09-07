@@ -195,7 +195,7 @@ export function PayrollTimePage() {
               <tr key={row.id}>
                 <td>{row.employeeName}</td>
                 <td>
-                  {row.projectCode} · {row.projectName}
+                  {row.projectName}
                 </td>
                 <td>{row.unit}</td>
                 <td>{row.quantity}</td>

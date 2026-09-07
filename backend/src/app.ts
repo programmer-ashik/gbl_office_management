@@ -53,12 +53,15 @@ import { ProcurementService } from './modules/procurement/procurement.service';
 import {
   createInventoryRouter,
   createItemsRouter,
+  createProductCategoriesRouter,
   createPurchaseOrdersRouter,
   createSuppliersRouter,
   createWarehousesRouter,
 } from './modules/procurement/procurement.routes';
 import { CustomersService } from './modules/customers/customers.service';
 import { createCustomersRouter } from './modules/customers/customers.routes';
+import { QuotationsService } from './modules/quotations/quotations.service';
+import { createQuotationsRouter } from './modules/quotations/quotations.routes';
 import { ReportTemplatesService } from './modules/templates/report-templates.service';
 import { createTemplatesRouter } from './modules/templates/templates.routes';
 import { seedDemoData } from './database/demo-seed';
@@ -136,6 +139,7 @@ export async function createApp(): Promise<Express> {
   const analyticsService = new AnalyticsService(ledgerService, bankingService);
   const employeesService = new EmployeesService(usersService);
   const templatesService = new ReportTemplatesService();
+  const quotationsService = new QuotationsService(usersService);
 
   if (!config.mongodb.memory) {
     await seedDemoData({
@@ -176,6 +180,10 @@ export async function createApp(): Promise<Express> {
   app.use(
     '/api/v1/customers',
     createCustomersRouter(customersService, authService, usersService),
+  );
+  app.use(
+    '/api/v1/quotations',
+    createQuotationsRouter(quotationsService, authService, usersService),
   );
   app.use(
     '/api/v1/accounts',
@@ -272,6 +280,10 @@ export async function createApp(): Promise<Express> {
   app.use(
     '/api/v1/items',
     createItemsRouter(procurementService, authService, usersService),
+  );
+  app.use(
+    '/api/v1/product-categories',
+    createProductCategoriesRouter(procurementService, authService, usersService),
   );
   app.use(
     '/api/v1/warehouses',

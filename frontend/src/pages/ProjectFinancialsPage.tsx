@@ -122,7 +122,7 @@ export function ProjectFinancialsPage() {
                 <tr key={row.projectId}>
                   <td>
                     <Link to={`/projects/${row.projectId}`}>
-                      {row.projectCode} · {row.projectName}
+                      {row.projectName}
                     </Link>
                     {row.isOverBudget ? (
                       <span className="badge-bad budget-flag">Over</span>
