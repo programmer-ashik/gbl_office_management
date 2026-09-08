@@ -8,11 +8,17 @@ import {
   type Project,
 } from '../types/project'
 import { qty } from '../types/procurement'
+import {
+  QUOTATION_STATUS_LABEL,
+  type Quotation,
+} from '../types/quotation'
+import { downloadQuotationPdf } from '../utils/quotationPdf'
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [project, setProject] = useState<Project | null>(null)
+  const [quotations, setQuotations] = useState<Quotation[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [name, setName] = useState('')
@@ -25,8 +31,12 @@ export function ProjectDetailPage() {
     if (!id) {
       return
     }
-    const row = await api.projectProfitability(id)
+    const [row, quoteRows] = await Promise.all([
+      api.projectProfitability(id),
+      api.quotations({ projectId: id }).catch(() => [] as Quotation[]),
+    ])
     setProject(row)
+    setQuotations(quoteRows)
     setName(row.name)
     setClientName(row.client.name)
     setContractValue(String(row.contractValue))
@@ -167,6 +177,56 @@ export function ProjectDetailPage() {
           Spent {money(financials.totalCost)} of {money(financials.totalBudget)} · remaining{' '}
           {money(financials.budgetRemaining)}
         </p>
+      </section>
+
+      <section className="table-card">
+        <h2>Quotations</h2>
+        <p className="muted">
+          Quotes approved and assigned to this project for{' '}
+          {project.client.name}.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Number</th>
+              <th>Customer</th>
+              <th>Status</th>
+              <th>Total</th>
+              <th>Date</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {quotations.map((row) => (
+              <tr key={row.id}>
+                <td>
+                  <Link to={`/quotations/${row.id}`}>{row.quotationNumber}</Link>
+                </td>
+                <td>{row.clientInfo.name}</td>
+                <td>{QUOTATION_STATUS_LABEL[row.status]}</td>
+                <td>{money(row.grandTotal)}</td>
+                <td>{row.createdAt.slice(0, 10)}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => downloadQuotationPdf(row)}
+                  >
+                    PDF
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {quotations.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="muted">
+                  No quotations assigned yet. Approve a quotation with this
+                  project selected.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
       </section>
 
       <section className="table-card">

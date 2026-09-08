@@ -97,6 +97,11 @@ export class CreateQuotationDto {
 export class UpdateQuotationStatusDto {
   @IsEnum(QuotationStatus)
   status: QuotationStatus;
+
+  /** Required when approving — project is assigned at approval, not at draft. */
+  @IsOptional()
+  @IsMongoId()
+  projectId?: string;
 }
 
 export class ListQuotationsQueryDto {

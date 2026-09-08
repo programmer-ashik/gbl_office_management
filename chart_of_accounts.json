@@ -2,11 +2,10 @@
   { "code": "1000", "name": "ASSETS", "type": "Asset", "isHeader": true, "parentCode": null },
   { "code": "1100", "name": "Current Assets", "type": "Asset", "isHeader": true, "parentCode": "1000" },
   { "code": "1110", "name": "Cash & Bank Accounts", "type": "Asset", "isHeader": true, "parentCode": "1100" },
-  { "code": "1111", "name": "Petty Cash (Hand Cash)", "type": "Asset", "isHeader": false, "parentCode": "1110" },
+  { "code": "1111", "name": "Hand Cash", "type": "Asset", "isHeader": false, "parentCode": "1110" },
   { "code": "1112", "name": "BRAC Bank", "type": "Asset", "isHeader": false, "parentCode": "1110" },
   { "code": "1113", "name": "DBBL Bank", "type": "Asset", "isHeader": false, "parentCode": "1110" },
   { "code": "1114", "name": "Mobile Banking (bKash / Nagad)", "type": "Asset", "isHeader": false, "parentCode": "1110" },
-  { "code": "1115", "name": "Cash in Hand", "type": "Asset", "isHeader": false, "parentCode": "1110" },
 
   { "code": "1120", "name": "ACCOUNTS RECEIVABLE", "type": "Asset", "isHeader": true, "parentCode": "1100" },
   { "code": "1121", "name": "Client Receivables", "type": "Asset", "isHeader": false, "parentCode": "1120" },
@@ -36,6 +35,7 @@
   { "code": "2130", "name": "Tax & VAT Payable", "type": "Liability", "isHeader": true, "parentCode": "2100" },
   { "code": "2131", "name": "Source Tax / AIT Payable", "type": "Liability", "isHeader": false, "parentCode": "2130" },
   { "code": "2132", "name": "VAT Payable", "type": "Liability", "isHeader": false, "parentCode": "2130" },
+  { "code": "2133", "name": "Provident Fund Payable", "type": "Liability", "isHeader": false, "parentCode": "2130" },
 
   { "code": "2200", "name": "Long-Term Liabilities", "type": "Liability", "isHeader": true, "parentCode": "2000" },
   { "code": "2210", "name": "Bank Loan / Director Loan", "type": "Liability", "isHeader": false, "parentCode": "2200" },

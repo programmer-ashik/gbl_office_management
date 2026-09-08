@@ -94,16 +94,8 @@ export class QuotationsService {
     let projectId: Types.ObjectId | undefined;
     let projectCode: string | undefined;
     let projectName: string | undefined;
-    if (dto.projectId) {
-      if (!Types.ObjectId.isValid(dto.projectId)) {
-        throw badRequest('Invalid project id');
-      }
-      const project = await ProjectModel.findById(dto.projectId).exec();
-      if (!project) throw notFound('Project not found');
-      projectId = project._id;
-      projectCode = project.code;
-      projectName = project.name;
-    }
+    // Project is assigned on approve — ignore create-time projectId.
+    void dto.projectId;
 
     const items = [];
     for (const line of dto.items) {
@@ -190,8 +182,44 @@ export class QuotationsService {
     id: string,
     status: QuotationStatus,
     actor: AuthenticatedUser,
+    projectId?: string,
   ): Promise<PublicQuotation> {
     const doc = await this.findOwnedOrAdmin(id, actor);
+    const canApprove =
+      actor.role === Role.ADMIN || actor.role === Role.ACCOUNTANT;
+
+    if (status === QuotationStatus.SENT) {
+      if (doc.status !== QuotationStatus.DRAFT) {
+        throw badRequest('Only draft quotations can be marked sent');
+      }
+    } else if (status === QuotationStatus.APPROVED) {
+      if (!canApprove) {
+        throw forbidden('Only admin or accountant can approve quotations');
+      }
+      if (doc.status !== QuotationStatus.SENT) {
+        throw badRequest('Only sent quotations can be approved');
+      }
+      const assignId = projectId || doc.projectId?.toString();
+      if (!assignId) {
+        throw badRequest('Select a project before approving the quotation');
+      }
+      if (!Types.ObjectId.isValid(assignId)) {
+        throw badRequest('Invalid project id');
+      }
+      const project = await ProjectModel.findById(assignId).exec();
+      if (!project) throw notFound('Project not found');
+      doc.projectId = project._id;
+      doc.projectCode = project.code;
+      doc.projectName = project.name;
+    } else if (status === QuotationStatus.REJECTED) {
+      if (!canApprove) {
+        throw forbidden('Only admin or accountant can reject quotations');
+      }
+      if (doc.status !== QuotationStatus.SENT) {
+        throw badRequest('Only sent quotations can be rejected');
+      }
+    }
+
     doc.status = status;
     await doc.save();
     return this.toPublic(doc);

@@ -23,6 +23,9 @@ import { LoginPage } from './pages/LoginPage'
 import { PayablesPage } from './pages/PayablesPage'
 import { PayrollDetailPage } from './pages/PayrollDetailPage'
 import { PayrollPage } from './pages/PayrollPage'
+import { PayrollProcessPage } from './pages/PayrollProcessPage'
+import { PayrollSettingsPage } from './pages/PayrollSettingsPage'
+import { PayrollStructuresPage } from './pages/PayrollStructuresPage'
 import { PayrollTimePage } from './pages/PayrollTimePage'
 import { ProcurementPage } from './pages/ProcurementPage'
 import { ProjectBudgetsPage } from './pages/ProjectBudgetsPage'
@@ -33,6 +36,7 @@ import { ProjectSitesPage } from './pages/ProjectSitesPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { PurchaseOrderDetailPage } from './pages/PurchaseOrderDetailPage'
 import { PurchaseOrderCreatePage } from './pages/PurchaseOrderCreatePage'
+import { PurchaseOrderProductSelectPage } from './pages/PurchaseOrderProductSelectPage'
 import { ProcurementCatalogPage } from './pages/ProcurementCatalogPage'
 import { QuotationProductSelectPage } from './pages/QuotationProductSelectPage'
 import { ReceivablesPage } from './pages/ReceivablesPage'
@@ -133,6 +137,10 @@ export default function App() {
 
             <Route path="/procurement" element={<ProcurementPage />} />
             <Route path="/procurement/new" element={<PurchaseOrderCreatePage />} />
+            <Route
+              path="/procurement/products/select"
+              element={<PurchaseOrderProductSelectPage />}
+            />
             <Route path="/procurement/catalog" element={<ProcurementCatalogPage />} />
             <Route path="/procurement/vendors" element={<VendorsPage />} />
             <Route path="/procurement/:id" element={<PurchaseOrderDetailPage />} />
@@ -145,6 +153,19 @@ export default function App() {
 
             <Route path="/payroll" element={<PayrollPage />} />
             <Route path="/payroll/time" element={<PayrollTimePage />} />
+            <Route
+              path="/payroll/structures"
+              element={<PayrollStructuresPage />}
+            />
+            <Route path="/payroll/process" element={<PayrollProcessPage />} />
+            <Route
+              path="/dashboard/payroll/structures"
+              element={<PayrollStructuresPage />}
+            />
+            <Route
+              path="/dashboard/payroll/process"
+              element={<PayrollProcessPage />}
+            />
             <Route path="/payroll/:id" element={<PayrollDetailPage />} />
             <Route path="/employees" element={<EmployeesPage />} />
             <Route path="/employees/:id/ledger" element={<EmployeeLedgerPage />} />
@@ -158,6 +179,11 @@ export default function App() {
             <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
 
             <Route path="/settings/profile" element={<ProfilePage />} />
+            <Route path="/settings/payroll" element={<PayrollSettingsPage />} />
+            <Route
+              path="/dashboard/settings/payroll"
+              element={<PayrollSettingsPage />}
+            />
             <Route
               path="/settings/appearance"
               element={
@@ -178,6 +204,7 @@ export default function App() {
                 </AdminRoute>
               }
             />
+            
             <Route
               path="/settings/templates/journal-voucher"
               element={

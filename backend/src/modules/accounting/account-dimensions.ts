@@ -72,7 +72,7 @@ const RULES_BY_CODE: Record<string, DimensionRule> = {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
-    label: 'Petty Cash',
+    label: 'Hand Cash',
   },
   [SystemAccountCode.BANK]: {
     entityType: JournalEntityType.TREASURY,

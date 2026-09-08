@@ -728,7 +728,7 @@ export class ProcurementService {
         }
         creditAccountCode = treasury.glAccountCode;
       } else if (settlement === 'cash') {
-        creditAccountCode = SystemAccountCode.CASH_IN_HAND;
+        creditAccountCode = SystemAccountCode.CASH;
       } else {
         throw badRequest('Select a bank account for bank settlement');
       }

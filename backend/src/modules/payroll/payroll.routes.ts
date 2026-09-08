@@ -11,6 +11,8 @@ import {
   CreateTimeLogDto,
   DisbursePayrollDto,
   GeneratePayrollDto,
+  PreviewSalaryBreakdownDto,
+  UpdatePayrollSettingsDto,
   UpsertSalaryStructureDto,
 } from './dto/payroll.dto';
 import type { PayrollService } from './payroll.service';
@@ -24,6 +26,44 @@ export function createPayrollRouter(
 ) {
   const router = Router();
   const auth = requireAuth(authService, usersService);
+
+  router.get(
+    '/settings',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const row = await payrollService.getPayrollSettings(req.user!);
+      sendSuccess(res, row, 'Payroll settings retrieved successfully');
+    }),
+  );
+
+  router.put(
+    '/settings',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(UpdatePayrollSettingsDto),
+    asyncHandler(async (req, res) => {
+      const row = await payrollService.updatePayrollSettings(
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Payroll settings saved successfully');
+    }),
+  );
+
+  router.post(
+    '/salary-structures/preview',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(PreviewSalaryBreakdownDto),
+    asyncHandler(async (req, res) => {
+      const row = await payrollService.previewSalaryBreakdown(
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Salary breakdown preview generated');
+    }),
+  );
 
   router.get(
     '/employees',
@@ -115,6 +155,16 @@ export function createPayrollRouter(
   );
 
   router.post(
+    '/runs/:id/post',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const row = await payrollService.postRun(String(req.params.id), req.user!);
+      sendSuccess(res, row, 'Monthly payroll posted (accrual) successfully');
+    }),
+  );
+
+  router.post(
     '/runs/:id/disburse',
     auth,
     requireRoles(...FINANCE),
@@ -126,6 +176,29 @@ export function createPayrollRouter(
         req.user!,
       );
       sendSuccess(res, row, 'Payroll disbursed successfully');
+    }),
+  );
+
+  router.get(
+    '/runs/:id/salary-slips/pdf',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const employeeId =
+        typeof req.query.employeeId === 'string'
+          ? req.query.employeeId
+          : undefined;
+      const pdf = await payrollService.buildSalarySlipPdfBuffer(
+        String(req.params.id),
+        employeeId,
+        req.user!,
+      );
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${pdf.filename}"`,
+      );
+      res.send(pdf.buffer);
     }),
   );
 

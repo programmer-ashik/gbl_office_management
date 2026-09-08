@@ -141,6 +141,7 @@ export type OverdueNotice = {
   invoiceId: string
   invoiceNumber: string
   projectCode: string
+  projectName?: string
   clientName: string
   clientEmail: string | null
   dueDate: string

@@ -36,12 +36,26 @@ export function PayrollDetailPage() {
             <span className={`status-pill status-${row.status}`}>
               {PAYROLL_STATUS_LABEL[row.status]}
             </span>
-            {row.journalNumber ? ` · ${row.journalNumber}` : null}
+            {row.accrualJournalNumber
+              ? ` · Accrual ${row.accrualJournalNumber}`
+              : null}
+            {row.journalNumber ? ` · Payout ${row.journalNumber}` : null}
           </p>
         </div>
-        <Link to="/payroll" className="ghost-link">
-          Payroll
-        </Link>
+        <div className="form-actions">
+          {row.status === 'disbursed' ? (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => void api.downloadPayrollSalarySlipsPdf(row.id)}
+            >
+              Salary slips PDF
+            </button>
+          ) : null}
+          <Link to="/payroll/process" className="ghost-link">
+            Process payroll
+          </Link>
+        </div>
       </header>
 
       <section className="grid metric-card-grid">

@@ -79,8 +79,8 @@ export function PayrollTimePage() {
         <div>
           <h1>Attendance & time</h1>
         </div>
-        <Link to="/payroll" className="ghost-link">
-          Salary disbursement
+        <Link to="/payroll/process" className="ghost-link">
+          Process payroll
         </Link>
       </header>
 

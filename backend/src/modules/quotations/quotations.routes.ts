@@ -103,6 +103,7 @@ export function createQuotationsRouter(
         String(req.params.id),
         req.body.status,
         req.user!,
+        req.body.projectId,
       );
       sendSuccess(res, row, 'Quotation status updated successfully');
     }),

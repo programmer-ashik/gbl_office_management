@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { MetricCard } from '../components/MetricCard'
+import { Select } from '../components/ui'
 import { useTheme, type UiTheme } from '../theme/ThemeContext'
 import { Role } from '../types/auth'
 
@@ -23,7 +24,7 @@ const OPTIONS: Array<{
   },
 ]
 
-const FONT_SIZES = [
+const FONT_SIZE_OPTIONS = [
   { value: '12px', label: '12px · Compact' },
   { value: '13px', label: '13px · Default' },
   { value: '14px', label: '14px · Comfortable' },
@@ -38,6 +39,9 @@ function AppearanceSettingsInner() {
     tableHeader,
     setTableHeader,
     resetTableHeader,
+    sidebar,
+    setSidebar,
+    resetSidebar,
   } = useTheme()
   const { user } = useAuth()
 
@@ -47,7 +51,8 @@ function AppearanceSettingsInner() {
         <div>
           <h1>Appearance</h1>
           <p className="muted">
-            Theme, table headers, and form look. Managed under Voucher Template.
+            Theme, sidebar, table headers, and form look. Managed under Voucher
+            Template.
           </p>
         </div>
       </header>
@@ -84,6 +89,49 @@ function AppearanceSettingsInner() {
 
       <section className="table-card theme-preview-block">
         <div className="table-head">
+          <h2>Sidebar style</h2>
+          <p className="muted">
+            Background and text color for the left navigation rail
+          </p>
+        </div>
+        <div className="theme-table-controls">
+          <label>
+            Sidebar background
+            <input
+              type="color"
+              value={sidebar.bg}
+              onChange={(e) => setSidebar({ bg: e.target.value })}
+            />
+          </label>
+          <label>
+            Sidebar text color
+            <input
+              type="color"
+              value={sidebar.color}
+              onChange={(e) => setSidebar({ color: e.target.value })}
+            />
+          </label>
+          <div className="theme-table-controls-actions">
+            <button type="button" className="ghost" onClick={resetSidebar}>
+              Reset sidebar
+            </button>
+          </div>
+        </div>
+        <div
+          className="theme-sidebar-preview"
+          style={{
+            background: sidebar.bg,
+            color: sidebar.color,
+          }}
+        >
+          <strong>GBL Office</strong>
+          <span style={{ opacity: 0.72 }}>Payroll · Process</span>
+          <span style={{ opacity: 0.72 }}>Settings · Appearance</span>
+        </div>
+      </section>
+
+      <section className="table-card theme-preview-block">
+        <div className="table-head">
           <h2>Table header style</h2>
           <p className="muted">
             Applies to every data table across the app (Admin only)
@@ -108,16 +156,11 @@ function AppearanceSettingsInner() {
           </label>
           <label>
             Header text size
-            <select
+            <Select
               value={tableHeader.fontSize}
-              onChange={(e) => setTableHeader({ fontSize: e.target.value })}
-            >
-              {FONT_SIZES.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              options={FONT_SIZE_OPTIONS}
+              onChange={(value) => setTableHeader({ fontSize: value })}
+            />
           </label>
           <div className="theme-table-controls-actions">
             <button type="button" className="ghost" onClick={resetTableHeader}>
@@ -135,7 +178,7 @@ function AppearanceSettingsInner() {
           </thead>
           <tbody>
             <tr>
-              <td>1111 · Petty Cash</td>
+              <td>1111 · Hand Cash</td>
               <td>150,000</td>
               <td></td>
             </tr>

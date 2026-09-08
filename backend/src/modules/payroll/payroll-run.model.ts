@@ -22,6 +22,9 @@ export interface IPayrollLine {
   basicMinor: number;
   allowancesMinor: number;
   structuralDeductionMinor: number;
+  providentFundMinor: number;
+  taxDeductionMinor: number;
+  structureAdvanceMinor: number;
   grossMinor: number;
   advanceDeductions: IPayrollAdvanceDeduction[];
   totalAdvanceDeductionMinor: number;
@@ -39,6 +42,10 @@ export interface IPayrollRun {
   totalStructuralDeductionMinor: number;
   totalAdvanceDeductionMinor: number;
   totalNetPayMinor: number;
+  accrualJournalId?: Types.ObjectId;
+  accrualJournalNumber?: string;
+  postedAt?: Date;
+  postedBy?: Types.ObjectId;
   treasuryId?: Types.ObjectId;
   treasuryAccountCode?: string;
   journalId?: Types.ObjectId;
@@ -80,11 +87,14 @@ const payrollLineSchema = new Schema<IPayrollLine>(
     basicMinor: { type: Number, required: true, min: 1 },
     allowancesMinor: { type: Number, required: true, min: 0 },
     structuralDeductionMinor: { type: Number, required: true, min: 0 },
+    providentFundMinor: { type: Number, required: true, min: 0, default: 0 },
+    taxDeductionMinor: { type: Number, required: true, min: 0, default: 0 },
+    structureAdvanceMinor: { type: Number, required: true, min: 0, default: 0 },
     grossMinor: { type: Number, required: true, min: 1 },
     advanceDeductions: { type: [advanceDeductionSchema], default: [] },
     totalAdvanceDeductionMinor: { type: Number, required: true, min: 0 },
     netPayMinor: { type: Number, required: true, min: 0 },
-    allocations: { type: [allocationSchema], required: true },
+    allocations: { type: [allocationSchema], default: [] },
   },
   { _id: false },
 );
@@ -106,6 +116,10 @@ const payrollRunSchema = new Schema<IPayrollRun>(
     totalStructuralDeductionMinor: { type: Number, required: true, min: 0 },
     totalAdvanceDeductionMinor: { type: Number, required: true, min: 0 },
     totalNetPayMinor: { type: Number, required: true, min: 0 },
+    accrualJournalId: { type: Schema.Types.ObjectId, ref: 'JournalEntry' },
+    accrualJournalNumber: { type: String },
+    postedAt: { type: Date },
+    postedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     treasuryId: { type: Schema.Types.ObjectId, ref: 'TreasuryAccount' },
     treasuryAccountCode: { type: String },
     journalId: { type: Schema.Types.ObjectId, ref: 'JournalEntry' },

@@ -379,7 +379,7 @@ export function sampleBalanceSheetReport(): BalanceSheetReport {
         total: 1_000_000,
         lines: [
           line('1100', 'Current Assets', 1_000_000, 0, true),
-          line('1111', 'Petty Cash', 150_000, 2, false),
+          line('1111', 'Hand Cash', 150_000, 2, false),
           line('1112', 'BRAC Bank', 850_000, 2, false),
         ],
       },

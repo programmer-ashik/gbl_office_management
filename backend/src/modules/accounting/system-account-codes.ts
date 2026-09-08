@@ -3,8 +3,10 @@
  * Must match chart_of_accounts.json leaf codes.
  */
 export const SystemAccountCode = {
+  /** Physical cash / hand cash (single channel). */
   CASH: '1111',
-  CASH_IN_HAND: '1115',
+  /** @deprecated Alias of CASH — Cash in Hand was a duplicate of Hand Cash. */
+  CASH_IN_HAND: '1111',
   BANK: '1112',
   BANK_ALT: '1113',
   MOBILE_BANKING: '1114',
@@ -16,6 +18,9 @@ export const SystemAccountCode = {
   ACCOUNTS_PAYABLE: '2111',
   SUBCONTRACTOR_PAYABLE: '2113',
   EMPLOYEE_PAYABLES: '2121',
+  SOURCE_TAX_PAYABLE: '2131',
+  VAT_PAYABLE: '2132',
+  PF_PAYABLE: '2133',
   OWNER_CAPITAL: '3100',
   RETAINED_EARNINGS: '3200',
   PROJECT_REVENUE: '4110',

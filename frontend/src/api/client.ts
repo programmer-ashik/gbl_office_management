@@ -44,6 +44,8 @@ import type { CreateProjectBody, Project, ProjectStatus } from '../types/project
 import type {
   PayrollEmployee,
   PayrollRun,
+  PayrollSettings,
+  SalaryBreakdownPreview,
   SalaryStructure,
   TimeLog,
 } from '../types/payroll'
@@ -487,10 +489,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  updateQuotationStatus: (id: string, status: QuotationStatus) =>
+  updateQuotationStatus: (
+    id: string,
+    status: QuotationStatus,
+    projectId?: string,
+  ) =>
     request<Quotation>(`/quotations/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, projectId }),
     }),
   projects: (status?: ProjectStatus) =>
     request<Project[]>(status ? `/projects?status=${status}` : '/projects'),
@@ -851,10 +857,52 @@ export const api = {
   apAging: (asOf?: string) =>
     request<AgingReport>(`/payables/aging${asOf ? `?asOf=${asOf}` : ''}`),
   payrollEmployees: () => request<PayrollEmployee[]>('/payroll/employees'),
+  payrollSettings: () => request<PayrollSettings>('/payroll/settings'),
+  updatePayrollSettings: (body: PayrollSettings) =>
+    request<PayrollSettings>('/payroll/settings', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  previewSalaryBreakdown: (body: {
+    grossSalary: number
+    customBreakdownApplied?: boolean
+    breakdown?: Partial<{
+      basicSalary: number
+      houseRent: number
+      medicalAllowance: number
+      conveyanceAllowance: number
+      otherAllowances: number
+    }>
+    deductionsDetail?: Partial<{
+      providentFund: number
+      taxDeduction: number
+      advanceAdjustment: number
+    }>
+  }) =>
+    request<SalaryBreakdownPreview>('/payroll/salary-structures/preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   salaryStructures: () => request<SalaryStructure[]>('/payroll/salary-structures'),
   upsertSalaryStructure: (body: {
     employeeId: string
-    basic: number
+    grossSalary?: number
+    customBreakdownApplied?: boolean
+    breakdown?: {
+      basicSalary?: number
+      houseRent?: number
+      medicalAllowance?: number
+      conveyanceAllowance?: number
+      otherAllowances?: number
+    }
+    deductionsDetail?: {
+      providentFund?: number
+      taxDeduction?: number
+      advanceAdjustment?: number
+    }
+    customOverride?: boolean
+    /** @deprecated Prefer grossSalary + breakdown */
+    basic?: number
     allowances?: Array<{ name: string; amount: number }>
     deductions?: Array<{ name: string; amount: number }>
   }) =>
@@ -886,11 +934,25 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  postPayroll: (id: string) =>
+    request<PayrollRun>(`/payroll/runs/${id}/post`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
   disbursePayroll: (id: string, body: { treasuryId: string; date: string }) =>
     request<PayrollRun>(`/payroll/runs/${id}/disburse`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  downloadPayrollSalarySlipsPdf: (id: string, employeeId?: string) => {
+    const qs = employeeId
+      ? `?employeeId=${encodeURIComponent(employeeId)}`
+      : ''
+    return downloadBlob(
+      `/payroll/runs/${id}/salary-slips/pdf${qs}`,
+      `payroll-${id}-slips.pdf`,
+    )
+  },
   auditLogs: (entityType?: string) =>
     request<AuditLog[]>(
       `/audit${entityType ? `?entityType=${encodeURIComponent(entityType)}` : ''}`,

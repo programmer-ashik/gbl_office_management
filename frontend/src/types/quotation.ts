@@ -51,7 +51,6 @@ export type Quotation = {
 }
 
 export type CreateQuotationBody = {
-  projectId?: string
   clientInfo: {
     name: string
     phone?: string

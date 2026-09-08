@@ -180,6 +180,7 @@ describe('Phase 9 RBAC, approvals, OCR and audit (e2e)', () => {
     expect(queued.body.data.requiresApproval).toBe(true);
     approvalId = queued.body.data.approval.id as string;
     expect(queued.body.data.approval.steps).toHaveLength(3);
+    expect(queued.body.data.approval.projectId).toBe(assignedProjectId);
 
     await request(app)
       .post(`/api/v1/approvals/${approvalId}/approve`)
@@ -215,6 +216,69 @@ describe('Phase 9 RBAC, approvals, OCR and audit (e2e)', () => {
       })
       .expect(201);
     expect(posted.body.data.entryNumber).toMatch(/^JE-/);
+  });
+
+  it('skips PM step when large journal has no projectId', async () => {
+    const queued = await request(app)
+      .post('/api/v1/journals')
+      .set('Authorization', `Bearer ${accountantToken}`)
+      .send({
+        date: '2026-09-11',
+        memo: 'Large untagged cash move',
+        lines: [
+          { accountCode: '1112', debit: 120_000 },
+          { accountCode: '3100', credit: 120_000 },
+        ],
+      })
+      .expect(202);
+
+    const approval = queued.body.data.approval as {
+      id: string;
+      steps: Array<{ role: string }>;
+      projectId: string | null;
+    };
+    expect(approval.projectId).toBeNull();
+    expect(approval.steps.map((s) => s.role)).toEqual([
+      'accountant',
+      'admin',
+    ]);
+
+    await request(app)
+      .post(`/api/v1/approvals/${approval.id}/approve`)
+      .set('Authorization', `Bearer ${accountantToken}`)
+      .send({ note: 'Accounts OK' })
+      .expect(200);
+
+    const fully = await request(app)
+      .post(`/api/v1/approvals/${approval.id}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ note: 'MD OK' })
+      .expect(200);
+    expect(fully.body.data.status).toBe('approved');
+  });
+
+  it('allows any PM to decide a PM step (not scoped to assigned project)', async () => {
+    const queued = await request(app)
+      .post('/api/v1/journals')
+      .set('Authorization', `Bearer ${accountantToken}`)
+      .send({
+        date: '2026-09-12',
+        memo: 'Cross-PM approval gap',
+        projectId: assignedProjectId,
+        lines: [
+          { accountCode: '1112', debit: 110_000 },
+          { accountCode: '3100', credit: 110_000 },
+        ],
+      })
+      .expect(202);
+
+    const id = queued.body.data.approval.id as string;
+    // otherPm is manager of otherProjectId, not assignedProjectId
+    await request(app)
+      .post(`/api/v1/approvals/${id}/approve`)
+      .set('Authorization', `Bearer ${otherPmToken}`)
+      .send({ note: 'Other PM can still approve' })
+      .expect(200);
   });
 
   it('records immutable audit logs for ledger posts', async () => {

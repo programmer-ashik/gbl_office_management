@@ -116,11 +116,6 @@ const DEFAULT_TREASURY: Array<{
     glAccountCode: SystemAccountCode.CASH,
   },
   {
-    name: 'Cash in Hand',
-    kind: TreasuryKind.PETTY_CASH,
-    glAccountCode: SystemAccountCode.CASH_IN_HAND,
-  },
-  {
     name: 'BRAC Bank',
     kind: TreasuryKind.COMMERCIAL_BANK,
     glAccountCode: SystemAccountCode.BANK,
@@ -133,6 +128,9 @@ const DEFAULT_TREASURY: Array<{
     institution: 'bKash / Nagad',
   },
 ];
+
+/** Legacy duplicate cash GL — same as Hand Cash; deactivate if still linked. */
+const LEGACY_CASH_IN_HAND_CODE = '1115';
 
 export class BankingService {
   constructor(
@@ -148,13 +146,28 @@ export class BankingService {
         glAccountCode: row.glAccountCode,
       }).exec();
       if (existing) {
-        // Keep GL link; refresh display name for Hand Cash clarity.
-        if (
-          row.glAccountCode === SystemAccountCode.CASH &&
-          existing.name !== row.name
-        ) {
+        let dirty = false;
+        if (existing.name !== row.name) {
           existing.name = row.name;
+          dirty = true;
+        }
+        if (existing.kind !== row.kind) {
           existing.kind = row.kind;
+          dirty = true;
+        }
+        if (row.institution && existing.institution !== row.institution) {
+          existing.institution = row.institution;
+          dirty = true;
+        }
+        if (!existing.isActive) {
+          existing.isActive = true;
+          dirty = true;
+        }
+        if (!existing.isSystem) {
+          existing.isSystem = true;
+          dirty = true;
+        }
+        if (dirty) {
           await existing.save();
         }
         continue;
@@ -172,6 +185,37 @@ export class BankingService {
       });
       created += 1;
     }
+
+    // Align Hand Cash GL display name with CoA / treasury label.
+    const cashGl = await AccountModel.findOne({
+      code: SystemAccountCode.CASH,
+    }).exec();
+    if (cashGl && cashGl.name !== 'Hand Cash') {
+      cashGl.name = 'Hand Cash';
+      await cashGl.save();
+    }
+
+    // Retire duplicate "Cash in Hand" (1115) — same concept as Hand Cash (1111).
+    const legacyCash = await TreasuryAccountModel.findOne({
+      glAccountCode: LEGACY_CASH_IN_HAND_CODE,
+    }).exec();
+    if (legacyCash && legacyCash.isActive) {
+      legacyCash.isActive = false;
+      legacyCash.isSystem = false;
+      await legacyCash.save();
+      console.log(
+        'Deactivated legacy treasury "Cash in Hand" (1115); use Hand Cash (1111)',
+      );
+    }
+
+    const legacyGl = await AccountModel.findOne({
+      code: LEGACY_CASH_IN_HAND_CODE,
+    }).exec();
+    if (legacyGl && legacyGl.isActive) {
+      legacyGl.isActive = false;
+      await legacyGl.save();
+    }
+
     if (created > 0) {
       console.log(`Seeded ${created} treasury account(s)`);
     }
@@ -238,7 +282,7 @@ export class BankingService {
   }
 
   async list(): Promise<PublicTreasuryAccount[]> {
-    const accounts = await TreasuryAccountModel.find()
+    const accounts = await TreasuryAccountModel.find({ isActive: true })
       .sort({ kind: 1, name: 1 })
       .exec();
     const balances = await this.balancesByCode(

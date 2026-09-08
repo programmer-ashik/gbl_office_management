@@ -13,3 +13,7 @@ export function canCreateQuotation(role: Role | undefined | null): boolean {
 export function canAuditQuotations(role: Role | undefined | null): boolean {
   return role === Role.ADMIN || role === Role.ACCOUNTANT
 }
+
+export function canApproveQuotation(role: Role | undefined | null): boolean {
+  return role === Role.ADMIN || role === Role.ACCOUNTANT
+}

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import { canCreateQuotation } from '../auth/permissions'
 import { useAuth } from '../auth/AuthContext'
 import { money } from '../types/accounting'
+import { Role } from '../types/auth'
 import type { Item, ProductCategory, StockRow } from '../types/procurement'
-import { writeQuotationProductSelection } from '../utils/quotationProductSelection'
+import { writePoProductSelection } from '../utils/poProductSelection'
 
 const PAGE_SIZE = 25
 
@@ -28,10 +28,14 @@ function stockByItem(rows: StockRow[]): Map<string, StockSummary> {
   return map
 }
 
-export function QuotationProductSelectPage() {
+export function PurchaseOrderProductSelectPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const canUse = canCreateQuotation(user?.role)
+  const canUse =
+    user?.role === Role.ADMIN ||
+    user?.role === Role.ACCOUNTANT ||
+    user?.role === Role.PROJECT_MANAGER
+
   const [categories, setCategories] = useState<ProductCategory[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [stockMap, setStockMap] = useState<Map<string, StockSummary>>(
@@ -48,7 +52,7 @@ export function QuotationProductSelectPage() {
   useEffect(() => {
     if (!canUse) return
     Promise.all([
-      api.productCategories(),
+      api.productCategories().catch(() => [] as ProductCategory[]),
       api.items(),
       api.inventory().catch(() => [] as StockRow[]),
     ])
@@ -80,8 +84,6 @@ export function QuotationProductSelectPage() {
   const filteredItems = useMemo(() => {
     const q = productSearch.trim().toLowerCase()
     return items.filter((row) => {
-      const stock = stockMap.get(row.id)
-      if (!stock || stock.quantity <= 0) return false
       if (selectedSubId && row.subCategoryId !== selectedSubId) return false
       if (
         selectedCategoryId &&
@@ -98,7 +100,7 @@ export function QuotationProductSelectPage() {
         (row.model ?? '').toLowerCase().includes(q)
       )
     })
-  }, [items, selectedCategoryId, selectedSubId, productSearch, stockMap])
+  }, [items, selectedCategoryId, selectedSubId, productSearch])
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
@@ -151,21 +153,21 @@ export function QuotationProductSelectPage() {
       .map((row) => ({
         productId: row.id,
         productName: `${row.sku} · ${row.name}`,
-        unitPrice: row.unitPrice ?? stockMap.get(row.id)?.unitPrice ?? 0,
+        unitPrice: row.unitPrice ?? stockMap.get(row.id)?.unitPrice ?? undefined,
       }))
     if (products.length === 0) {
       setError('Select at least one product')
       return
     }
-    writeQuotationProductSelection(products)
+    writePoProductSelection(products)
     setError(null)
-    navigate('/quotations/new')
+    navigate('/procurement/new')
   }
 
   if (!canUse) {
     return (
       <section className="table-card">
-        <p className="form-error">You cannot select quotation products.</p>
+        <p className="form-error">You cannot select purchase order products.</p>
       </section>
     )
   }
@@ -179,11 +181,11 @@ export function QuotationProductSelectPage() {
         <div>
           <h1>Select products</h1>
           <p className="muted">
-            In-stock items only. Select products, then save back to the quotation.
+            Catalog SKUs for this purchase order. Save to return to the PO form.
           </p>
         </div>
         <div className="form-actions">
-          <Link to="/quotations/new" className="ghost-link">
+          <Link to="/procurement/new" className="ghost-link">
             Back
           </Link>
           <button
@@ -296,8 +298,9 @@ export function QuotationProductSelectPage() {
               </thead>
               <tbody>
                 {pageItems.map((row) => {
-                  const stock = stockMap.get(row.id)!
-                  const displayPrice = row.unitPrice ?? stock.unitPrice
+                  const stock = stockMap.get(row.id)
+                  const displayPrice =
+                    row.unitPrice ?? stock?.unitPrice ?? null
                   return (
                     <tr
                       key={row.id}
@@ -324,15 +327,17 @@ export function QuotationProductSelectPage() {
                       <td>{row.unit}</td>
                       <td>{row.brand ?? '—'}</td>
                       <td>{categoryLabel(row)}</td>
-                      <td className="num">{stock.quantity}</td>
-                      <td className="num">{money(displayPrice)}</td>
+                      <td className="num">{stock?.quantity ?? 0}</td>
+                      <td className="num">
+                        {displayPrice != null ? money(displayPrice) : '—'}
+                      </td>
                     </tr>
                   )
                 })}
                 {pageItems.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="muted">
-                      No in-stock products match this filter.
+                      No catalog products match this filter.
                     </td>
                   </tr>
                 ) : null}
@@ -375,7 +380,7 @@ export function QuotationProductSelectPage() {
               onClick={onSave}
               disabled={selectedIds.size === 0}
             >
-              Save to quotation ({selectedIds.size})
+              Save to purchase order ({selectedIds.size})
             </button>
           </div>
         </div>

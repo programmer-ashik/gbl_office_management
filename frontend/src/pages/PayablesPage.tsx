@@ -79,8 +79,7 @@ export function PayablesPage() {
           row.isActive &&
           (row.kind === 'cash' ||
             row.kind === 'petty_cash' ||
-            row.glAccountCode === '1111' ||
-            row.glAccountCode === '1115'),
+            row.glAccountCode === '1111'),
       ) ?? treasuryList.find((row) => row.isActive)
     if (!billTreasuryId && preferredCash) {
       setBillTreasuryId(preferredCash.id)
