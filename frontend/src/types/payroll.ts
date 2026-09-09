@@ -81,7 +81,8 @@ export type TimeLog = {
   id: string
   employeeId: string
   employeeName: string
-  projectId: string
+  kind: 'project' | 'administrative'
+  projectId: string | null
   projectCode: string
   projectName: string
   periodYear: number
@@ -89,6 +90,24 @@ export type TimeLog = {
   unit: string
   quantity: number
   notes: string | null
+}
+
+export type SalaryFacility = {
+  id: string
+  facilityNumber: string
+  kind: 'salary_advance' | 'salary_loan'
+  status: string
+  employeeId: string
+  employeeName: string
+  principal: number
+  installment: number
+  installmentCount: number
+  repaid: number
+  outstanding: number
+  purpose: string
+  treasuryAccountCode: string | null
+  journalNumber: string | null
+  disbursedAt: string
 }
 
 export type PayrollLine = {
@@ -106,7 +125,15 @@ export type PayrollLine = {
     advanceNumber: string
     amount: number
   }>
+  facilityDeductions: Array<{
+    facilityId: string
+    facilityNumber: string
+    kind: 'salary_advance' | 'salary_loan'
+    label: string
+    amount: number
+  }>
   totalAdvanceDeductions: number
+  totalFacilityDeductions: number
   netPay: number
   allocations: Array<{
     projectId: string
@@ -126,6 +153,7 @@ export type PayrollRun = {
   totalGross: number
   totalStructuralDeductions: number
   totalAdvanceDeductions: number
+  totalFacilityDeductions?: number
   totalNetPay: number
   accrualJournalNumber: string | null
   postedAt: string | null

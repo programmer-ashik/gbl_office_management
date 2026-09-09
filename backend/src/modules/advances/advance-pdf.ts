@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit'
 import { AdvanceStatus } from '../../common/enums/advance-status.enum'
 import { fromMinorUnits } from '../../common/utils/money'
+import { resolveCompanyLogoForPdf } from '../pdf/company-logo'
 import type { AdvanceDocument } from './advance.model'
 
 const STATUS_LABEL: Record<AdvanceStatus, string> = {
@@ -23,9 +24,25 @@ function dateLabel(value?: Date | null): string {
   return value.toISOString().slice(0, 10)
 }
 
+function drawLogo(
+  doc: PDFKit.PDFDocument,
+  logoPath: string | null,
+  x = 48,
+  y = 40,
+): number {
+  if (!logoPath) return 0
+  try {
+    doc.image(logoPath, x, y, { height: 36 })
+    return 90
+  } catch {
+    return 0
+  }
+}
+
 export async function buildAdvanceVoucherPdf(
   row: AdvanceDocument,
 ): Promise<Buffer> {
+  const logo = await resolveCompanyLogoForPdf()
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 48, size: 'A4' })
     const chunks: Buffer[] = []
@@ -33,13 +50,17 @@ export async function buildAdvanceVoucherPdf(
     doc.on('end', () => resolve(Buffer.concat(chunks)))
     doc.on('error', reject)
 
-    doc.fontSize(16).fillColor('#0f2744').text('GBL Office')
+    const indent = drawLogo(doc, logo.absolutePath)
+    doc
+      .fontSize(16)
+      .fillColor('#0f2744')
+      .text(logo.companyName, 48 + indent, 44)
     doc
       .fontSize(11)
       .fillColor('#5a6578')
-      .text('Employee Advance Disbursement Voucher')
-    doc.moveDown(0.8)
-    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#cfd6e0').stroke()
+      .text('Employee Advance Disbursement Voucher', 48 + indent)
+    doc.moveDown(1.2)
+    doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor('#1d4ed8').stroke()
     doc.moveDown(1)
 
     doc.fillColor('#0f2744').fontSize(12)
@@ -88,6 +109,7 @@ export async function buildProjectAdvanceReportPdf(input: {
   projectName: string
   rows: AdvanceDocument[]
 }): Promise<Buffer> {
+  const logo = await resolveCompanyLogoForPdf()
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       margin: 40,
@@ -99,12 +121,16 @@ export async function buildProjectAdvanceReportPdf(input: {
     doc.on('end', () => resolve(Buffer.concat(chunks)))
     doc.on('error', reject)
 
-    doc.fontSize(16).fillColor('#0f2744').text('Project Advance Summary Report')
+    const indent = drawLogo(doc, logo.absolutePath, 40, 32)
+    doc
+      .fontSize(16)
+      .fillColor('#0f2744')
+      .text('Project Advance Summary Report', 40 + indent, 36)
     doc
       .fontSize(11)
       .fillColor('#5a6578')
-      .text(`${input.projectCode} · ${input.projectName}`)
-    doc.text(`Generated: ${new Date().toISOString().slice(0, 10)}`)
+      .text(`${input.projectCode} · ${input.projectName}`, 40 + indent)
+    doc.text(`Generated: ${new Date().toISOString().slice(0, 10)}`, 40 + indent)
     doc.moveDown(0.8)
 
     const totalRequested = input.rows.reduce(

@@ -46,6 +46,7 @@ import type {
   PayrollRun,
   PayrollSettings,
   SalaryBreakdownPreview,
+  SalaryFacility,
   SalaryStructure,
   TimeLog,
 } from '../types/payroll'
@@ -974,7 +975,8 @@ export const api = {
     ),
   createTimeLog: (body: {
     employeeId: string
-    projectId: string
+    kind?: 'project' | 'administrative'
+    projectId?: string
     periodYear: number
     periodMonth: number
     unit: 'hours' | 'days'
@@ -985,6 +987,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  salaryFacilities: () =>
+    request<SalaryFacility[]>('/payroll/salary-facilities'),
+  createSalaryFacility: (body: {
+    employeeId: string
+    kind: 'salary_advance' | 'salary_loan'
+    principal: number
+    installment: number
+    installmentCount: number
+    treasuryId: string
+    date: string
+    purpose: string
+  }) =>
+    request<SalaryFacility>('/payroll/salary-facilities', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   payrollRuns: () => request<PayrollRun[]>('/payroll/runs'),
   payrollRun: (id: string) => request<PayrollRun>(`/payroll/runs/${id}`),
   generatePayroll: (body: { periodYear: number; periodMonth: number }) =>
@@ -992,10 +1010,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  postPayroll: (id: string) =>
+  postPayroll: (
+    id: string,
+    body?: { salaryExpenseAccountCode?: string },
+  ) =>
     request<PayrollRun>(`/payroll/runs/${id}/post`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify(body ?? {}),
     }),
   disbursePayroll: (id: string, body: { treasuryId: string; date: string }) =>
     request<PayrollRun>(`/payroll/runs/${id}/disburse`, {

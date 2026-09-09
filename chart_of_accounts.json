@@ -61,7 +61,7 @@
   { "code": "5200", "name": "Operating & Office Overhead Expenses", "type": "Expense", "isHeader": true, "parentCode": "5000" },
   { "code": "5210", "name": "Office Rent", "type": "Expense", "isHeader": false, "parentCode": "5200" },
   { "code": "5220", "name": "Utility Bills", "type": "Expense", "isHeader": false, "parentCode": "5200" },
-  { "code": "5230", "name": "Administrative & HQ Staff Salaries", "type": "Expense", "isHeader": false, "parentCode": "5200" },
+  { "code": "5230", "name": "Office Employee Salary", "type": "Expense", "isHeader": false, "parentCode": "5200" },
   { "code": "5240", "name": "Office Petty Cash Expenses", "type": "Expense", "isHeader": false, "parentCode": "5200" },
   { "code": "5250", "name": "Bank Charges & Transaction Fees", "type": "Expense", "isHeader": false, "parentCode": "5200" }
 ]

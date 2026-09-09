@@ -8,9 +8,11 @@ import { validateBody } from '../../common/middleware/validate';
 import type { AuthService } from '../auth/auth.service';
 import type { UsersService } from '../users/users.service';
 import {
+  CreateSalaryFacilityDto,
   CreateTimeLogDto,
   DisbursePayrollDto,
   GeneratePayrollDto,
+  PostPayrollDto,
   PreviewSalaryBreakdownDto,
   UpdatePayrollSettingsDto,
   UpsertSalaryStructureDto,
@@ -124,6 +126,27 @@ export function createPayrollRouter(
   );
 
   router.get(
+    '/salary-facilities',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const rows = await payrollService.listSalaryFacilities(req.user!);
+      sendSuccess(res, rows, 'Salary advances & loans retrieved successfully');
+    }),
+  );
+
+  router.post(
+    '/salary-facilities',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(CreateSalaryFacilityDto),
+    asyncHandler(async (req, res) => {
+      const row = await payrollService.createSalaryFacility(req.body, req.user!);
+      sendSuccess(res, row, 'Salary facility disbursed successfully', 201);
+    }),
+  );
+
+  router.get(
     '/runs',
     auth,
     requireRoles(...FINANCE),
@@ -158,8 +181,13 @@ export function createPayrollRouter(
     '/runs/:id/post',
     auth,
     requireRoles(...FINANCE),
+    validateBody(PostPayrollDto),
     asyncHandler(async (req, res) => {
-      const row = await payrollService.postRun(String(req.params.id), req.user!);
+      const row = await payrollService.postRun(
+        String(req.params.id),
+        req.user!,
+        req.body,
+      );
       sendSuccess(res, row, 'Monthly payroll posted (accrual) successfully');
     }),
   );

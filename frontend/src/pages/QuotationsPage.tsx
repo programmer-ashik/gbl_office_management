@@ -97,120 +97,139 @@ export function QuotationsPage() {
           </p>
         </div>
         <div className='header-actions'>
-          <button
-            type='button'
-            onClick={() => navigate('/quotations/new')}
-          >
+          <button type='button' onClick={() => navigate("/quotations/new")}>
             New quotation
           </button>
         </div>
       </header>
-
       <section className='table-card'>
         <form
-          className='filter-bar filter-bar-compact'
+          className='flex flex-col gap-4'
           onSubmit={(event: FormEvent) => {
             event.preventDefault();
             void load();
           }}
         >
-          {canAudit ? (
-            <label>
-              Employee
+          {/* Main filters */}
+          <div className='flex flex-wrap items-end gap-4'>
+            {canAudit ? (
+              <label className='flex min-w-[200px] flex-1 flex-col gap-1'>
+                <span>Employee</span>
+
+                <Select
+                  value={createdBy}
+                  onChange={setCreatedBy}
+                  options={[
+                    { value: "", label: "All employees" },
+                    ...employeeOptions,
+                  ]}
+                  searchable
+                  portal
+                  placeholder='All employees'
+                />
+              </label>
+            ) : null}
+
+            <label className='flex min-w-[200px] flex-1 flex-col gap-1'>
+              <span>Project</span>
+
               <Select
-                value={createdBy}
-                onChange={setCreatedBy}
+                value={projectId}
+                onChange={setProjectId}
                 options={[
-                  { value: "", label: "All employees" },
-                  ...employeeOptions,
+                  { value: "", label: "All projects" },
+                  ...projects.map((row) => ({
+                    value: row.id,
+                    label: row.name,
+                  })),
                 ]}
                 searchable
                 portal
-                placeholder='All employees'
+                placeholder='All projects'
               />
             </label>
-          ) : null}
-          <label>
-            Project
-            <Select
-              value={projectId}
-              onChange={setProjectId}
-              options={[
-                { value: "", label: "All projects" },
-                ...projects.map((row) => ({
-                  value: row.id,
-                  label: `${row.code} · ${row.name}`,
-                })),
-              ]}
-              searchable
-              portal
-              placeholder='All projects'
-            />
-          </label>
-          <label>
-            Status
-            <Select
-              value={status}
-              onChange={setStatus}
-              options={[
-                { value: "", label: "All statuses" },
-                ...Object.values(QuotationStatus).map((value) => ({
-                  value,
-                  label: QUOTATION_STATUS_LABEL[value],
-                })),
-              ]}
-            />
-          </label>
-          <label>
-            From
-            <input
-              type='date'
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-            />
-          </label>
-          <label>
-            To
-            <input
-              type='date'
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-            />
-          </label>
-          <div className='form-actions compact-actions filter-actions'>
-            <button type='submit'>Apply</button>
-            <button
-              type='button'
-              className='ghost'
-              onClick={() => {
-                setCreatedBy("");
-                setProjectId("");
-                setStatus("");
-                setFromDate("");
-                setToDate("");
-                setLoading(true);
-                setError(null);
-                api
-                  .quotations({})
-                  .then(setRows)
-                  .catch((err: unknown) => {
-                    setError(
-                      err instanceof Error
-                        ? err.message
-                        : "Unable to load quotations",
-                    );
-                  })
-                  .finally(() => setLoading(false));
-              }}
-            >
-              Clear
-            </button>
+
+            <label className='flex min-w-[180px] flex-1 flex-col gap-1'>
+              <span>Status</span>
+
+              <Select
+                value={status}
+                onChange={setStatus}
+                options={[
+                  { value: "", label: "All statuses" },
+                  ...Object.values(QuotationStatus).map((value) => ({
+                    value,
+                    label: QUOTATION_STATUS_LABEL[value],
+                  })),
+                ]}
+              />
+            </label>
+          </div>
+
+          {/* Date filters + actions */}
+          <div className='flex flex-wrap items-end gap-4'>
+            <label className='flex min-w-[180px] flex-1 flex-col gap-1'>
+              <span>From</span>
+
+              <input
+                type='date'
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+              />
+            </label>
+
+            <label className='flex min-w-[180px] flex-1 flex-col gap-1'>
+              <span>To</span>
+
+              <input
+                type='date'
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+              />
+            </label>
+
+            <div className='flex items-center gap-2'>
+              <button type='submit'>Apply</button>
+
+              <button
+                type='button'
+                className='ghost'
+                onClick={() => {
+                  setCreatedBy("");
+                  setProjectId("");
+                  setStatus("");
+                  setFromDate("");
+                  setToDate("");
+
+                  setLoading(true);
+                  setError(null);
+
+                  api
+                    .quotations({})
+                    .then(setRows)
+                    .catch((err: unknown) => {
+                      setError(
+                        err instanceof Error
+                          ? err.message
+                          : "Unable to load quotations",
+                      );
+                    })
+                    .finally(() => setLoading(false));
+                }}
+              >
+                Clear
+              </button>
+            </div>
           </div>
         </form>
 
+        {/* Error */}
         {error ? <p className='form-error'>{error}</p> : null}
+
+        {/* Loading */}
         {loading ? <p className='muted'>Loading…</p> : null}
 
+        {/* Table */}
         <div className='journal-lines-scroll'>
           <table className='journal-lines-table'>
             <thead>
@@ -225,6 +244,7 @@ export function QuotationsPage() {
                 <th>Actions</th>
               </tr>
             </thead>
+
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id}>
@@ -233,12 +253,19 @@ export function QuotationsPage() {
                       {row.quotationNumber}
                     </Link>
                   </td>
+
                   <td>{row.clientInfo.name}</td>
+
                   <td>{row.projectName ?? "—"}</td>
+
                   <td>{row.createdByName}</td>
+
                   <td>{row.createdAt.slice(0, 10)}</td>
+
                   <td>{QUOTATION_STATUS_LABEL[row.status]}</td>
+
                   <td className='num'>{money(row.grandTotal)}</td>
+
                   <td>
                     <div className='form-actions'>
                       <button
@@ -248,6 +275,7 @@ export function QuotationsPage() {
                       >
                         Open
                       </button>
+
                       <button
                         type='button'
                         className='ghost'
@@ -259,6 +287,7 @@ export function QuotationsPage() {
                   </td>
                 </tr>
               ))}
+
               {!loading && rows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className='muted'>

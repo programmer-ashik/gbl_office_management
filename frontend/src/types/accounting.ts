@@ -177,6 +177,9 @@ export type BalanceSheetLine = {
   isHeader: boolean
   isPostable: boolean
   depth: number
+  isParty?: boolean
+  entityType?: string | null
+  entityId?: string | null
 }
 
 export type BalanceSheetSection = {

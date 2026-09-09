@@ -23,6 +23,7 @@ export type LogoAlign = 'left' | 'center' | 'right';
 export type TemplateBlockStyles = {
   logoAlign?: LogoAlign;
   showAccountCodes?: boolean;
+  showPartyBreakdown?: boolean;
 };
 
 export type TemplateBlock = {
@@ -124,14 +125,14 @@ export function defaultBalanceSheetTemplate(): PublicReportTemplate {
         type: 'ASSETS_SECTION',
         position: 3,
         visible: true,
-        styles: { showAccountCodes: true },
+        styles: { showAccountCodes: true, showPartyBreakdown: true },
       },
       {
         id: 'liabilities_section',
         type: 'LIABILITIES_SECTION',
         position: 4,
         visible: true,
-        styles: { showAccountCodes: true },
+        styles: { showAccountCodes: true, showPartyBreakdown: true },
       },
       {
         id: 'equity_section',

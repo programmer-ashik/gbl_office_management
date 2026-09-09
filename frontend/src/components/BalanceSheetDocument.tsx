@@ -13,18 +13,29 @@ import {
   type TemplateBlock,
 } from '../types/report-template'
 
+function partyHref(line: BalanceSheetLine): string | null {
+  if (!line.isParty || !line.entityId) return null
+  if (line.entityType === 'employee') return `/employees/${line.entityId}/ledger`
+  if (line.entityType === 'customer') return `/customers/${line.entityId}`
+  if (line.entityType === 'supplier') return `/suppliers/${line.entityId}`
+  return null
+}
+
 function SectionBlock({
   section,
   showAccountCodes,
+  showPartyBreakdown,
   interactive,
 }: {
   section: BalanceSheetSection
   showAccountCodes: boolean
+  showPartyBreakdown: boolean
   interactive: boolean
 }) {
-  const visible = section.lines.filter(
-    (line) => line.isHeader || Math.abs(line.balance) >= 0.005,
-  )
+  const visible = section.lines.filter((line) => {
+    if (line.isParty && !showPartyBreakdown) return false
+    return line.isHeader || line.isParty || Math.abs(line.balance) >= 0.005
+  })
 
   return (
     <div className="bs-section">
@@ -62,11 +73,15 @@ function LineRow({
   interactive: boolean
 }) {
   const depth = Math.max(0, line.depth)
-  const isHeader = line.isHeader || !line.isPostable
+  const isHeader = (line.isHeader || !line.isPostable) && !line.isParty
   const label = (
     <>
-      {showAccountCodes ? <span className="bs-code">{line.code}</span> : null}
-      <span className="bs-name">{line.name}</span>
+      {showAccountCodes && !line.isParty ? (
+        <span className="bs-code">{line.code}</span>
+      ) : null}
+      <span className={line.isParty ? 'bs-name bs-party-name' : 'bs-name'}>
+        {line.name}
+      </span>
     </>
   )
 
@@ -79,11 +94,21 @@ function LineRow({
     )
   }
 
+  const href = line.isParty
+    ? partyHref(line)
+    : line.isPostable
+      ? `/ledgers/${line.code}`
+      : null
+
   return (
-    <tr className={`bs-line-row bs-depth-${Math.min(depth, 4)}`}>
+    <tr
+      className={`bs-line-row bs-depth-${Math.min(depth, 4)}${
+        line.isParty ? ' bs-party-row' : ''
+      }`}
+    >
       <td className="bs-cell-account">
-        {interactive ? (
-          <Link to={`/ledgers/${line.code}`} className="bs-drill">
+        {interactive && href ? (
+          <Link to={href} className="bs-drill">
             {label}
           </Link>
         ) : (
@@ -230,8 +255,12 @@ function FooterBlock({ template }: { template: BalanceSheetTemplate }) {
   )
 }
 
-function showCodesFor(block: TemplateBlock): boolean {
-  return block.styles?.showAccountCodes !== false
+function showCodesFor(block: TemplateBlock | undefined): boolean {
+  return block?.styles?.showAccountCodes !== false
+}
+
+function showPartiesFor(block: TemplateBlock | undefined): boolean {
+  return block?.styles?.showPartyBreakdown === true
 }
 
 type Props = {
@@ -249,8 +278,12 @@ export function BalanceSheetDocument({
     .filter(isBlockVisible)
     .sort((a, b) => a.position - b.position)
 
+  const assetsBlock = blocks.find((b) => b.type === 'ASSETS_SECTION')
+  const liabilitiesBlock = blocks.find((b) => b.type === 'LIABILITIES_SECTION')
+  const equityBlock = blocks.find((b) => b.type === 'EQUITY_SECTION')
+
   return (
-    <div className="bs-report bs-document">
+    <div className="bs-report bs-document bs-report--landscape">
       {blocks.map((block) => {
         switch (block.type) {
           case 'LOGO':
@@ -274,74 +307,87 @@ export function BalanceSheetDocument({
           case 'METRIC_TILES':
             return <MetricsBlock key={block.id} report={report} />
           case 'ASSETS_SECTION':
+            // Rendered once with liabilities/equity in landscape columns
+            if (block.id !== assetsBlock?.id) return null
             return (
-              <div key={block.id} className="table-card bs-column">
-                <div className="bs-column-head">
-                  <h2>Assets</h2>
+              <div key="bs-landscape-columns" className="bs-columns">
+                <div className="table-card bs-column">
+                  <div className="bs-column-head">
+                    <h2>Assets (Debit)</h2>
+                  </div>
+                  {assetsBlock ? (
+                    <>
+                      <SectionBlock
+                        section={report.assets.current}
+                        showAccountCodes={showCodesFor(assetsBlock)}
+                        showPartyBreakdown={showPartiesFor(assetsBlock)}
+                        interactive={interactive}
+                      />
+                      <SectionBlock
+                        section={report.assets.fixed}
+                        showAccountCodes={showCodesFor(assetsBlock)}
+                        showPartyBreakdown={showPartiesFor(assetsBlock)}
+                        interactive={interactive}
+                      />
+                      <StatementTotal
+                        label="TOTAL ASSETS"
+                        amount={report.assets.total}
+                        variant="grand"
+                      />
+                    </>
+                  ) : null}
                 </div>
-                <SectionBlock
-                  section={report.assets.current}
-                  showAccountCodes={showCodesFor(block)}
-                  interactive={interactive}
-                />
-                <SectionBlock
-                  section={report.assets.fixed}
-                  showAccountCodes={showCodesFor(block)}
-                  interactive={interactive}
-                />
-                <StatementTotal
-                  label="TOTAL ASSETS"
-                  amount={report.assets.total}
-                  variant="grand"
-                />
+                <div className="table-card bs-column">
+                  <div className="bs-column-head">
+                    <h2>Liabilities & Equity (Credit)</h2>
+                  </div>
+                  {liabilitiesBlock ? (
+                    <>
+                      <SectionBlock
+                        section={report.liabilities.current}
+                        showAccountCodes={showCodesFor(liabilitiesBlock)}
+                        showPartyBreakdown={showPartiesFor(liabilitiesBlock)}
+                        interactive={interactive}
+                      />
+                      <SectionBlock
+                        section={report.liabilities.longTerm}
+                        showAccountCodes={showCodesFor(liabilitiesBlock)}
+                        showPartyBreakdown={showPartiesFor(liabilitiesBlock)}
+                        interactive={interactive}
+                      />
+                      <StatementTotal
+                        label="TOTAL LIABILITIES"
+                        amount={report.liabilities.total}
+                        variant="subtotal"
+                      />
+                    </>
+                  ) : null}
+                  {equityBlock ? (
+                    <>
+                      <SectionBlock
+                        section={report.equity.section}
+                        showAccountCodes={showCodesFor(equityBlock)}
+                        showPartyBreakdown={false}
+                        interactive={interactive}
+                      />
+                      <StatementTotal
+                        label="TOTAL EQUITY"
+                        amount={report.equity.total}
+                        variant="subtotal"
+                      />
+                      <StatementTotal
+                        label="TOTAL LIABILITIES & EQUITY"
+                        amount={report.totalLiabilitiesAndEquity}
+                        variant="grand"
+                      />
+                    </>
+                  ) : null}
+                </div>
               </div>
             )
           case 'LIABILITIES_SECTION':
-            return (
-              <div key={block.id} className="table-card bs-column">
-                <div className="bs-column-head">
-                  <h2>Liabilities</h2>
-                </div>
-                <SectionBlock
-                  section={report.liabilities.current}
-                  showAccountCodes={showCodesFor(block)}
-                  interactive={interactive}
-                />
-                <SectionBlock
-                  section={report.liabilities.longTerm}
-                  showAccountCodes={showCodesFor(block)}
-                  interactive={interactive}
-                />
-                <StatementTotal
-                  label="TOTAL LIABILITIES"
-                  amount={report.liabilities.total}
-                  variant="subtotal"
-                />
-              </div>
-            )
           case 'EQUITY_SECTION':
-            return (
-              <div key={block.id} className="table-card bs-column">
-                <div className="bs-column-head">
-                  <h2>Equity</h2>
-                </div>
-                <SectionBlock
-                  section={report.equity.section}
-                  showAccountCodes={showCodesFor(block)}
-                  interactive={interactive}
-                />
-                <StatementTotal
-                  label="TOTAL EQUITY"
-                  amount={report.equity.total}
-                  variant="subtotal"
-                />
-                <StatementTotal
-                  label="TOTAL LIABILITIES & EQUITY"
-                  amount={report.totalLiabilitiesAndEquity}
-                  variant="grand"
-                />
-              </div>
-            )
+            return null
           case 'FOOTER_SIGNATURES':
             return <FooterBlock key={block.id} template={template} />
           default:
@@ -360,6 +406,7 @@ export function sampleBalanceSheetReport(): BalanceSheetReport {
     balance: number,
     depth: number,
     isHeader: boolean,
+    extra?: Partial<BalanceSheetLine>,
   ): BalanceSheetLine => ({
     code,
     name,
@@ -368,6 +415,7 @@ export function sampleBalanceSheetReport(): BalanceSheetReport {
     isHeader,
     isPostable: !isHeader,
     depth,
+    ...extra,
   })
 
   return {
@@ -379,8 +427,28 @@ export function sampleBalanceSheetReport(): BalanceSheetReport {
         total: 1_000_000,
         lines: [
           line('1100', 'Current Assets', 1_000_000, 0, true),
+          line('1121', 'Client Receivables', 200_000, 2, false),
+          line('1121:c1', 'Acme Ltd', 120_000, 3, false, {
+            isParty: true,
+            entityType: 'customer',
+            entityId: 'c1',
+            isPostable: false,
+          }),
+          line('1121:c2', 'Beta Traders', 80_000, 3, false, {
+            isParty: true,
+            entityType: 'customer',
+            entityId: 'c2',
+            isPostable: false,
+          }),
+          line('1131', 'Advance to Staff', 50_000, 2, false),
+          line('1131:e1', 'Rahim Uddin', 50_000, 3, false, {
+            isParty: true,
+            entityType: 'employee',
+            entityId: 'e1',
+            isPostable: false,
+          }),
           line('1111', 'Hand Cash', 150_000, 2, false),
-          line('1112', 'BRAC Bank', 850_000, 2, false),
+          line('1112', 'BRAC Bank', 600_000, 2, false),
         ],
       },
       fixed: {
@@ -395,8 +463,31 @@ export function sampleBalanceSheetReport(): BalanceSheetReport {
       current: {
         id: 'current_liabilities',
         title: 'Current Liabilities',
-        total: 0,
-        lines: [line('2100', 'Current Liabilities', 0, 0, true)],
+        total: 250_000,
+        lines: [
+          line('2100', 'Current Liabilities', 250_000, 0, true),
+          line('2111', 'Supplier Payables', 80_000, 2, false),
+          line('2111:s1', 'Steel Supply Co', 80_000, 3, false, {
+            isParty: true,
+            entityType: 'supplier',
+            entityId: 's1',
+            isPostable: false,
+          }),
+          line('2113', 'Subcontractor Payables', 40_000, 2, false),
+          line('2121', 'Unpaid Staff Salaries', 130_000, 2, false),
+          line('2121:e1', 'Rahim Uddin', 70_000, 3, false, {
+            isParty: true,
+            entityType: 'employee',
+            entityId: 'e1',
+            isPostable: false,
+          }),
+          line('2121:e2', 'Karim Ali', 60_000, 3, false, {
+            isParty: true,
+            entityType: 'employee',
+            entityId: 'e2',
+            isPostable: false,
+          }),
+        ],
       },
       longTerm: {
         id: 'long_term_liabilities',
@@ -404,21 +495,21 @@ export function sampleBalanceSheetReport(): BalanceSheetReport {
         total: 0,
         lines: [line('2200', 'Long-Term Liabilities', 0, 0, true)],
       },
-      total: 0,
+      total: 250_000,
     },
     equity: {
       section: {
         id: 'equity',
         title: 'Equity',
-        total: 1_000_000,
+        total: 750_000,
         lines: [
-          line('3000', 'Equity', 1_000_000, 0, true),
-          line('3100', "Owner's Capital", 1_000_000, 1, false),
+          line('3000', 'Equity', 750_000, 0, true),
+          line('3100', "Owner's Capital", 750_000, 1, false),
         ],
       },
       retainedEarnings: 0,
       netIncome: 0,
-      total: 1_000_000,
+      total: 750_000,
     },
     totalLiabilitiesAndEquity: 1_000_000,
     isBalanced: true,

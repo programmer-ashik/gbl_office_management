@@ -17,6 +17,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { api } from '../api/client'
+import { FileUploadField } from '../components/FileUploadField'
 import {
   BalanceSheetDocument,
   sampleBalanceSheetReport,
@@ -446,14 +447,12 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
               }
             />
           </label>
-          <label>
-            Company logo
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => void onUploadLogo(e.target.files?.[0] ?? null)}
-            />
-          </label>
+          <FileUploadField
+            label="Company logo"
+            accept="image/*"
+            hint="Used on invoices, JV, salary slips, and other PDFs"
+            onFile={(file) => void onUploadLogo(file)}
+          />
           {draft.companyLogoUrl ? (
             <button
               type="button"
@@ -652,21 +651,42 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
                 selected.type === 'LIABILITIES_SECTION' ||
                 selected.type === 'EQUITY_SECTION' ||
                 selected.type === 'LINES_TABLE') && (
-                <label className="tpl-check">
-                  <input
-                    type="checkbox"
-                    checked={selected.styles?.showAccountCodes !== false}
-                    onChange={(e) =>
-                      patchBlock(selected.id, {
-                        styles: {
-                          ...selected.styles,
-                          showAccountCodes: e.target.checked,
-                        },
-                      })
-                    }
-                  />
-                  Show account codes
-                </label>
+                <>
+                  <label className="tpl-check">
+                    <input
+                      type="checkbox"
+                      checked={selected.styles?.showAccountCodes !== false}
+                      onChange={(e) =>
+                        patchBlock(selected.id, {
+                          styles: {
+                            ...selected.styles,
+                            showAccountCodes: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    Show account codes
+                  </label>
+                  {(selected.type === 'ASSETS_SECTION' ||
+                    selected.type === 'LIABILITIES_SECTION') && (
+                    <label className="tpl-check">
+                      <input
+                        type="checkbox"
+                        checked={selected.styles?.showPartyBreakdown === true}
+                        onChange={(e) =>
+                          patchBlock(selected.id, {
+                            styles: {
+                              ...selected.styles,
+                              showPartyBreakdown: e.target.checked,
+                            },
+                          })
+                        }
+                      />
+                      Show party names (receivables, advances, payables,
+                      unpaid salaries)
+                    </label>
+                  )}
+                </>
               )}
             </div>
           ) : null}

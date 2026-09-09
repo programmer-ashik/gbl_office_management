@@ -1,36 +1,29 @@
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
-import { PageSkeleton } from './PageSkeleton'
-
-const SKELETON_MS = 260
 
 /**
- * Softens route changes with a brief skeleton + fade-in.
- * Does not alter page data loading or handlers.
+ * Soft route fade without skeleton swap — avoids table header blink.
  */
 export function PageTransition() {
   const location = useLocation()
-  const [phase, setPhase] = useState<'skeleton' | 'content'>('content')
-  const [activePath, setActivePath] = useState(location.pathname)
+  const [displayPath, setDisplayPath] = useState(location.pathname)
+  const [fading, setFading] = useState(false)
 
   useEffect(() => {
-    if (location.pathname === activePath) return
-
-    setPhase('skeleton')
-    const timer = window.setTimeout(() => {
-      setActivePath(location.pathname)
-      setPhase('content')
-    }, SKELETON_MS)
-
-    return () => window.clearTimeout(timer)
-  }, [location.pathname, activePath])
-
-  if (phase === 'skeleton') {
-    return <PageSkeleton />
-  }
+    if (location.pathname === displayPath) return
+    setFading(true)
+    const fadeOut = window.setTimeout(() => {
+      setDisplayPath(location.pathname)
+      setFading(false)
+    }, 90)
+    return () => window.clearTimeout(fadeOut)
+  }, [location.pathname, displayPath])
 
   return (
-    <div key={activePath} className="page-view">
+    <div
+      key={displayPath}
+      className={fading ? 'page-view page-view--fade' : 'page-view'}
+    >
       <Outlet />
     </div>
   )

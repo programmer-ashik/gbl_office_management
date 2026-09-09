@@ -8,6 +8,14 @@ export interface IPayrollAdvanceDeduction {
   amountMinor: number;
 }
 
+export interface IPayrollFacilityDeduction {
+  facilityId: Types.ObjectId;
+  facilityNumber: string;
+  kind: 'salary_advance' | 'salary_loan';
+  label: string;
+  amountMinor: number;
+}
+
 export interface IPayrollAllocation {
   projectId: Types.ObjectId;
   projectCode: string;
@@ -27,7 +35,9 @@ export interface IPayrollLine {
   structureAdvanceMinor: number;
   grossMinor: number;
   advanceDeductions: IPayrollAdvanceDeduction[];
+  facilityDeductions: IPayrollFacilityDeduction[];
   totalAdvanceDeductionMinor: number;
+  totalFacilityDeductionMinor: number;
   netPayMinor: number;
   allocations: IPayrollAllocation[];
 }
@@ -69,6 +79,25 @@ const advanceDeductionSchema = new Schema<IPayrollAdvanceDeduction>(
   { _id: false },
 );
 
+const facilityDeductionSchema = new Schema<IPayrollFacilityDeduction>(
+  {
+    facilityId: {
+      type: Schema.Types.ObjectId,
+      ref: 'SalaryFacility',
+      required: true,
+    },
+    facilityNumber: { type: String, required: true },
+    kind: {
+      type: String,
+      required: true,
+      enum: ['salary_advance', 'salary_loan'],
+    },
+    label: { type: String, required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+  },
+  { _id: false },
+);
+
 const allocationSchema = new Schema<IPayrollAllocation>(
   {
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true },
@@ -92,7 +121,14 @@ const payrollLineSchema = new Schema<IPayrollLine>(
     structureAdvanceMinor: { type: Number, required: true, min: 0, default: 0 },
     grossMinor: { type: Number, required: true, min: 1 },
     advanceDeductions: { type: [advanceDeductionSchema], default: [] },
+    facilityDeductions: { type: [facilityDeductionSchema], default: [] },
     totalAdvanceDeductionMinor: { type: Number, required: true, min: 0 },
+    totalFacilityDeductionMinor: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
+    },
     netPayMinor: { type: Number, required: true, min: 0 },
     allocations: { type: [allocationSchema], default: [] },
   },

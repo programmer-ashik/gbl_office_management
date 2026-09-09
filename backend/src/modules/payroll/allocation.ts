@@ -26,6 +26,14 @@ export type AdvanceDeduction = {
   amountMinor: number;
 };
 
+export type FacilityDeduction = {
+  facilityId: string;
+  facilityNumber: string;
+  kind: 'salary_advance' | 'salary_loan';
+  label: string;
+  amountMinor: number;
+};
+
 /**
  * Split gross across projects by time. Empty logs → [] (HQ salary uses 5230).
  */
@@ -113,6 +121,49 @@ export function proposeAdvanceDeductions(input: {
 }
 
 /**
+ * Cap each facility at its installment (or outstanding), from remaining net pool.
+ */
+export function proposeFacilityDeductions(input: {
+  poolMinor: number;
+  facilities: Array<{
+    facilityId: string;
+    facilityNumber: string;
+    kind: 'salary_advance' | 'salary_loan';
+    installmentMinor: number;
+    outstandingMinor: number;
+  }>;
+}): {
+  deductions: FacilityDeduction[];
+  totalFacilityDeductionMinor: number;
+  remainingPoolMinor: number;
+} {
+  let remaining = Math.max(0, input.poolMinor);
+  const deductions: FacilityDeduction[] = [];
+  for (const row of input.facilities) {
+    if (remaining <= 0) break;
+    const due = Math.min(row.installmentMinor, row.outstandingMinor);
+    const amountMinor = Math.min(remaining, due);
+    if (amountMinor <= 0) continue;
+    deductions.push({
+      facilityId: row.facilityId,
+      facilityNumber: row.facilityNumber,
+      kind: row.kind,
+      label:
+        row.kind === 'salary_loan'
+          ? `Salary loan ${row.facilityNumber}`
+          : `Salary advance ${row.facilityNumber}`,
+      amountMinor,
+    });
+    remaining -= amountMinor;
+  }
+  return {
+    deductions,
+    totalFacilityDeductionMinor: input.poolMinor - remaining,
+    remainingPoolMinor: remaining,
+  };
+}
+
+/**
  * Step 1 — Monthly accrual (expense recognized, net owed to staff).
  * Dr 5120 (project labor) or 5230 (HQ) = Gross
  * Cr 1131 advances · Cr 2133 PF · Cr 2131 tax · Cr 2121 net payable
@@ -123,10 +174,13 @@ export function buildAccrualJournalLines(input: {
   allocations: LaborAllocation[];
   grossMinor: number;
   advanceDeductions: AdvanceDeduction[];
+  facilityDeductions?: FacilityDeduction[];
   structureAdvanceMinor: number;
   providentFundMinor: number;
   taxDeductionMinor: number;
   netPayMinor: number;
+  /** HQ / office salary expense leaf (default 5230). Project labor stays 5120. */
+  adminSalaryAccountCode?: string;
 }): JournalLineDto[] {
   if (input.grossMinor <= 0) {
     throw badRequest('Gross salary must be greater than zero');
@@ -135,6 +189,8 @@ export function buildAccrualJournalLines(input: {
     throw badRequest('Net pay cannot be negative');
   }
 
+  const adminCode =
+    input.adminSalaryAccountCode?.trim() || ADMIN_SALARY_CODE;
   const lines: JournalLineDto[] = [];
   const allocated = input.allocations.reduce((s, r) => s + r.amountMinor, 0);
 
@@ -151,16 +207,16 @@ export function buildAccrualJournalLines(input: {
     const remainder = input.grossMinor - allocated;
     if (remainder > 0) {
       lines.push({
-        accountCode: ADMIN_SALARY_CODE,
+        accountCode: adminCode,
         debit: fromMinorUnits(remainder),
         description: `HQ salary · ${input.employeeName}`,
       });
     }
   } else {
     lines.push({
-      accountCode: ADMIN_SALARY_CODE,
+      accountCode: adminCode,
       debit: fromMinorUnits(input.grossMinor),
-      description: `HQ / admin salary · ${input.employeeName}`,
+      description: `Office / HQ salary · ${input.employeeName}`,
     });
   }
 
@@ -170,6 +226,16 @@ export function buildAccrualJournalLines(input: {
       credit: fromMinorUnits(row.amountMinor),
       description: `Advance recovery ${row.advanceNumber}`,
       projectId: row.projectId,
+      entityType: JournalEntityType.EMPLOYEE,
+      entityId: input.employeeId,
+    });
+  }
+
+  for (const row of input.facilityDeductions ?? []) {
+    lines.push({
+      accountCode: ADVANCE_ASSET_CODE,
+      credit: fromMinorUnits(row.amountMinor),
+      description: `${row.label} installment`,
       entityType: JournalEntityType.EMPLOYEE,
       entityId: input.employeeId,
     });

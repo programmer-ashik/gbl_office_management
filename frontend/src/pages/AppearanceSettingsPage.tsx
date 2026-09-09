@@ -2,7 +2,11 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { MetricCard } from '../components/MetricCard'
 import { Select } from '../components/ui'
-import { useTheme, type UiTheme } from '../theme/ThemeContext'
+import {
+  BUTTON_PRESETS,
+  useTheme,
+  type UiTheme,
+} from '../theme/ThemeContext'
 import { Role } from '../types/auth'
 
 const OPTIONS: Array<{
@@ -42,6 +46,9 @@ function AppearanceSettingsInner() {
     sidebar,
     setSidebar,
     resetSidebar,
+    primaryButton,
+    setPrimaryButton,
+    resetPrimaryButton,
   } = useTheme()
   const { user } = useAuth()
 
@@ -51,8 +58,7 @@ function AppearanceSettingsInner() {
         <div>
           <h1>Appearance</h1>
           <p className="muted">
-            Theme, sidebar, table headers, and form look. Managed under Voucher
-            Template.
+            Theme, sidebar, buttons, table headers, and form look.
           </p>
         </div>
       </header>
@@ -127,6 +133,108 @@ function AppearanceSettingsInner() {
           <strong>GBL Office</strong>
           <span style={{ opacity: 0.72 }}>Payroll · Process</span>
           <span style={{ opacity: 0.72 }}>Settings · Appearance</span>
+        </div>
+      </section>
+
+      <section className="table-card theme-preview-block">
+        <div className="table-head">
+          <h2>Button style</h2>
+          <p className="muted">
+            Primary action buttons (Apply, Save, Post). Ghost buttons stay
+            outline. Pick a named preset or fine-tune gradient and hover.
+          </p>
+        </div>
+        <div className="theme-button-presets">
+          {BUTTON_PRESETS.map((preset) => (
+            <button
+              key={preset.name}
+              type="button"
+              className={
+                primaryButton.name === preset.name
+                  ? 'theme-btn-preset is-selected'
+                  : 'theme-btn-preset'
+              }
+              style={{
+                background: `linear-gradient(90deg, ${preset.gradientFrom}, ${preset.gradientTo})`,
+                color: preset.text,
+              }}
+              onClick={() => setPrimaryButton({ ...preset })}
+            >
+              {preset.name}
+            </button>
+          ))}
+        </div>
+        <div className="theme-table-controls theme-button-controls">
+          <label>
+            Gradient start
+            <input
+              type="color"
+              value={primaryButton.gradientFrom}
+              onChange={(e) =>
+                setPrimaryButton({
+                  name: 'Custom',
+                  gradientFrom: e.target.value,
+                })
+              }
+            />
+          </label>
+          <label>
+            Gradient end
+            <input
+              type="color"
+              value={primaryButton.gradientTo}
+              onChange={(e) =>
+                setPrimaryButton({
+                  name: 'Custom',
+                  gradientTo: e.target.value,
+                })
+              }
+            />
+          </label>
+          <label>
+            Text color
+            <input
+              type="color"
+              value={primaryButton.text}
+              onChange={(e) =>
+                setPrimaryButton({ name: 'Custom', text: e.target.value })
+              }
+            />
+          </label>
+          <label>
+            Hover start
+            <input
+              type="color"
+              value={primaryButton.hoverFrom}
+              onChange={(e) =>
+                setPrimaryButton({
+                  name: 'Custom',
+                  hoverFrom: e.target.value,
+                })
+              }
+            />
+          </label>
+          <label>
+            Hover end
+            <input
+              type="color"
+              value={primaryButton.hoverTo}
+              onChange={(e) =>
+                setPrimaryButton({ name: 'Custom', hoverTo: e.target.value })
+              }
+            />
+          </label>
+          <div className="theme-table-controls-actions">
+            <button type="button" className="ghost" onClick={resetPrimaryButton}>
+              Reset buttons
+            </button>
+          </div>
+        </div>
+        <div className="theme-button-preview form-actions">
+          <button type="button">Primary action</button>
+          <button type="button" className="ghost">
+            Ghost / secondary
+          </button>
         </div>
       </section>
 

@@ -12,6 +12,10 @@ export type BalanceSheetLine = {
   isHeader: boolean;
   isPostable: boolean;
   depth: number;
+  /** Party sub-ledger row under a control account (customer/supplier/employee). */
+  isParty?: boolean;
+  entityType?: string | null;
+  entityId?: string | null;
 };
 
 export type BalanceSheetSection = {
@@ -44,12 +48,30 @@ export type BalanceSheetReport = {
   difference: number;
 };
 
+/** Control accounts that expand into named party rows on the balance sheet. */
+export const BS_PARTY_CONTROL_CODES = [
+  SystemAccountCode.ACCOUNTS_RECEIVABLE, // 1121 Client Receivables
+  SystemAccountCode.EMPLOYEE_ADVANCES, // 1131 Advance to Staff
+  SystemAccountCode.ACCOUNTS_PAYABLE, // 2111 Supplier Payables
+  SystemAccountCode.SUBCONTRACTOR_PAYABLE, // 2113 Subcontractor Payables
+  SystemAccountCode.EMPLOYEE_PAYABLES, // 2121 Unpaid Staff Salaries
+] as const;
+
 type AccountRow = {
   code: string;
   name: string;
   type: AccountType;
   parentCode?: string;
   isPostable: boolean;
+};
+
+type PartyAgg = {
+  accountCode: string;
+  entityId: string;
+  entityType: string;
+  entityName: string;
+  debitMinor: number;
+  creditMinor: number;
 };
 
 function round2(value: number): number {
@@ -100,6 +122,7 @@ function buildSection(
   accounts: AccountRow[],
   byCode: Map<string, AccountRow>,
   balances: Map<string, number>,
+  partyByAccount: Map<string, PartyAgg[]>,
 ): BalanceSheetSection {
   const members = accounts
     .filter(
@@ -108,9 +131,9 @@ function buildSection(
     )
     .sort((a, b) => a.code.localeCompare(b.code));
 
-  const lines: BalanceSheetLine[] = members.map((account) => {
+  const lines: BalanceSheetLine[] = [];
+  for (const account of members) {
     const own = balances.get(account.code) ?? 0;
-    // Header total = sum of postable descendants (and self if postable)
     let balance = account.isPostable ? own : 0;
     if (!account.isPostable) {
       balance = members
@@ -122,16 +145,37 @@ function buildSection(
         )
         .reduce((sum, child) => sum + (balances.get(child.code) ?? 0), 0);
     }
-    return {
+    const depth = depthOf(account.code, byCode);
+    lines.push({
       code: account.code,
       name: account.name,
       parentCode: account.parentCode ?? null,
       balance: round2(balance),
       isHeader: !account.isPostable,
       isPostable: account.isPostable,
-      depth: depthOf(account.code, byCode),
-    };
-  });
+      depth,
+    });
+
+    const parties = partyByAccount.get(account.code) ?? [];
+    for (const party of parties) {
+      const partyBalance = fromMinorUnits(
+        signedBalanceMinor(account.type, party.debitMinor, party.creditMinor),
+      );
+      if (Math.abs(partyBalance) < 0.005) continue;
+      lines.push({
+        code: `${account.code}:${party.entityId}`,
+        name: party.entityName,
+        parentCode: account.code,
+        balance: round2(partyBalance),
+        isHeader: false,
+        isPostable: false,
+        depth: depth + 1,
+        isParty: true,
+        entityType: party.entityType,
+        entityId: party.entityId,
+      });
+    }
+  }
 
   const total = round2(
     members
@@ -150,7 +194,7 @@ export class BalanceSheetService {
     }
     end.setUTCHours(23, 59, 59, 999);
 
-    const [accounts, aggregates] = await Promise.all([
+    const [accounts, aggregates, partyAggregates] = await Promise.all([
       AccountModel.find({ isActive: true }).sort({ code: 1 }).lean().exec(),
       LedgerLineModel.aggregate<{
         _id: string;
@@ -161,6 +205,33 @@ export class BalanceSheetService {
         {
           $group: {
             _id: '$accountCode',
+            debitMinor: { $sum: '$debitMinor' },
+            creditMinor: { $sum: '$creditMinor' },
+          },
+        },
+      ]),
+      LedgerLineModel.aggregate<{
+        _id: { accountCode: string; entityId: TypesLike };
+        entityType: string;
+        entityName: string;
+        debitMinor: number;
+        creditMinor: number;
+      }>([
+        {
+          $match: {
+            date: { $lte: end },
+            accountCode: { $in: [...BS_PARTY_CONTROL_CODES] },
+            entityId: { $exists: true, $ne: null },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              accountCode: '$accountCode',
+              entityId: '$entityId',
+            },
+            entityType: { $last: '$entityType' },
+            entityName: { $last: '$entityName' },
             debitMinor: { $sum: '$debitMinor' },
             creditMinor: { $sum: '$creditMinor' },
           },
@@ -188,6 +259,25 @@ export class BalanceSheetService {
       );
     }
 
+    const partyByAccount = new Map<string, PartyAgg[]>();
+    for (const row of partyAggregates) {
+      const accountCode = row._id.accountCode;
+      const entityId = String(row._id.entityId);
+      const list = partyByAccount.get(accountCode) ?? [];
+      list.push({
+        accountCode,
+        entityId,
+        entityType: row.entityType || 'unknown',
+        entityName: row.entityName?.trim() || 'Unknown party',
+        debitMinor: row.debitMinor,
+        creditMinor: row.creditMinor,
+      });
+      partyByAccount.set(accountCode, list);
+    }
+    for (const [, list] of partyByAccount) {
+      list.sort((a, b) => a.entityName.localeCompare(b.entityName));
+    }
+
     const currentAssets = buildSection(
       'current_assets',
       'Current Assets',
@@ -195,6 +285,7 @@ export class BalanceSheetService {
       accountRows.filter((row) => row.type === AccountType.ASSET),
       byCode,
       balances,
+      partyByAccount,
     );
     const fixedAssets = buildSection(
       'fixed_assets',
@@ -203,9 +294,9 @@ export class BalanceSheetService {
       accountRows.filter((row) => row.type === AccountType.ASSET),
       byCode,
       balances,
+      partyByAccount,
     );
 
-    // Include any other asset roots under 1000 not in 1100/1200
     const otherAssetTotal = round2(
       accountRows
         .filter(
@@ -230,6 +321,7 @@ export class BalanceSheetService {
       accountRows.filter((row) => row.type === AccountType.LIABILITY),
       byCode,
       balances,
+      partyByAccount,
     );
     const longTermLiabilities = buildSection(
       'long_term_liabilities',
@@ -238,6 +330,7 @@ export class BalanceSheetService {
       accountRows.filter((row) => row.type === AccountType.LIABILITY),
       byCode,
       balances,
+      partyByAccount,
     );
     const totalLiabilities = round2(
       currentLiabilities.total + longTermLiabilities.total,
@@ -266,9 +359,9 @@ export class BalanceSheetService {
       equityAccounts,
       byCode,
       balances,
+      partyByAccount,
     );
 
-    // Present computed net income / retained earnings for the period
     const retainedEarnings = round2(
       (balances.get(SystemAccountCode.RETAINED_EARNINGS) ?? 0) + netIncome,
     );
@@ -288,8 +381,6 @@ export class BalanceSheetService {
       },
     ];
 
-    // Avoid double-counting: equity total = posted equity excluding 3200 + RE line
-    // (3200 balance is inside retainedEarnings together with NI)
     const equityWithout3200 = round2(
       equityAccounts
         .filter(
@@ -332,6 +423,8 @@ export class BalanceSheetService {
     };
   }
 }
+
+type TypesLike = { toString(): string };
 
 /** Pure helper for unit tests without Mongo. */
 export function assertBalanceSheetEquation(input: {

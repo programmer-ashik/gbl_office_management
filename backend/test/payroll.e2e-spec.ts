@@ -183,6 +183,7 @@ describe('Phase 8 payroll and project cost allocation (e2e)', () => {
     const posted = await request(app)
       .post(`/api/v1/payroll/runs/${payrollRunId}/post`)
       .set('Authorization', `Bearer ${adminToken}`)
+      .send({ salaryExpenseAccountCode: '5230' })
       .expect(200);
 
     expect(posted.body.data.status).toBe('posted');

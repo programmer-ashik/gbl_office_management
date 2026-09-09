@@ -200,7 +200,10 @@ export default function App() {
                 </AdminRoute>
               }
             />
-            <Route path="/settings/accounts" element={<ChartOfAccountsPage />} />
+            <Route
+              path="/settings/accounts"
+              element={<Navigate to="/accounts" replace />}
+            />
             <Route path="/settings/approvals" element={<ApprovalsPage />} />
             <Route path="/settings/users" element={<EmployeesPage />} />
             <Route path="/settings/audit" element={<AuditPage />} />

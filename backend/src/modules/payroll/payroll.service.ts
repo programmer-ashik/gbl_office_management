@@ -13,23 +13,37 @@ import type { BankingService } from '../banking/banking.service';
 import type { ProjectsService } from '../projects/projects.service';
 import type { UsersService } from '../users/users.service';
 import {
+  ADMIN_SALARY_CODE,
   allocateLaborByTime,
   buildAccrualJournalLines,
   buildDisbursementJournalLines,
   proposeAdvanceDeductions,
+  proposeFacilityDeductions,
 } from './allocation';
 import {
   buildPayrollSlipsPdf,
   buildSalarySlipPdf,
 } from './salary-slip-pdf';
 import type {
+  CreateSalaryFacilityDto,
   CreateTimeLogDto,
   DisbursePayrollDto,
   GeneratePayrollDto,
+  PostPayrollDto,
   PreviewSalaryBreakdownDto,
   UpdatePayrollSettingsDto,
   UpsertSalaryStructureDto,
 } from './dto/payroll.dto';
+import { AccountType } from '../../common/enums/account-type.enum';
+import { AccountModel } from '../accounting/account.model';
+import { SystemAccountCode } from '../accounting/system-account-codes';
+import { JournalEntityType } from '../accounting/journal.enums';
+import {
+  SalaryFacilityKind,
+  SalaryFacilityModel,
+  SalaryFacilityStatus,
+  type SalaryFacilityDocument,
+} from './salary-facility.model';
 import {
   PayrollSettingsModel,
   PAYROLL_SETTINGS_KEY,
@@ -90,7 +104,8 @@ export type PublicTimeLog = {
   id: string;
   employeeId: string;
   employeeName: string;
-  projectId: string;
+  kind: 'project' | 'administrative';
+  projectId: string | null;
   projectCode: string;
   projectName: string;
   periodYear: number;
@@ -98,6 +113,24 @@ export type PublicTimeLog = {
   unit: string;
   quantity: number;
   notes: string | null;
+};
+
+export type PublicSalaryFacility = {
+  id: string;
+  facilityNumber: string;
+  kind: 'salary_advance' | 'salary_loan';
+  status: string;
+  employeeId: string;
+  employeeName: string;
+  principal: number;
+  installment: number;
+  installmentCount: number;
+  repaid: number;
+  outstanding: number;
+  purpose: string;
+  treasuryAccountCode: string | null;
+  journalNumber: string | null;
+  disbursedAt: string;
 };
 
 export type PublicPayrollRun = {
@@ -109,6 +142,7 @@ export type PublicPayrollRun = {
   totalGross: number;
   totalStructuralDeductions: number;
   totalAdvanceDeductions: number;
+  totalFacilityDeductions: number;
   totalNetPay: number;
   accrualJournalNumber: string | null;
   postedAt: string | null;
@@ -130,7 +164,15 @@ export type PublicPayrollRun = {
       advanceNumber: string;
       amount: number;
     }>;
+    facilityDeductions: Array<{
+      facilityId: string;
+      facilityNumber: string;
+      kind: 'salary_advance' | 'salary_loan';
+      label: string;
+      amount: number;
+    }>;
     totalAdvanceDeductions: number;
+    totalFacilityDeductions: number;
     netPay: number;
     allocations: Array<{
       projectId: string;
@@ -400,12 +442,34 @@ export class PayrollService {
   ): Promise<PublicTimeLog> {
     this.assertFinance(actor);
     const employee = await this.usersService.findByIdOrFail(dto.employeeId);
-    const project = await this.projectsService.getById(dto.projectId);
+    const kind = dto.kind === 'administrative' ? 'administrative' : 'project';
     const quantityMilli = toMilliQty(dto.quantity);
 
+    if (kind === 'administrative') {
+      const created = await TimeLogModel.create({
+        employeeId: employee._id,
+        employeeName: `${employee.firstName} ${employee.lastName}`,
+        kind: 'administrative',
+        projectCode: 'HQ',
+        projectName: 'Administrative / HQ',
+        periodYear: dto.periodYear,
+        periodMonth: dto.periodMonth,
+        unit: dto.unit,
+        quantityMilli,
+        notes: dto.notes?.trim(),
+        createdBy: new Types.ObjectId(actor.userId),
+      });
+      return this.toPublicTimeLog(created);
+    }
+
+    if (!dto.projectId) {
+      throw badRequest('Project is required for project time logs');
+    }
+    const project = await this.projectsService.getById(dto.projectId);
     const created = await TimeLogModel.create({
       employeeId: employee._id,
       employeeName: `${employee.firstName} ${employee.lastName}`,
+      kind: 'project',
       projectId: new Types.ObjectId(project.id),
       projectCode: project.code,
       projectName: project.name,
@@ -417,6 +481,91 @@ export class PayrollService {
       createdBy: new Types.ObjectId(actor.userId),
     });
     return this.toPublicTimeLog(created);
+  }
+
+  async listSalaryFacilities(
+    actor: AuthenticatedUser,
+  ): Promise<PublicSalaryFacility[]> {
+    this.assertFinance(actor);
+    const rows = await SalaryFacilityModel.find()
+      .sort({ disbursedAt: -1 })
+      .exec();
+    return rows.map((row) => this.toPublicSalaryFacility(row));
+  }
+
+  async createSalaryFacility(
+    dto: CreateSalaryFacilityDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicSalaryFacility> {
+    this.assertFinance(actor);
+    const employee = await this.usersService.findByIdOrFail(dto.employeeId);
+    if (!employee.isActive) {
+      throw badRequest('Employee is inactive');
+    }
+    const principalMinor = toMinorUnits(dto.principal);
+    const installmentMinor = toMinorUnits(dto.installment);
+    if (installmentMinor > principalMinor) {
+      throw badRequest('Installment cannot exceed principal');
+    }
+    const expected = installmentMinor * dto.installmentCount;
+    if (expected < principalMinor) {
+      // allow last installment to be smaller — ok if count * installment >= principal roughly
+    }
+    const treasury = await this.bankingService.requireActive(dto.treasuryId);
+    const date = this.parseDate(dto.date);
+    const kind =
+      dto.kind === SalaryFacilityKind.LOAN
+        ? SalaryFacilityKind.LOAN
+        : SalaryFacilityKind.ADVANCE;
+    const facilityNumber = await this.nextNumber(
+      kind === SalaryFacilityKind.LOAN ? 'salary-loan' : 'salary-advance',
+      kind === SalaryFacilityKind.LOAN ? 'SLN' : 'SAD',
+    );
+
+    // Disburse: Dr 1131 Advance to Staff / Cr Cash|Bank — cash out, receivable up
+    const journal = await this.journalService.post(
+      {
+        date: date.toISOString(),
+        memo: `${kind === SalaryFacilityKind.LOAN ? 'Salary loan' : 'Salary advance'} ${facilityNumber}`,
+        reference: facilityNumber,
+        lines: [
+          {
+            accountCode: SystemAccountCode.EMPLOYEE_ADVANCES,
+            debit: fromMinorUnits(principalMinor),
+            description: `${facilityNumber} · ${employee.firstName} ${employee.lastName}`,
+            entityType: JournalEntityType.EMPLOYEE,
+            entityId: employee._id.toString(),
+          },
+          {
+            accountCode: treasury.glAccountCode,
+            credit: fromMinorUnits(principalMinor),
+            description: `${facilityNumber} disbursement`,
+          },
+        ],
+      },
+      actor.userId,
+      'system',
+    );
+
+    const created = await SalaryFacilityModel.create({
+      facilityNumber,
+      kind,
+      status: SalaryFacilityStatus.ACTIVE,
+      employeeId: employee._id,
+      employeeName: `${employee.firstName} ${employee.lastName}`,
+      principalMinor,
+      installmentMinor,
+      installmentCount: dto.installmentCount,
+      repaidMinor: 0,
+      purpose: dto.purpose.trim(),
+      treasuryId: new Types.ObjectId(treasury.id),
+      treasuryAccountCode: treasury.glAccountCode,
+      journalId: new Types.ObjectId(journal.id),
+      journalNumber: journal.entryNumber,
+      disbursedAt: date,
+      createdBy: new Types.ObjectId(actor.userId),
+    });
+    return this.toPublicSalaryFacility(created);
   }
 
   async listRuns(actor: AuthenticatedUser): Promise<PublicPayrollRun[]> {
@@ -464,6 +613,10 @@ export class PayrollService {
       (sum, row) => sum + row.totalAdvanceDeductionMinor,
       0,
     );
+    const totalFacilityDeductionMinor = lines.reduce(
+      (sum, row) => sum + (row.totalFacilityDeductionMinor ?? 0),
+      0,
+    );
     const totalNetPayMinor = lines.reduce((sum, row) => sum + row.netPayMinor, 0);
 
     const created = await PayrollRunModel.create({
@@ -474,7 +627,8 @@ export class PayrollService {
       lines,
       totalGrossMinor,
       totalStructuralDeductionMinor,
-      totalAdvanceDeductionMinor,
+      totalAdvanceDeductionMinor:
+        totalAdvanceDeductionMinor + totalFacilityDeductionMinor,
       totalNetPayMinor,
       createdBy: new Types.ObjectId(actor.userId),
     });
@@ -485,12 +639,17 @@ export class PayrollService {
   async postRun(
     id: string,
     actor: AuthenticatedUser,
+    dto?: PostPayrollDto,
   ): Promise<PublicPayrollRun> {
     this.assertFinance(actor);
     const run = await this.findRunOrFail(id);
     if (run.status !== PayrollRunStatus.DRAFT) {
       throw badRequest('Only draft payroll runs can be posted');
     }
+
+    const adminSalaryAccountCode = await this.resolveSalaryExpenseAccount(
+      dto?.salaryExpenseAccountCode,
+    );
 
     const journalLines = run.lines.flatMap((line) =>
       buildAccrualJournalLines({
@@ -510,10 +669,18 @@ export class PayrollService {
           projectId: row.projectId.toString(),
           amountMinor: row.amountMinor,
         })),
+        facilityDeductions: (line.facilityDeductions ?? []).map((row) => ({
+          facilityId: row.facilityId.toString(),
+          facilityNumber: row.facilityNumber,
+          kind: row.kind,
+          label: row.label,
+          amountMinor: row.amountMinor,
+        })),
         structureAdvanceMinor: line.structureAdvanceMinor ?? 0,
         providentFundMinor: line.providentFundMinor ?? 0,
         taxDeductionMinor: line.taxDeductionMinor ?? 0,
         netPayMinor: line.netPayMinor,
+        adminSalaryAccountCode,
       }),
     );
 
@@ -544,6 +711,19 @@ export class PayrollService {
           advance.settledBy = new Types.ObjectId(actor.userId);
         }
         await advance.save();
+      }
+      for (const deduction of line.facilityDeductions ?? []) {
+        const facility = await SalaryFacilityModel.findById(
+          deduction.facilityId,
+        ).exec();
+        if (!facility) continue;
+        facility.repaidMinor = (facility.repaidMinor ?? 0) + deduction.amountMinor;
+        if (facility.repaidMinor >= facility.principalMinor) {
+          facility.status = SalaryFacilityStatus.SETTLED;
+          facility.settledAt = postedAt;
+          facility.repaidMinor = facility.principalMinor;
+        }
+        await facility.save();
       }
     }
 
@@ -659,10 +839,13 @@ export class PayrollService {
       periodYear,
       periodMonth,
     }).exec();
+    const projectLogs = logs.filter(
+      (row) => row.kind !== 'administrative' && row.projectId,
+    );
     const allocations = allocateLaborByTime({
       grossMinor,
-      logs: logs.map((row) => ({
-        projectId: row.projectId.toString(),
+      logs: projectLogs.map((row) => ({
+        projectId: row.projectId!.toString(),
         projectCode: row.projectCode,
         projectName: row.projectName,
         quantityMilli: row.quantityMilli,
@@ -690,6 +873,26 @@ export class PayrollService {
         .filter((row) => row.outstandingMinor > 0),
     });
 
+    const facilities = await SalaryFacilityModel.find({
+      employeeId: structure.employeeId,
+      status: SalaryFacilityStatus.ACTIVE,
+    })
+      .sort({ disbursedAt: 1 })
+      .exec();
+
+    const facilityProposal = proposeFacilityDeductions({
+      poolMinor: advanceProposal.netPayMinor,
+      facilities: facilities
+        .map((row) => ({
+          facilityId: row._id.toString(),
+          facilityNumber: row.facilityNumber,
+          kind: row.kind,
+          installmentMinor: row.installmentMinor,
+          outstandingMinor: row.principalMinor - row.repaidMinor,
+        }))
+        .filter((row) => row.outstandingMinor > 0),
+    });
+
     return {
       employeeId: structure.employeeId,
       employeeName: structure.employeeName,
@@ -706,8 +909,16 @@ export class PayrollService {
         projectId: new Types.ObjectId(row.projectId),
         amountMinor: row.amountMinor,
       })),
+      facilityDeductions: facilityProposal.deductions.map((row) => ({
+        facilityId: new Types.ObjectId(row.facilityId),
+        facilityNumber: row.facilityNumber,
+        kind: row.kind,
+        label: row.label,
+        amountMinor: row.amountMinor,
+      })),
       totalAdvanceDeductionMinor: advanceProposal.totalAdvanceDeductionMinor,
-      netPayMinor: advanceProposal.netPayMinor,
+      totalFacilityDeductionMinor: facilityProposal.totalFacilityDeductionMinor,
+      netPayMinor: facilityProposal.remainingPoolMinor,
       allocations: allocations.map((row) => ({
         projectId: new Types.ObjectId(row.projectId),
         projectCode: row.projectCode,
@@ -804,7 +1015,8 @@ export class PayrollService {
       id: row._id.toString(),
       employeeId: row.employeeId.toString(),
       employeeName: row.employeeName,
-      projectId: row.projectId.toString(),
+      kind: row.kind === 'administrative' ? 'administrative' : 'project',
+      projectId: row.projectId ? row.projectId.toString() : null,
       projectCode: row.projectCode,
       projectName: row.projectName,
       periodYear: row.periodYear,
@@ -815,7 +1027,34 @@ export class PayrollService {
     };
   }
 
+  private toPublicSalaryFacility(
+    row: SalaryFacilityDocument,
+  ): PublicSalaryFacility {
+    const outstanding = Math.max(0, row.principalMinor - row.repaidMinor);
+    return {
+      id: row._id.toString(),
+      facilityNumber: row.facilityNumber,
+      kind: row.kind,
+      status: row.status,
+      employeeId: row.employeeId.toString(),
+      employeeName: row.employeeName,
+      principal: fromMinorUnits(row.principalMinor),
+      installment: fromMinorUnits(row.installmentMinor),
+      installmentCount: row.installmentCount,
+      repaid: fromMinorUnits(row.repaidMinor),
+      outstanding: fromMinorUnits(outstanding),
+      purpose: row.purpose,
+      treasuryAccountCode: row.treasuryAccountCode ?? null,
+      journalNumber: row.journalNumber ?? null,
+      disbursedAt: row.disbursedAt.toISOString(),
+    };
+  }
+
   private toPublicPayrollRun(row: PayrollRunDocument): PublicPayrollRun {
+    const totalFacility = row.lines.reduce(
+      (sum, line) => sum + (line.totalFacilityDeductionMinor ?? 0),
+      0,
+    );
     return {
       id: row._id.toString(),
       sheetNumber: row.sheetNumber,
@@ -825,6 +1064,7 @@ export class PayrollService {
       totalGross: fromMinorUnits(row.totalGrossMinor),
       totalStructuralDeductions: fromMinorUnits(row.totalStructuralDeductionMinor),
       totalAdvanceDeductions: fromMinorUnits(row.totalAdvanceDeductionMinor),
+      totalFacilityDeductions: fromMinorUnits(totalFacility),
       totalNetPay: fromMinorUnits(row.totalNetPayMinor),
       accrualJournalNumber: row.accrualJournalNumber ?? null,
       postedAt: row.postedAt ? row.postedAt.toISOString() : null,
@@ -846,7 +1086,17 @@ export class PayrollService {
           advanceNumber: item.advanceNumber,
           amount: fromMinorUnits(item.amountMinor),
         })),
+        facilityDeductions: (line.facilityDeductions ?? []).map((item) => ({
+          facilityId: item.facilityId.toString(),
+          facilityNumber: item.facilityNumber,
+          kind: item.kind,
+          label: item.label,
+          amount: fromMinorUnits(item.amountMinor),
+        })),
         totalAdvanceDeductions: fromMinorUnits(line.totalAdvanceDeductionMinor),
+        totalFacilityDeductions: fromMinorUnits(
+          line.totalFacilityDeductionMinor ?? 0,
+        ),
         netPay: fromMinorUnits(line.netPayMinor),
         allocations: line.allocations.map((item) => ({
           projectId: item.projectId.toString(),
@@ -893,5 +1143,33 @@ export class PayrollService {
       throw notFound('Payroll run not found');
     }
     return row;
+  }
+
+  /**
+   * HQ / office salary expense must be a postable expense leaf.
+   * Defaults to 5230 Office Employee Salary. Project labor remains 5120.
+   */
+  private async resolveSalaryExpenseAccount(
+    code?: string,
+  ): Promise<string> {
+    const requested = (code?.trim() || ADMIN_SALARY_CODE).toUpperCase();
+    if (requested === SystemAccountCode.PROJECT_LABOR) {
+      throw badRequest(
+        'Use a non-project salary expense head (e.g. 5230). Project labor 5120 is applied automatically from time logs.',
+      );
+    }
+    const account = await AccountModel.findOne({
+      code: requested,
+      isActive: true,
+    }).exec();
+    if (!account) {
+      throw badRequest(`Salary expense account ${requested} not found`);
+    }
+    if (!account.isPostable || account.type !== AccountType.EXPENSE) {
+      throw badRequest(
+        `${requested} is not a postable expense account — select a leaf under Expenses`,
+      );
+    }
+    return account.code;
   }
 }

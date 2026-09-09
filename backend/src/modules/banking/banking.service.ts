@@ -14,6 +14,7 @@ import { CounterModel } from '../accounting/counter.model';
 import type { JournalService } from '../accounting/journal.service';
 import { LedgerLineModel } from '../accounting/ledger.model';
 import { LedgerService } from '../accounting/ledger.service';
+import { JournalEntryModel } from '../accounting/journal-entry.model';
 import { SystemAccountCode } from '../accounting/system-account-codes';
 import { ProjectModel } from '../projects/project.model';
 import {
@@ -809,8 +810,32 @@ export class BankingService {
       session.glAccountCode,
       { asOf: session.asOf },
     );
+    const journalIds = [
+      ...new Set(ledger.entries.map((entry) => entry.journalEntryId)),
+    ];
+    const journals = journalIds.length
+      ? await JournalEntryModel.find({
+          _id: { $in: journalIds.map((id) => new Types.ObjectId(id)) },
+        })
+          .select('journalType status reversesEntryId')
+          .lean()
+          .exec()
+      : [];
+    const skipJournalIds = new Set(
+      journals
+        .filter(
+          (row) =>
+            row.journalType === 'opening_balance' ||
+            row.status === 'reversed' ||
+            Boolean(row.reversesEntryId),
+        )
+        .map((row) => row._id.toString()),
+    );
     const unmatchedBook = ledger.entries
-      .filter((entry) => !matchedIds.has(entry.id))
+      .filter(
+        (entry) =>
+          !matchedIds.has(entry.id) && !skipJournalIds.has(entry.journalEntryId),
+      )
       .map((entry) => ({
         id: entry.id,
         date: entry.date,

@@ -20,6 +20,10 @@ class TemplateBlockStylesDto {
   @IsOptional()
   @IsBoolean()
   showAccountCodes?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  showPartyBreakdown?: boolean;
 }
 
 class TemplateBlockDto {

@@ -21,6 +21,16 @@ export type SidebarStyle = {
   color: string
 }
 
+/** Primary action button (non-ghost) */
+export type PrimaryButtonStyle = {
+  name: string
+  gradientFrom: string
+  gradientTo: string
+  text: string
+  hoverFrom: string
+  hoverTo: string
+}
+
 type ThemeContextValue = {
   theme: UiTheme
   setTheme: (theme: UiTheme) => void
@@ -30,11 +40,15 @@ type ThemeContextValue = {
   sidebar: SidebarStyle
   setSidebar: (next: Partial<SidebarStyle>) => void
   resetSidebar: () => void
+  primaryButton: PrimaryButtonStyle
+  setPrimaryButton: (next: Partial<PrimaryButtonStyle>) => void
+  resetPrimaryButton: () => void
 }
 
 const THEME_KEY = 'gbl.uiTheme'
 const TABLE_HEADER_KEY = 'gbl.tableHeader'
 const SIDEBAR_KEY = 'gbl.sidebarStyle'
+const PRIMARY_BUTTON_KEY = 'gbl.primaryButtonStyle'
 
 const DEFAULT_TABLE_HEADER: TableHeaderStyle = {
   bg: '#1d4ed8',
@@ -47,7 +61,50 @@ const DEFAULT_SIDEBAR: SidebarStyle = {
   color: '#f3efe6',
 }
 
+export const DEFAULT_PRIMARY_BUTTON: PrimaryButtonStyle = {
+  name: 'Primary',
+  gradientFrom: '#0f2744',
+  gradientTo: '#1d4ed8',
+  text: '#ffffff',
+  hoverFrom: '#153556',
+  hoverTo: '#2563eb',
+}
+
+const BUTTON_PRESETS: PrimaryButtonStyle[] = [
+  DEFAULT_PRIMARY_BUTTON,
+  {
+    name: 'Teal',
+    gradientFrom: '#0f766e',
+    gradientTo: '#14b8a6',
+    text: '#ffffff',
+    hoverFrom: '#0d9488',
+    hoverTo: '#2dd4bf',
+  },
+  {
+    name: 'Emerald',
+    gradientFrom: '#047857',
+    gradientTo: '#10b981',
+    text: '#ffffff',
+    hoverFrom: '#059669',
+    hoverTo: '#34d399',
+  },
+  {
+    name: 'Slate',
+    gradientFrom: '#334155',
+    gradientTo: '#64748b',
+    text: '#ffffff',
+    hoverFrom: '#475569',
+    hoverTo: '#94a3b8',
+  },
+]
+
+export { BUTTON_PRESETS }
+
 const ThemeContext = createContext<ThemeContextValue | null>(null)
+
+function setCssVar(name: string, value: string) {
+  document.documentElement.style.setProperty(name, value, 'important')
+}
 
 function readStoredTheme(): UiTheme {
   try {
@@ -95,21 +152,63 @@ function readStoredSidebar(): SidebarStyle {
   }
 }
 
+function readStoredPrimaryButton(): PrimaryButtonStyle {
+  try {
+    const raw = localStorage.getItem(PRIMARY_BUTTON_KEY)
+    if (!raw) return { ...DEFAULT_PRIMARY_BUTTON }
+    const parsed = JSON.parse(raw) as Partial<PrimaryButtonStyle>
+    return {
+      name:
+        typeof parsed.name === 'string'
+          ? parsed.name
+          : DEFAULT_PRIMARY_BUTTON.name,
+      gradientFrom:
+        typeof parsed.gradientFrom === 'string'
+          ? parsed.gradientFrom
+          : DEFAULT_PRIMARY_BUTTON.gradientFrom,
+      gradientTo:
+        typeof parsed.gradientTo === 'string'
+          ? parsed.gradientTo
+          : DEFAULT_PRIMARY_BUTTON.gradientTo,
+      text:
+        typeof parsed.text === 'string'
+          ? parsed.text
+          : DEFAULT_PRIMARY_BUTTON.text,
+      hoverFrom:
+        typeof parsed.hoverFrom === 'string'
+          ? parsed.hoverFrom
+          : DEFAULT_PRIMARY_BUTTON.hoverFrom,
+      hoverTo:
+        typeof parsed.hoverTo === 'string'
+          ? parsed.hoverTo
+          : DEFAULT_PRIMARY_BUTTON.hoverTo,
+    }
+  } catch {
+    return { ...DEFAULT_PRIMARY_BUTTON }
+  }
+}
+
 function applyTheme(theme: UiTheme) {
   document.documentElement.setAttribute('data-theme', theme)
 }
 
 function applyTableHeader(style: TableHeaderStyle) {
-  const root = document.documentElement
-  root.style.setProperty('--theme-table-head-bg', style.bg)
-  root.style.setProperty('--theme-table-head-color', style.color)
-  root.style.setProperty('--theme-table-head-size', style.fontSize)
+  setCssVar('--theme-table-head-bg', style.bg)
+  setCssVar('--theme-table-head-color', style.color)
+  setCssVar('--theme-table-head-size', style.fontSize)
 }
 
 function applySidebar(style: SidebarStyle) {
-  const root = document.documentElement
-  root.style.setProperty('--theme-sidebar-bg', style.bg)
-  root.style.setProperty('--theme-sidebar-color', style.color)
+  setCssVar('--theme-sidebar-bg', style.bg)
+  setCssVar('--theme-sidebar-color', style.color)
+}
+
+function applyPrimaryButton(style: PrimaryButtonStyle) {
+  setCssVar('--theme-btn-from', style.gradientFrom)
+  setCssVar('--theme-btn-to', style.gradientTo)
+  setCssVar('--theme-btn-text', style.text)
+  setCssVar('--theme-btn-hover-from', style.hoverFrom)
+  setCssVar('--theme-btn-hover-to', style.hoverTo)
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -131,14 +230,26 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return initial
   })
 
+  const [primaryButton, setPrimaryButtonState] = useState<PrimaryButtonStyle>(
+    () => {
+      const initial = readStoredPrimaryButton()
+      if (typeof document !== 'undefined') applyPrimaryButton(initial)
+      return initial
+    },
+  )
+
   useEffect(() => {
     applyTheme(theme)
+    // Re-apply custom colors after theme attribute so they always win.
+    applySidebar(sidebar)
+    applyTableHeader(tableHeader)
+    applyPrimaryButton(primaryButton)
     try {
       localStorage.setItem(THEME_KEY, theme)
     } catch {
       /* ignore */
     }
-  }, [theme])
+  }, [theme, sidebar, tableHeader, primaryButton])
 
   useEffect(() => {
     applyTableHeader(tableHeader)
@@ -157,6 +268,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       /* ignore */
     }
   }, [sidebar])
+
+  useEffect(() => {
+    applyPrimaryButton(primaryButton)
+    try {
+      localStorage.setItem(PRIMARY_BUTTON_KEY, JSON.stringify(primaryButton))
+    } catch {
+      /* ignore */
+    }
+  }, [primaryButton])
 
   const setTheme = useCallback((next: UiTheme) => {
     setThemeState(next)
@@ -178,6 +298,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setSidebarState({ ...DEFAULT_SIDEBAR })
   }, [])
 
+  const setPrimaryButton = useCallback((next: Partial<PrimaryButtonStyle>) => {
+    setPrimaryButtonState((current) => ({ ...current, ...next }))
+  }, [])
+
+  const resetPrimaryButton = useCallback(() => {
+    setPrimaryButtonState({ ...DEFAULT_PRIMARY_BUTTON })
+  }, [])
+
   const value = useMemo(
     () => ({
       theme,
@@ -188,6 +316,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       sidebar,
       setSidebar,
       resetSidebar,
+      primaryButton,
+      setPrimaryButton,
+      resetPrimaryButton,
     }),
     [
       theme,
@@ -198,6 +329,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       sidebar,
       setSidebar,
       resetSidebar,
+      primaryButton,
+      setPrimaryButton,
+      resetPrimaryButton,
     ],
   )
 

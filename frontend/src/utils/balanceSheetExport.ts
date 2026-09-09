@@ -34,12 +34,16 @@ function showCodes(block: TemplateBlock | undefined): boolean {
   return block?.styles?.showAccountCodes !== false
 }
 
+function showParties(block: TemplateBlock | undefined): boolean {
+  return block?.styles?.showPartyBreakdown === true
+}
+
 function lineToRow(line: BalanceSheetLine, withCodes: boolean): PdfRow {
-  const isHeader = line.isHeader || !line.isPostable
+  const isHeader = (line.isHeader || !line.isPostable) && !line.isParty
   return {
     kind: isHeader ? 'header' : 'line',
     depth: Math.max(0, line.depth),
-    code: withCodes ? line.code : '',
+    code: withCodes && !line.isParty ? line.code : '',
     name: line.name,
     amount: money(line.balance),
   }
@@ -49,10 +53,13 @@ function pushSectionLines(
   rows: PdfRow[],
   section: BalanceSheetSection,
   withCodes: boolean,
+  withParties: boolean,
 ): void {
   for (const line of section.lines) {
-    const isHeader = line.isHeader || !line.isPostable
-    if (!isHeader && Math.abs(line.balance) < 0.005) continue
+    if (line.isParty && !withParties) continue
+    const isHeader = (line.isHeader || !line.isPostable) && !line.isParty
+    if (!isHeader && !line.isParty && Math.abs(line.balance) < 0.005) continue
+    if (line.isParty && Math.abs(line.balance) < 0.005) continue
     rows.push(lineToRow(line, withCodes))
   }
 }
@@ -108,6 +115,7 @@ function buildBodyFromTemplate(
 
   for (const block of blocks) {
     const codes = showCodes(block)
+    const parties = showParties(block)
     if (block.type === 'ASSETS_SECTION') {
       rows.push({
         kind: 'section',
@@ -116,8 +124,8 @@ function buildBodyFromTemplate(
         name: 'ASSETS',
         amount: '',
       })
-      pushSectionLines(rows, report.assets.current, codes)
-      pushSectionLines(rows, report.assets.fixed, codes)
+      pushSectionLines(rows, report.assets.current, codes, parties)
+      pushSectionLines(rows, report.assets.fixed, codes, parties)
       rows.push({
         kind: 'total',
         depth: 0,
@@ -135,8 +143,8 @@ function buildBodyFromTemplate(
         name: 'LIABILITIES',
         amount: '',
       })
-      pushSectionLines(rows, report.liabilities.current, codes)
-      pushSectionLines(rows, report.liabilities.longTerm, codes)
+      pushSectionLines(rows, report.liabilities.current, codes, parties)
+      pushSectionLines(rows, report.liabilities.longTerm, codes, parties)
       rows.push({
         kind: 'subtotal',
         depth: 0,
@@ -154,7 +162,7 @@ function buildBodyFromTemplate(
         name: 'EQUITY',
         amount: '',
       })
-      pushSectionLines(rows, report.equity.section, codes)
+      pushSectionLines(rows, report.equity.section, codes, false)
       rows.push({
         kind: 'subtotal',
         depth: 0,
@@ -188,7 +196,7 @@ export async function downloadBalanceSheetPdf(
     templateInput,
     defaultBalanceSheetTemplate(),
   )
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
   const contentWidth = pageWidth - MARGIN * 2

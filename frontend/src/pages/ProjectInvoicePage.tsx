@@ -24,6 +24,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
+import { FileUploadField } from "../components/FileUploadField";
 import { ProjectInvoiceDocument } from "../components/ProjectInvoiceDocument";
 import {
   draftStorageKey,
@@ -764,36 +765,32 @@ export function ProjectInvoicePage() {
               <span>Use digital signature</span>
             </label>
             {draft.useDigitalSignature ? (
-              <div className='inv-sign-tools'>
-                <label>
-                  Upload signature image
-                  <input
-                    type='file'
-                    accept='image/png,image/jpeg,image/webp'
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = () => {
-                        patchDraft({
-                          digitalSignatureDataUrl: String(reader.result || ""),
-                        });
-                      };
-                      reader.readAsDataURL(file);
-                    }}
-                  />
-                </label>
+              <div className="inv-sign-tools">
+                <FileUploadField
+                  label="Upload signature image"
+                  accept="image/png,image/jpeg,image/webp"
+                  hint="PNG, JPG, or WebP · drop or browse"
+                  onFile={(file) => {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      patchDraft({
+                        digitalSignatureDataUrl: String(reader.result || ""),
+                      });
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
                 <InvoiceSignaturePad
                   onApply={(dataUrl) =>
                     patchDraft({ digitalSignatureDataUrl: dataUrl })
                   }
                 />
                 {draft.digitalSignatureDataUrl ? (
-                  <div className='inv-sign-preview'>
-                    <img src={draft.digitalSignatureDataUrl} alt='Signature' />
+                  <div className="inv-sign-preview">
+                    <img src={draft.digitalSignatureDataUrl} alt="Signature" />
                     <button
-                      type='button'
-                      className='ghost'
+                      type="button"
+                      className="ghost"
                       onClick={() =>
                         patchDraft({ digitalSignatureDataUrl: null })
                       }
@@ -802,11 +799,11 @@ export function ProjectInvoicePage() {
                     </button>
                   </div>
                 ) : (
-                  <p className='muted'>Draw or upload a signature to apply.</p>
+                  <p className="muted">Draw or upload a signature to apply.</p>
                 )}
               </div>
             ) : (
-              <p className='muted'>
+              <p className="muted">
                 Blank signature line will appear for wet ink.
               </p>
             )}

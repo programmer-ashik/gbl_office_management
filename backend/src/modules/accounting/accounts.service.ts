@@ -97,7 +97,14 @@ export class AccountsService {
       }
 
       if (!forceUpdate) {
-        skipped += 1;
+        // Keep labels in sync with chart JSON (safe rename only).
+        if (existing.name !== row.name) {
+          existing.name = row.name;
+          await existing.save();
+          updated += 1;
+        } else {
+          skipped += 1;
+        }
         continue;
       }
 

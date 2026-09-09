@@ -243,10 +243,10 @@ export const NAV_SECTIONS: NavSection[] = [
         roles: FINANCE,
       },
       {
-        label: 'Attendance & Time',
+        label: 'Attendance & loans',
         to: '/payroll/time',
         icon: 'time',
-        hint: 'Labor · Allocation',
+        hint: 'Time · Advances · Loans',
         roles: FINANCE,
       },
       {
@@ -341,13 +341,6 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: 'profile',
         hint: 'Account · Session',
         roles: ALL,
-      },
-      {
-        label: 'Chart of Accounts',
-        to: '/settings/accounts',
-        icon: 'accounts',
-        hint: 'Double-entry CoA',
-        roles: FINANCE,
       },
       {
         label: 'Payroll Rules',
