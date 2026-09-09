@@ -4071,3 +4071,66 @@ tr.is-selected-row {
     position: static;
   }
 }
+
+.recon-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.recon-pane .table-wrap {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.recon-pane tr.is-selected {
+  background: color-mix(in srgb, var(--theme-table-head-bg, #1d4ed8) 14%, transparent);
+}
+
+.recon-pane tr.is-candidate {
+  background: color-mix(in srgb, #16a34a 12%, transparent);
+}
+
+.recon-summary-bar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  margin: 12px 0 20px;
+  border: 1px solid var(--line-strong, #cfd6e0);
+  border-radius: var(--theme-card-radius, var(--radius));
+  background: var(--theme-input-bg, #fff);
+}
+
+.recon-summary-bar > div {
+  display: grid;
+  gap: 4px;
+}
+
+.recon-summary-bar span {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.recon-summary-bar strong {
+  font-size: var(--text-md);
+}
+
+.recon-summary-bar .is-balanced strong {
+  color: #047857;
+}
+
+.recon-summary-bar .is-unbalanced strong {
+  color: #b91c1c;
+}
+
+@media (max-width: 960px) {
+  .recon-split,
+  .recon-summary-bar {
+    grid-template-columns: 1fr;
+  }
+}

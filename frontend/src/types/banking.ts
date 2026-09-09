@@ -62,9 +62,12 @@ export type StatementLine = {
   date: string
   description: string
   amount: number
+  debit: number
+  credit: number
   reference: string | null
   status: string
   matchedLedgerLineId: string | null
+  reconciledDate: string | null
 }
 
 export type Reconciliation = {
@@ -73,10 +76,16 @@ export type Reconciliation = {
   treasuryAccountId: string
   glAccountCode: string
   asOf: string
+  openingBalance: number | null
   statementBalance: number
   bookBalance: number
+  calculatedBookBalance: number
+  uncollectedDeposits: number
+  unpresentedCheques: number
   difference: number
+  fileName: string | null
   status: string
+  displayStatus: 'draft' | 'partially_reconciled' | 'reconciled'
   matchedCount: number
   unmatchedStatementCount: number
   isReconciled: boolean
@@ -86,7 +95,10 @@ export type Reconciliation = {
     date: string
     entryNumber: string
     memo: string
+    reference: string | null
     debit: number
     credit: number
   }>
 }
+
+export type BankAdjustKind = 'bank_charge' | 'bank_interest'

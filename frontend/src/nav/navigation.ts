@@ -158,7 +158,7 @@ export const NAV_SECTIONS: NavSection[] = [
         label: 'Bank Reconciliation',
         to: '/banking/reconciliation',
         icon: 'reconcile',
-        hint: 'Statement matching',
+        hint: 'Statement · Match · Adjust',
         roles: FINANCE,
       },
     ],

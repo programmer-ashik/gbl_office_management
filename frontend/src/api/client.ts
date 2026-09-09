@@ -562,18 +562,76 @@ export const api = {
     }),
   importReconciliation: (
     treasuryId: string,
-    body: { asOf: string; statementBalance: number; csv: string },
+    body: {
+      asOf?: string
+      statementBalance?: number
+      csv?: string
+      pdfBase64?: string
+      openingBalance?: number
+      fileName?: string
+    },
   ) =>
     request<Reconciliation>(`/treasury/${treasuryId}/reconciliations`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  previewStatement: (
+    treasuryId: string,
+    body: { csv?: string; pdfBase64?: string },
+  ) =>
+    request<{
+      lineCount: number
+      openingBalance: number | null
+      closingBalance: number | null
+      periodFrom: string | null
+      periodTo: string | null
+      asOf: string | null
+      sampleLines: Array<{
+        date: string
+        description: string
+        amount: number
+        reference?: string
+      }>
+    }>(`/treasury/${treasuryId}/reconciliations/preview`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  listTreasuryReconciliations: (treasuryId: string) =>
+    request<Reconciliation[]>(`/treasury/${treasuryId}/reconciliations`),
   reconciliation: (id: string) => request<Reconciliation>(`/reconciliations/${id}`),
+  autoMatchReconciliation: (id: string) =>
+    request<Reconciliation>(`/reconciliations/${id}/auto-match`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  adjustReconciliation: (
+    id: string,
+    body: {
+      kind: 'bank_charge' | 'bank_interest'
+      amount: number
+      date: string
+      memo?: string
+      reference?: string
+      projectId?: string
+    },
+  ) =>
+    request<Reconciliation>(`/reconciliations/${id}/adjust`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   matchReconciliation: (
     id: string,
     body: { statementLineId: string; ledgerLineId: string },
   ) =>
     request<Reconciliation>(`/reconciliations/${id}/match`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  unmatchReconciliation: (
+    id: string,
+    body: { statementLineId: string },
+  ) =>
+    request<Reconciliation>(`/reconciliations/${id}/unmatch`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

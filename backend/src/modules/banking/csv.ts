@@ -1,4 +1,8 @@
 import { badRequest } from '../../common/errors/app-error';
+import {
+  buildStatementParseResult,
+  type StatementParseResult,
+} from './statement-meta';
 
 export type ParsedStatementLine = {
   date: string;
@@ -10,7 +14,8 @@ export type ParsedStatementLine = {
 const HEADER_DATE = /^(date|txn_date|transaction_date|value_date)$/i;
 const HEADER_DESC = /^(description|narration|memo|particulars|details)$/i;
 const HEADER_AMOUNT = /^(amount|amt|value)$/i;
-const HEADER_REF = /^(reference|ref|cheque|check|txn_id)$/i;
+const HEADER_REF =
+  /^(reference|ref|cheque|check|cheque_no|check_no|txn_id|chequeorrefno)$/i;
 
 export function toSignedMinorUnits(amount: number): number {
   if (typeof amount !== 'number' || !Number.isFinite(amount)) {
@@ -25,6 +30,10 @@ export function toSignedMinorUnits(amount: number): number {
 }
 
 export function parseStatementCsv(csv: string): ParsedStatementLine[] {
+  return parseStatementCsvDetailed(csv).lines;
+}
+
+export function parseStatementCsvDetailed(csv: string): StatementParseResult {
   const rows = parseCsvRows(csv);
   if (rows.length < 2) {
     throw badRequest('CSV must include a header row and at least one transaction');
@@ -62,14 +71,46 @@ export function parseStatementCsv(csv: string): ParsedStatementLine[] {
   if (lines.length === 0) {
     throw badRequest('CSV does not contain any statement lines');
   }
-  return lines;
+  return buildStatementParseResult(lines, csv);
 }
 
 export function sameUtcDay(a: Date, b: Date): boolean {
-  return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
+  return utcDayKey(a) === utcDayKey(b);
+}
+
+export function daysApartUtc(a: Date, b: Date): number {
+  const ms = Math.abs(utcDayStart(a).getTime() - utcDayStart(b).getTime());
+  return Math.round(ms / 86_400_000);
+}
+
+function utcDayStart(date: Date): Date {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+}
+
+function utcDayKey(date: Date): string {
+  return utcDayStart(date).toISOString().slice(0, 10);
+}
+
+export function normalizeRef(value?: string | null): string {
+  return (value ?? '').trim().toLowerCase().replace(/[\s#-]+/g, '');
+}
+
+export function refsCompatible(
+  statementRef?: string | null,
+  bookRef?: string | null,
+  bookMemo?: string | null,
+): boolean {
+  const needle = normalizeRef(statementRef);
+  if (!needle || needle.length < 2) {
+    return false;
+  }
+  const haystacks = [normalizeRef(bookRef), normalizeRef(bookMemo)].filter(
+    Boolean,
+  );
+  return haystacks.some(
+    (hay) => hay === needle || hay.includes(needle) || needle.includes(hay),
   );
 }
 
@@ -78,44 +119,89 @@ export type MatchableBookLine = {
   date: Date;
   debitMinor: number;
   creditMinor: number;
+  reference?: string | null;
+  memo?: string | null;
 };
 
 export type MatchableStatementLine = {
   index: number;
   date: Date;
   amountMinor: number;
+  reference?: string | null;
 };
+
+/**
+ * Heuristic auto-match:
+ * Amount must match exactly AND (cheque/ref matches OR date within ±7 days).
+ * Prefer same-day + ref matches when multiple candidates exist.
+ */
+export const DATE_MATCH_WINDOW_DAYS = 7;
 
 export function autoMatchStatementLines(
   statement: MatchableStatementLine[],
   book: MatchableBookLine[],
+  options?: { dateWindowDays?: number },
 ): Array<{ statementIndex: number; ledgerLineId: string }> {
+  const windowDays = options?.dateWindowDays ?? DATE_MATCH_WINDOW_DAYS;
   const usedBook = new Set<string>();
   const matches: Array<{ statementIndex: number; ledgerLineId: string }> = [];
 
   for (const line of statement) {
-    const candidate = book.find((entry) => {
-      if (usedBook.has(entry.id)) {
-        return false;
-      }
-      if (!sameUtcDay(entry.date, line.date)) {
-        return false;
-      }
-      if (line.amountMinor > 0) {
-        return entry.debitMinor === line.amountMinor;
-      }
-      if (line.amountMinor < 0) {
-        return entry.creditMinor === -line.amountMinor;
-      }
-      return false;
-    });
-    if (candidate) {
-      usedBook.add(candidate.id);
-      matches.push({ statementIndex: line.index, ledgerLineId: candidate.id });
+    const candidates = book
+      .filter((entry) => {
+        if (usedBook.has(entry.id)) {
+          return false;
+        }
+        if (!amountMatches(line.amountMinor, entry)) {
+          return false;
+        }
+        const withinWindow = daysApartUtc(entry.date, line.date) <= windowDays;
+        const refHit = refsCompatible(
+          line.reference,
+          entry.reference,
+          entry.memo,
+        );
+        return withinWindow || refHit;
+      })
+      .map((entry) => {
+        const dayGap = daysApartUtc(entry.date, line.date);
+        const refHit = refsCompatible(
+          line.reference,
+          entry.reference,
+          entry.memo,
+        );
+        let score = 0;
+        if (dayGap === 0) score += 100;
+        else if (dayGap <= windowDays) score += 50;
+        if (refHit) score += 40;
+        return { entry, score, dayGap };
+      })
+      .sort((a, b) => b.score - a.score || a.dayGap - b.dayGap);
+
+    const best = candidates[0];
+    if (best) {
+      usedBook.add(best.entry.id);
+      matches.push({
+        statementIndex: line.index,
+        ledgerLineId: best.entry.id,
+      });
     }
   }
 
   return matches;
+}
+
+function amountMatches(
+  amountMinor: number,
+  entry: Pick<MatchableBookLine, 'debitMinor' | 'creditMinor'>,
+): boolean {
+  if (amountMinor > 0) {
+    return entry.debitMinor === amountMinor;
+  }
+  if (amountMinor < 0) {
+    return entry.creditMinor === -amountMinor;
+  }
+  return false;
 }
 
 function parseAmount(raw: string): number {

@@ -8,9 +8,11 @@ export interface IStatementLine {
   date: Date;
   description: string;
   amountMinor: number;
+  /** Cheque / bank reference (chequeOrRefNo). */
   reference?: string;
   status: StatementLineStatus;
   matchedLedgerLineId?: Types.ObjectId;
+  reconciledDate?: Date;
 }
 
 export interface IReconciliation {
@@ -18,7 +20,11 @@ export interface IReconciliation {
   treasuryAccountId: Types.ObjectId;
   glAccountCode: string;
   asOf: Date;
+  /** Optional opening balance from the bank statement. */
+  openingBalanceMinor?: number;
   statementBalanceMinor: number;
+  /** Original upload file name when provided. */
+  fileName?: string;
   status: ReconciliationStatus;
   lines: IStatementLine[];
   createdBy: Types.ObjectId;
@@ -42,6 +48,7 @@ const statementLineSchema = new Schema<IStatementLine>(
       default: 'unmatched',
     },
     matchedLedgerLineId: { type: Schema.Types.ObjectId, ref: 'LedgerLine' },
+    reconciledDate: { type: Date },
   },
   { _id: true },
 );
@@ -57,7 +64,9 @@ const reconciliationSchema = new Schema<IReconciliation>(
     },
     glAccountCode: { type: String, required: true },
     asOf: { type: Date, required: true },
+    openingBalanceMinor: { type: Number },
     statementBalanceMinor: { type: Number, required: true },
+    fileName: { type: String, trim: true, maxlength: 240 },
     status: {
       type: String,
       required: true,

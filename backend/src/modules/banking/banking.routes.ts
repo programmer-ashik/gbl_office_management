@@ -10,10 +10,13 @@ import type { LedgerService } from '../accounting/ledger.service';
 import type { UsersService } from '../users/users.service';
 import type { BankingService } from './banking.service';
 import {
+  AdjustReconciliationDto,
   CreateTransferDto,
   CreateTreasuryAccountDto,
   ImportReconciliationDto,
   MatchReconciliationDto,
+  PreviewStatementDto,
+  UnmatchReconciliationDto,
   UpdateTreasuryAccountDto,
 } from './dto/banking.dto';
 
@@ -71,6 +74,20 @@ export function createTreasuryRouter(
     asyncHandler(async (req, res) => {
       const rows = await bankingService.listReconciliations(String(req.params.id));
       sendSuccess(res, rows, 'Reconciliations retrieved successfully');
+    }),
+  );
+
+  router.post(
+    '/:id/reconciliations/preview',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(PreviewStatementDto),
+    asyncHandler(async (req, res) => {
+      const preview = await bankingService.previewStatement(
+        String(req.params.id),
+        req.body,
+      );
+      sendSuccess(res, preview, 'Statement preview ready');
     }),
   );
 
@@ -164,6 +181,33 @@ export function createReconciliationsRouter(
   );
 
   router.post(
+    '/:id/auto-match',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const session = await bankingService.autoMatchReconciliation(
+        String(req.params.id),
+      );
+      sendSuccess(res, session, 'Auto-match completed successfully');
+    }),
+  );
+
+  router.post(
+    '/:id/adjust',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(AdjustReconciliationDto),
+    asyncHandler(async (req, res) => {
+      const session = await bankingService.adjustReconciliation(
+        String(req.params.id),
+        req.body,
+        req.user!.userId,
+      );
+      sendSuccess(res, session, 'Bank adjustment posted successfully');
+    }),
+  );
+
+  router.post(
     '/:id/match',
     auth,
     requireRoles(...FINANCE),
@@ -175,6 +219,20 @@ export function createReconciliationsRouter(
         req.body.ledgerLineId,
       );
       sendSuccess(res, session, 'Statement line matched successfully');
+    }),
+  );
+
+  router.post(
+    '/:id/unmatch',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(UnmatchReconciliationDto),
+    asyncHandler(async (req, res) => {
+      const session = await bankingService.unmatchLine(
+        String(req.params.id),
+        req.body.statementLineId,
+      );
+      sendSuccess(res, session, 'Statement line unmatched successfully');
     }),
   );
 

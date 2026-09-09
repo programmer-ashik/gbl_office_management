@@ -15,17 +15,26 @@ import type { JournalService } from '../accounting/journal.service';
 import { LedgerLineModel } from '../accounting/ledger.model';
 import { LedgerService } from '../accounting/ledger.service';
 import { SystemAccountCode } from '../accounting/system-account-codes';
+import { ProjectModel } from '../projects/project.model';
 import {
   autoMatchStatementLines,
-  parseStatementCsv,
+  parseStatementCsvDetailed,
   toSignedMinorUnits,
 } from './csv';
+import {
+  bufferFromPdfBase64,
+  parseStatementPdfDetailed,
+} from './pdf-statement';
+import { buildStatementParseResult } from './statement-meta';
 import type {
+  AdjustReconciliationDto,
   CreateTransferDto,
   CreateTreasuryAccountDto,
   ImportReconciliationDto,
+  PreviewStatementDto,
   UpdateTreasuryAccountDto,
 } from './dto/banking.dto';
+import { BankAdjustKind } from './dto/banking.dto';
 import {
   FundTransferModel,
   type FundTransferDocument,
@@ -75,9 +84,12 @@ export type PublicStatementLine = {
   date: string;
   description: string;
   amount: number;
+  debit: number;
+  credit: number;
   reference: string | null;
   status: string;
   matchedLedgerLineId: string | null;
+  reconciledDate: string | null;
 };
 
 export type PublicReconciliation = {
@@ -86,10 +98,17 @@ export type PublicReconciliation = {
   treasuryAccountId: string;
   glAccountCode: string;
   asOf: string;
+  openingBalance: number | null;
   statementBalance: number;
   bookBalance: number;
+  /** Statement ending + uncollected deposits − unpresented cheques */
+  calculatedBookBalance: number;
+  uncollectedDeposits: number;
+  unpresentedCheques: number;
   difference: number;
+  fileName: string | null;
   status: string;
+  displayStatus: 'draft' | 'partially_reconciled' | 'reconciled';
   matchedCount: number;
   unmatchedStatementCount: number;
   isReconciled: boolean;
@@ -99,6 +118,7 @@ export type PublicReconciliation = {
     date: string;
     entryNumber: string;
     memo: string;
+    reference: string | null;
     debit: number;
     credit: number;
   }>;
@@ -406,30 +426,73 @@ export class BankingService {
     return rows.map((row) => this.toPublicTransfer(row));
   }
 
+  async previewStatement(
+    treasuryId: string,
+    dto: PreviewStatementDto,
+  ): Promise<{
+    lineCount: number;
+    openingBalance: number | null;
+    closingBalance: number | null;
+    periodFrom: string | null;
+    periodTo: string | null;
+    asOf: string | null;
+    sampleLines: Array<{
+      date: string;
+      description: string;
+      amount: number;
+      reference?: string;
+    }>;
+  }> {
+    await this.findTreasuryOrFail(treasuryId);
+    const parsed = await this.parseStatementInput(dto);
+    return {
+      lineCount: parsed.lines.length,
+      openingBalance: parsed.openingBalance ?? null,
+      closingBalance: parsed.closingBalance ?? null,
+      periodFrom: parsed.periodFrom ?? null,
+      periodTo: parsed.periodTo ?? null,
+      asOf: parsed.asOf ?? null,
+      sampleLines: parsed.lines.slice(0, 8),
+    };
+  }
+
   async importReconciliation(
     treasuryId: string,
     dto: ImportReconciliationDto,
     userId: string,
   ): Promise<PublicReconciliation> {
     const treasury = await this.findTreasuryOrFail(treasuryId);
-    const asOf = new Date(dto.asOf);
+    const parsed = await this.parseStatementInput(dto);
+
+    if (parsed.lines.length === 0) {
+      throw badRequest('Provide CSV text, PDF (pdfBase64), or statement lines');
+    }
+
+    const closing =
+      dto.statementBalance ?? parsed.closingBalance;
+    if (closing == null) {
+      throw badRequest(
+        'Closing / ending balance is required (not found on statement)',
+      );
+    }
+
+    const asOfRaw = dto.asOf ?? parsed.asOf;
+    if (!asOfRaw) {
+      throw badRequest('Statement as-of date is required');
+    }
+    const asOf = new Date(
+      /^\d{4}-\d{2}-\d{2}$/.test(asOfRaw)
+        ? `${asOfRaw}T00:00:00.000Z`
+        : asOfRaw,
+    );
     if (Number.isNaN(asOf.getTime())) {
       throw badRequest('Invalid statement date');
     }
 
-    const parsed = dto.csv
-      ? parseStatementCsv(dto.csv)
-      : (dto.lines ?? []).map((line) => ({
-          date: line.date,
-          description: line.description,
-          amount: line.amount,
-          reference: line.reference,
-        }));
-    if (parsed.length === 0) {
-      throw badRequest('Provide CSV text or statement lines');
-    }
+    const opening =
+      dto.openingBalance ?? parsed.openingBalance ?? undefined;
 
-    const lines: IStatementLine[] = parsed.map((line) => ({
+    const lines: IStatementLine[] = parsed.lines.map((line) => ({
       date: new Date(line.date),
       description: line.description.trim(),
       amountMinor: toSignedMinorUnits(line.amount),
@@ -443,7 +506,10 @@ export class BankingService {
         treasuryAccountId: treasury._id,
         glAccountCode: treasury.glAccountCode,
         asOf,
-        statementBalanceMinor: toSignedMinorUnits(dto.statementBalance),
+        openingBalanceMinor:
+          opening != null ? toSignedMinorUnits(opening) : undefined,
+        statementBalanceMinor: toSignedMinorUnits(closing),
+        fileName: dto.fileName?.trim() || undefined,
         status: 'open',
         lines,
         createdBy: new Types.ObjectId(userId),
@@ -452,6 +518,136 @@ export class BankingService {
 
     await this.applyAutoMatch(created);
     return this.toPublicReconciliation(created);
+  }
+
+  private async parseStatementInput(dto: {
+    csv?: string;
+    pdfBase64?: string;
+    lines?: Array<{
+      date: string;
+      description: string;
+      amount: number;
+      reference?: string;
+    }>;
+  }) {
+    if (dto.pdfBase64?.trim()) {
+      const buffer = bufferFromPdfBase64(dto.pdfBase64);
+      return parseStatementPdfDetailed(buffer);
+    }
+    if (dto.csv?.trim()) {
+      return parseStatementCsvDetailed(dto.csv);
+    }
+    if (dto.lines?.length) {
+      return buildStatementParseResult(
+        dto.lines.map((line) => ({
+          date: line.date,
+          description: line.description,
+          amount: line.amount,
+          reference: line.reference,
+        })),
+      );
+    }
+    throw badRequest('Provide CSV text, PDF (pdfBase64), or statement lines');
+  }
+
+  async autoMatchReconciliation(
+    reconciliationId: string,
+  ): Promise<PublicReconciliation> {
+    const session = await this.findReconciliationOrFail(reconciliationId);
+    if (session.status === 'completed') {
+      throw badRequest('Reconciliation is already completed');
+    }
+    await this.applyAutoMatch(session);
+    return this.toPublicReconciliation(session);
+  }
+
+  async adjustReconciliation(
+    reconciliationId: string,
+    dto: AdjustReconciliationDto,
+    userId: string,
+  ): Promise<PublicReconciliation> {
+    const session = await this.findReconciliationOrFail(reconciliationId);
+    if (session.status === 'completed') {
+      throw badRequest('Reconciliation is already completed');
+    }
+
+    const date = new Date(dto.date);
+    if (Number.isNaN(date.getTime())) {
+      throw badRequest('Invalid adjustment date');
+    }
+
+    let projectId: string | undefined;
+    if (dto.projectId) {
+      if (!Types.ObjectId.isValid(dto.projectId)) {
+        throw badRequest('Invalid projectId');
+      }
+      const project = await ProjectModel.findById(dto.projectId).exec();
+      if (!project) {
+        throw notFound('Project not found');
+      }
+      projectId = project._id.toString();
+    }
+
+    const amount = dto.amount;
+    const memo =
+      dto.memo?.trim() ||
+      (dto.kind === BankAdjustKind.BANK_CHARGE
+        ? `Bank charge · ${session.reconciliationNumber}`
+        : `Bank interest · ${session.reconciliationNumber}`);
+
+    const bankLine = {
+      accountCode: session.glAccountCode,
+      description: memo,
+      ...(dto.reference ? { reference: dto.reference } : {}),
+    };
+
+    const counterCode =
+      dto.kind === BankAdjustKind.BANK_CHARGE
+        ? SystemAccountCode.BANK_CHARGES
+        : SystemAccountCode.OTHER_INCOME;
+
+    const lines =
+      dto.kind === BankAdjustKind.BANK_CHARGE
+        ? [
+            {
+              accountCode: counterCode,
+              debit: amount,
+              description: memo,
+              ...(projectId ? { projectId } : {}),
+            },
+            {
+              ...bankLine,
+              credit: amount,
+            },
+          ]
+        : [
+            {
+              ...bankLine,
+              debit: amount,
+            },
+            {
+              accountCode: counterCode,
+              credit: amount,
+              description: memo,
+              ...(projectId ? { projectId } : {}),
+            },
+          ];
+
+    await this.journalService.post(
+      {
+        date: date.toISOString(),
+        memo,
+        reference: dto.reference?.trim() || session.reconciliationNumber,
+        projectId,
+        lines,
+      },
+      userId,
+      'system',
+    );
+
+    // Re-run auto-match so the new bank ledger line can clear against the statement.
+    await this.applyAutoMatch(session);
+    return this.toPublicReconciliation(session);
   }
 
   async getReconciliation(id: string): Promise<PublicReconciliation> {
@@ -512,6 +708,34 @@ export class BankingService {
 
     line.status = 'matched';
     line.matchedLedgerLineId = book._id;
+    line.reconciledDate = new Date();
+    await session.save();
+    return this.toPublicReconciliation(session);
+  }
+
+  async unmatchLine(
+    reconciliationId: string,
+    statementLineId: string,
+  ): Promise<PublicReconciliation> {
+    const session = await this.findReconciliationOrFail(reconciliationId);
+    if (session.status === 'completed') {
+      throw badRequest('Reconciliation is already completed');
+    }
+    const line = session.lines.find(
+      (item) => item._id?.toString() === statementLineId,
+    );
+    if (!line) {
+      throw notFound('Statement line not found');
+    }
+    if (line.status !== 'matched') {
+      throw badRequest('Statement line is not matched');
+    }
+    line.status = 'unmatched';
+    // Clear link fields on the subdocument (markModified so Mongoose persists unset).
+    (line as { matchedLedgerLineId?: Types.ObjectId }).matchedLedgerLineId =
+      undefined;
+    (line as { reconciledDate?: Date }).reconciledDate = undefined;
+    session.markModified('lines');
     await session.save();
     return this.toPublicReconciliation(session);
   }
@@ -585,15 +809,49 @@ export class BankingService {
       session.glAccountCode,
       { asOf: session.asOf },
     );
-    const unmatchedBook = ledger.entries.filter(
-      (entry) => !matchedIds.has(entry.id),
-    );
+    const unmatchedBook = ledger.entries
+      .filter((entry) => !matchedIds.has(entry.id))
+      .map((entry) => ({
+        id: entry.id,
+        date: entry.date,
+        entryNumber: entry.entryNumber,
+        memo: entry.memo,
+        reference: entry.reference ?? null,
+        debit: entry.debit,
+        credit: entry.credit,
+      }));
+
     const unmatchedStatementCount = session.lines.filter(
       (line) => line.status === 'unmatched',
     ).length;
-    const difference = fromMinorUnits(
-      session.statementBalanceMinor - bookBalanceMinor,
+    const matchedCount = session.lines.filter(
+      (line) => line.status === 'matched',
+    ).length;
+
+    const uncollectedDepositsMinor = unmatchedBook.reduce(
+      (sum, row) => sum + toMinorUnits(row.debit),
+      0,
     );
+    const unpresentedChequesMinor = unmatchedBook.reduce(
+      (sum, row) => sum + toMinorUnits(row.credit),
+      0,
+    );
+    const calculatedBookBalanceMinor =
+      session.statementBalanceMinor +
+      uncollectedDepositsMinor -
+      unpresentedChequesMinor;
+    const difference = fromMinorUnits(
+      calculatedBookBalanceMinor - bookBalanceMinor,
+    );
+    const isReconciled =
+      unmatchedStatementCount === 0 && Math.abs(difference) < 0.005;
+
+    let displayStatus: PublicReconciliation['displayStatus'] = 'draft';
+    if (session.status === 'completed' || isReconciled) {
+      displayStatus = 'reconciled';
+    } else if (matchedCount > 0) {
+      displayStatus = 'partially_reconciled';
+    }
 
     return {
       id: session._id.toString(),
@@ -601,25 +859,41 @@ export class BankingService {
       treasuryAccountId: session.treasuryAccountId.toString(),
       glAccountCode: session.glAccountCode,
       asOf: session.asOf.toISOString(),
+      openingBalance:
+        session.openingBalanceMinor != null
+          ? fromMinorUnits(session.openingBalanceMinor)
+          : null,
       statementBalance: fromMinorUnits(session.statementBalanceMinor),
       bookBalance: fromMinorUnits(bookBalanceMinor),
+      calculatedBookBalance: fromMinorUnits(calculatedBookBalanceMinor),
+      uncollectedDeposits: fromMinorUnits(uncollectedDepositsMinor),
+      unpresentedCheques: fromMinorUnits(unpresentedChequesMinor),
       difference,
+      fileName: session.fileName ?? null,
       status: session.status,
-      matchedCount: session.lines.filter((line) => line.status === 'matched')
-        .length,
+      displayStatus,
+      matchedCount,
       unmatchedStatementCount,
-      isReconciled: unmatchedStatementCount === 0 && difference === 0,
-      lines: session.lines.map((line) => ({
-        id: String(line._id),
-        date: line.date.toISOString(),
-        description: line.description,
-        amount: fromMinorUnits(line.amountMinor),
-        reference: line.reference ?? null,
-        status: line.status,
-        matchedLedgerLineId: line.matchedLedgerLineId
-          ? line.matchedLedgerLineId.toString()
-          : null,
-      })),
+      isReconciled,
+      lines: session.lines.map((line) => {
+        const amount = fromMinorUnits(line.amountMinor);
+        return {
+          id: String(line._id),
+          date: line.date.toISOString(),
+          description: line.description,
+          amount,
+          debit: amount > 0 ? amount : 0,
+          credit: amount < 0 ? -amount : 0,
+          reference: line.reference ?? null,
+          status: line.status,
+          matchedLedgerLineId: line.matchedLedgerLineId
+            ? line.matchedLedgerLineId.toString()
+            : null,
+          reconciledDate: line.reconciledDate
+            ? line.reconciledDate.toISOString()
+            : null,
+        };
+      }),
       unmatchedBook,
     };
   }
@@ -629,22 +903,38 @@ export class BankingService {
       session.glAccountCode,
       { asOf: session.asOf },
     );
-    const book = ledger.entries.map((entry) => ({
-      id: entry.id,
-      date: new Date(entry.date),
-      debitMinor: toMinorUnits(entry.debit),
-      creditMinor: toMinorUnits(entry.credit),
-    }));
-    const statement = session.lines.map((line, index) => ({
-      index,
-      date: line.date,
-      amountMinor: line.amountMinor,
-    }));
+    const used = new Set(
+      session.lines
+        .filter((line) => line.matchedLedgerLineId)
+        .map((line) => line.matchedLedgerLineId!.toString()),
+    );
+    const book = ledger.entries
+      .filter((entry) => !used.has(entry.id))
+      .map((entry) => ({
+        id: entry.id,
+        date: new Date(entry.date),
+        debitMinor: toMinorUnits(entry.debit),
+        creditMinor: toMinorUnits(entry.credit),
+        reference: entry.reference,
+        memo: entry.memo,
+      }));
+    const statement = session.lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => line.status === 'unmatched')
+      .map(({ line, index }) => ({
+        index,
+        date: line.date,
+        amountMinor: line.amountMinor,
+        reference: line.reference,
+      }));
     const matches = autoMatchStatementLines(statement, book);
+    const now = new Date();
     for (const match of matches) {
       const line = session.lines[match.statementIndex];
+      if (!line || line.status !== 'unmatched') continue;
       line.status = 'matched';
       line.matchedLedgerLineId = new Types.ObjectId(match.ledgerLineId);
+      line.reconciledDate = now;
     }
     await session.save();
   }

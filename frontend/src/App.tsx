@@ -125,7 +125,15 @@ export default function App() {
               path="/banking/reconciliation"
               element={<BankingReconciliationPage />}
             />
+            <Route
+              path="/dashboard/accounting/bank-reconciliation"
+              element={<BankingReconciliationPage />}
+            />
             <Route path="/banking/:id" element={<TreasuryDetailPage />} />
+            <Route
+              path="/dashboard/accounting/bank-reconciliation/:id"
+              element={<TreasuryDetailPage />}
+            />
 
             <Route path="/advances" element={<AdvancesPage />} />
             <Route path="/dashboard/advances" element={<AdvancesPage />} />

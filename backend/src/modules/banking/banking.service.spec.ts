@@ -61,6 +61,72 @@ describe('autoMatchStatementLines', () => {
     ]);
   });
 
+  it('matches by amount within ±7 days when refs are absent', () => {
+    const matches = autoMatchStatementLines(
+      [
+        {
+          index: 0,
+          date: new Date('2026-09-08T00:00:00.000Z'),
+          amountMinor: -2500,
+        },
+      ],
+      [
+        {
+          id: 'fee',
+          date: new Date('2026-09-02T00:00:00.000Z'),
+          debitMinor: 0,
+          creditMinor: 2500,
+        },
+      ],
+    );
+    expect(matches).toEqual([{ statementIndex: 0, ledgerLineId: 'fee' }]);
+  });
+
+  it('does not match outside the ±7 day window without a ref', () => {
+    const matches = autoMatchStatementLines(
+      [
+        {
+          index: 0,
+          date: new Date('2026-09-20T00:00:00.000Z'),
+          amountMinor: -2500,
+        },
+      ],
+      [
+        {
+          id: 'fee',
+          date: new Date('2026-09-02T00:00:00.000Z'),
+          debitMinor: 0,
+          creditMinor: 2500,
+        },
+      ],
+    );
+    expect(matches).toEqual([]);
+  });
+
+  it('matches by cheque/ref even outside the date window', () => {
+    const matches = autoMatchStatementLines(
+      [
+        {
+          index: 0,
+          date: new Date('2026-09-20T00:00:00.000Z'),
+          amountMinor: -10000,
+          reference: 'CHQ-7788',
+        },
+      ],
+      [
+        {
+          id: 'chq',
+          date: new Date('2026-09-01T00:00:00.000Z'),
+          debitMinor: 0,
+          creditMinor: 10000,
+          reference: 'CHQ-7788',
+          memo: 'Supplier payment',
+        },
+      ],
+    );
+    expect(matches).toEqual([{ statementIndex: 0, ledgerLineId: 'chq' }]);
+  });
+
   it('does not reuse a book line twice', () => {
     const matches = autoMatchStatementLines(
       [
