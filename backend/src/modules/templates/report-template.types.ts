@@ -53,6 +53,17 @@ export type FooterConfig = {
   auditorLabel: string;
 };
 
+export type VoucherConfig = {
+  theme: 'yellow' | 'blue' | 'emerald' | 'crimson' | 'charcoal';
+  companySubtitle: string;
+  currencyLabel: string;
+  majorUnitLabel: string;
+  minorUnitLabel: string;
+  amountInWordsLabel: string;
+  showWatermark: boolean;
+  signatoryTitles: string[];
+};
+
 export type PublicReportTemplate = {
   id: string | null;
   templateName: string;
@@ -61,6 +72,7 @@ export type PublicReportTemplate = {
   headerConfig: HeaderConfig;
   layoutStructure: TemplateBlock[];
   footerConfig: FooterConfig;
+  voucherConfig?: VoucherConfig | null;
   isDefault: boolean;
   updatedBy: string | null;
   updatedAt: string | null;
@@ -87,6 +99,26 @@ const defaultFooter = (): FooterConfig => ({
   managingDirectorLabel: 'Managing Director',
   auditorLabel: 'Auditor',
 });
+
+export function defaultVoucherConfig(): VoucherConfig {
+  return {
+    theme: 'yellow',
+    companySubtitle: '',
+    currencyLabel: 'Amount in BDT',
+    majorUnitLabel: 'TAKA',
+    minorUnitLabel: 'PAISA',
+    amountInWordsLabel: 'Amount in words Taka:',
+    showWatermark: true,
+    signatoryTitles: [
+      'Head of A/C',
+      'Prepared by',
+      'Accounts Manager',
+      'Group Co-ordinator',
+      'Chief Executive Officer',
+      'Managing Director',
+    ],
+  };
+}
 
 export function defaultBalanceSheetTemplate(): PublicReportTemplate {
   return {
@@ -206,6 +238,7 @@ export function defaultJournalVoucherTemplate(): PublicReportTemplate {
       showManagingDirector: false,
       showAuditor: false,
     },
+    voucherConfig: defaultVoucherConfig(),
     isDefault: true,
     updatedBy: null,
     updatedAt: null,
@@ -304,6 +337,16 @@ export function hydrateTemplate(
     footerConfig: {
       ...base.footerConfig,
       ...(partial.footerConfig ?? {}),
+    },
+    voucherConfig: {
+      ...defaultVoucherConfig(),
+      ...(base.voucherConfig ?? {}),
+      ...(partial.voucherConfig ?? {}),
+      signatoryTitles:
+        partial.voucherConfig?.signatoryTitles?.length
+          ? partial.voucherConfig.signatoryTitles
+          : (base.voucherConfig?.signatoryTitles ??
+            defaultVoucherConfig().signatoryTitles),
     },
     isDefault: partial.isDefault ?? true,
     updatedBy: partial.updatedBy ?? null,

@@ -12,8 +12,19 @@ export interface IItem {
   quantity?: number;
   brand?: string;
   model?: string;
+  /** Country of manufacture */
   countryOfOrigin?: string;
   technicalSpecification?: string;
+  warranty?: string;
+  /** Unique product serial */
+  serialNumber?: string;
+  /**
+   * Barcode payload: {warehouseCode}-{categoryCode}-{serialNumber}
+   */
+  barcode?: string;
+  warehouseId?: Types.ObjectId;
+  warehouseCode?: string;
+  dataSheetUrl?: string;
   categoryId?: Types.ObjectId;
   subCategoryId?: Types.ObjectId;
   supplierId?: Types.ObjectId;
@@ -37,6 +48,23 @@ const itemSchema = new Schema<IItem>(
     model: { type: String, trim: true, maxlength: 120 },
     countryOfOrigin: { type: String, trim: true, maxlength: 120 },
     technicalSpecification: { type: String, trim: true, maxlength: 2000 },
+    warranty: { type: String, trim: true, maxlength: 120 },
+    serialNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      maxlength: 64,
+      sparse: true,
+      unique: true,
+    },
+    barcode: { type: String, trim: true, maxlength: 120, index: true },
+    warehouseId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Warehouse',
+      index: true,
+    },
+    warehouseCode: { type: String, trim: true, uppercase: true, maxlength: 32 },
+    dataSheetUrl: { type: String, trim: true, maxlength: 500 },
     categoryId: {
       type: Schema.Types.ObjectId,
       ref: 'ProductCategory',

@@ -5,6 +5,7 @@ export interface IQuotationItem {
   _id: Types.ObjectId;
   productId?: Types.ObjectId;
   productName: string;
+  dataSheetUrl?: string;
   unitPriceMinor: number;
   quantity: number;
   discountRate: number;
@@ -43,6 +44,7 @@ export type PublicQuotationItem = {
   id: string;
   productId: string | null;
   productName: string;
+  dataSheetUrl: string | null;
   unitPrice: number;
   quantity: number;
   discount: number;
@@ -78,6 +80,7 @@ const quotationItemSchema = new Schema<IQuotationItem>(
   {
     productId: { type: Schema.Types.ObjectId, ref: 'Item' },
     productName: { type: String, required: true, trim: true, maxlength: 200 },
+    dataSheetUrl: { type: String, trim: true, maxlength: 500 },
     unitPriceMinor: { type: Number, required: true, min: 0 },
     quantity: { type: Number, required: true, min: 0.001 },
     discountRate: { type: Number, required: true, default: 0, min: 0, max: 100 },

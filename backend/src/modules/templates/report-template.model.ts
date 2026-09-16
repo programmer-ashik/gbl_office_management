@@ -14,6 +14,7 @@ export interface IReportTemplate {
   headerConfig: HeaderConfig;
   layoutStructure: TemplateBlock[];
   footerConfig: FooterConfig;
+  voucherConfig?: Record<string, unknown>;
   isDefault: boolean;
   updatedBy?: Types.ObjectId;
   createdAt?: Date;
@@ -104,6 +105,7 @@ const reportTemplateSchema = new Schema<IReportTemplate>(
     headerConfig: { type: headerSchema, required: true },
     layoutStructure: { type: [blockSchema], required: true },
     footerConfig: { type: footerSchema, required: true },
+    voucherConfig: { type: Schema.Types.Mixed },
     isDefault: { type: Boolean, required: true, default: true },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },

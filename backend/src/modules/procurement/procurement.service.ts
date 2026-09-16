@@ -33,6 +33,7 @@ import type {
   IssueStockDto,
   ReceiveGoodsDto,
   ReturnGoodsDto,
+  UpdateItemDto,
 } from './dto/procurement.dto';
 import { GoodsMovementModel } from './goods-movement.model';
 import { ItemModel, type ItemDocument } from './item.model';
@@ -83,6 +84,12 @@ export type PublicItem = {
   model: string | null;
   countryOfOrigin: string | null;
   technicalSpecification: string | null;
+  warranty: string | null;
+  serialNumber: string | null;
+  barcode: string | null;
+  warehouseId: string | null;
+  warehouseCode: string | null;
+  dataSheetUrl: string | null;
   categoryId: string | null;
   subCategoryId: string | null;
   supplierId: string | null;
@@ -216,6 +223,12 @@ export class ProcurementService {
       model: row.model ?? null,
       countryOfOrigin: row.countryOfOrigin ?? null,
       technicalSpecification: row.technicalSpecification ?? null,
+      warranty: row.warranty ?? null,
+      serialNumber: row.serialNumber ?? null,
+      barcode: row.barcode ?? null,
+      warehouseId: row.warehouseId ? row.warehouseId.toString() : null,
+      warehouseCode: row.warehouseCode ?? null,
+      dataSheetUrl: row.dataSheetUrl ?? null,
       categoryId: row.categoryId ? row.categoryId.toString() : null,
       subCategoryId: row.subCategoryId ? row.subCategoryId.toString() : null,
       supplierId: row.supplierId ? row.supplierId.toString() : null,
@@ -352,15 +365,76 @@ export class ProcurementService {
 
   async createItem(dto: CreateItemDto, actor: AuthenticatedUser): Promise<PublicItem> {
     this.assertFinance(actor);
-    const sku = dto.sku.trim().toUpperCase();
-    const existing = await ItemModel.findOne({ sku }).exec();
-    if (existing) {
-      throw badRequest(`SKU ${sku} already exists`);
-    }
     const { categoryId, subCategoryId } = await this.resolveCategoryIds(
       dto.categoryId,
       dto.subCategoryId,
     );
+
+    let categoryCode = 'GEN';
+    if (subCategoryId) {
+      const sub = await ProductCategoryModel.findById(subCategoryId).exec();
+      if (sub?.code) categoryCode = sub.code.toUpperCase();
+      else if (categoryId) {
+        const cat = await ProductCategoryModel.findById(categoryId).exec();
+        if (cat?.code) categoryCode = cat.code.toUpperCase();
+      }
+    } else if (categoryId) {
+      const cat = await ProductCategoryModel.findById(categoryId).exec();
+      if (cat?.code) categoryCode = cat.code.toUpperCase();
+    }
+
+    let warehouseId: Types.ObjectId | undefined;
+    let warehouseCode = 'WH01';
+    if (dto.warehouseId) {
+      const warehouse = await this.findWarehouseOrFail(dto.warehouseId);
+      warehouseId = warehouse._id;
+      warehouseCode = warehouse.code.toUpperCase();
+    } else {
+      const def = await WarehouseModel.findOne({
+        isDefault: true,
+        isActive: true,
+      }).exec();
+      if (def) {
+        warehouseId = def._id;
+        warehouseCode = def.code.toUpperCase();
+      }
+    }
+
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    let sku = dto.sku?.trim().toUpperCase() || '';
+    if (!sku) {
+      const counter = await CounterModel.findOneAndUpdate(
+        { key: `item-sku:${categoryCode}:${day}` },
+        { $inc: { seq: 1 } },
+        { upsert: true, new: true },
+      );
+      const seq = String(counter?.seq ?? 1).padStart(4, '0');
+      sku = `${categoryCode}-${day.slice(2)}-${seq}`;
+    }
+    const existing = await ItemModel.findOne({ sku }).exec();
+    if (existing) {
+      throw badRequest(`SKU ${sku} already exists`);
+    }
+
+    let serialNumber = dto.serialNumber?.trim().toUpperCase() || '';
+    if (!serialNumber) {
+      const counter = await CounterModel.findOneAndUpdate(
+        { key: `item-serial:${day}` },
+        { $inc: { seq: 1 } },
+        { upsert: true, new: true },
+      );
+      const seq = String(counter?.seq ?? 1).padStart(5, '0');
+      serialNumber = `SN${day.slice(2)}${seq}`;
+    }
+    const serialClash = await ItemModel.findOne({ serialNumber }).exec();
+    if (serialClash) {
+      throw badRequest(`Serial ${serialNumber} already exists`);
+    }
+
+    const barcode =
+      dto.barcode?.trim().toUpperCase() ||
+      `${warehouseCode}-${categoryCode}-${serialNumber}`;
+
     let supplierId: Types.ObjectId | undefined;
     let supplierName: string | undefined;
     if (dto.supplierId) {
@@ -380,6 +454,12 @@ export class ProcurementService {
       model: dto.model?.trim() || undefined,
       countryOfOrigin: dto.countryOfOrigin?.trim() || undefined,
       technicalSpecification: dto.technicalSpecification?.trim() || undefined,
+      warranty: dto.warranty?.trim() || undefined,
+      serialNumber,
+      barcode,
+      warehouseId,
+      warehouseCode,
+      dataSheetUrl: dto.dataSheetUrl?.trim() || undefined,
       categoryId,
       subCategoryId,
       supplierId,
@@ -387,6 +467,135 @@ export class ProcurementService {
       isActive: true,
     });
     return this.toPublicItem(created);
+  }
+
+  async getItem(id: string, actor: AuthenticatedUser): Promise<PublicItem> {
+    this.assertProcurementOrQuote(actor);
+    const row = await this.findItemOrFail(id);
+    if (!row.isActive) {
+      throw notFound('Item not found');
+    }
+    return this.toPublicItem(row);
+  }
+
+  async updateItem(
+    id: string,
+    dto: UpdateItemDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicItem> {
+    this.assertFinance(actor);
+    const row = await this.findItemOrFail(id);
+    if (!row.isActive) {
+      throw notFound('Item not found');
+    }
+
+    const { categoryId, subCategoryId } = await this.resolveCategoryIds(
+      dto.categoryId !== undefined
+        ? dto.categoryId
+        : row.categoryId?.toString(),
+      dto.subCategoryId !== undefined
+        ? dto.subCategoryId
+        : row.subCategoryId?.toString(),
+    );
+
+    let categoryCode = 'GEN';
+    if (subCategoryId) {
+      const sub = await ProductCategoryModel.findById(subCategoryId).exec();
+      if (sub?.code) categoryCode = sub.code.toUpperCase();
+      else if (categoryId) {
+        const cat = await ProductCategoryModel.findById(categoryId).exec();
+        if (cat?.code) categoryCode = cat.code.toUpperCase();
+      }
+    } else if (categoryId) {
+      const cat = await ProductCategoryModel.findById(categoryId).exec();
+      if (cat?.code) categoryCode = cat.code.toUpperCase();
+    }
+
+    let warehouseId = row.warehouseId;
+    let warehouseCode = row.warehouseCode || 'WH01';
+    if (dto.warehouseId) {
+      const warehouse = await this.findWarehouseOrFail(dto.warehouseId);
+      warehouseId = warehouse._id;
+      warehouseCode = warehouse.code.toUpperCase();
+    }
+
+    if (dto.sku !== undefined) {
+      const sku = dto.sku.trim().toUpperCase();
+      if (!sku) throw badRequest('SKU is required');
+      if (sku !== row.sku) {
+        const existing = await ItemModel.findOne({ sku }).exec();
+        if (existing) throw badRequest(`SKU ${sku} already exists`);
+        row.sku = sku;
+      }
+    }
+
+    if (dto.serialNumber !== undefined) {
+      const serialNumber = dto.serialNumber.trim().toUpperCase();
+      if (serialNumber && serialNumber !== row.serialNumber) {
+        const clash = await ItemModel.findOne({ serialNumber }).exec();
+        if (clash) throw badRequest(`Serial ${serialNumber} already exists`);
+      }
+      row.serialNumber = serialNumber || undefined;
+    }
+
+    if (dto.name !== undefined) row.name = dto.name.trim();
+    if (dto.unit !== undefined) row.unit = dto.unit.trim();
+    if (dto.description !== undefined) {
+      row.description = dto.description.trim() || undefined;
+    }
+    if (dto.unitPrice !== undefined) {
+      row.unitPriceMinor = toMinorUnits(dto.unitPrice);
+    }
+    if (dto.quantity !== undefined) row.quantity = dto.quantity;
+    if (dto.brand !== undefined) row.brand = dto.brand.trim() || undefined;
+    if (dto.model !== undefined) row.model = dto.model.trim() || undefined;
+    if (dto.countryOfOrigin !== undefined) {
+      row.countryOfOrigin = dto.countryOfOrigin.trim() || undefined;
+    }
+    if (dto.technicalSpecification !== undefined) {
+      row.technicalSpecification =
+        dto.technicalSpecification.trim() || undefined;
+    }
+    if (dto.warranty !== undefined) {
+      row.warranty = dto.warranty.trim() || undefined;
+    }
+    if (dto.dataSheetUrl !== undefined) {
+      row.dataSheetUrl = dto.dataSheetUrl.trim() || undefined;
+    }
+
+    row.categoryId = categoryId;
+    row.subCategoryId = subCategoryId;
+    row.warehouseId = warehouseId;
+    row.warehouseCode = warehouseCode;
+
+    const serialForBarcode = row.serialNumber || 'SN00000';
+    row.barcode =
+      dto.barcode?.trim().toUpperCase() ||
+      `${warehouseCode}-${categoryCode}-${serialForBarcode}`;
+
+    if (dto.supplierId !== undefined) {
+      if (!dto.supplierId) {
+        row.supplierId = undefined;
+        row.supplierName = undefined;
+      } else {
+        const supplier = await this.findSupplierOrFail(dto.supplierId);
+        row.supplierId = supplier._id;
+        row.supplierName = supplier.name;
+      }
+    }
+
+    await row.save();
+    return this.toPublicItem(row);
+  }
+
+  async deleteItem(id: string, actor: AuthenticatedUser): Promise<void> {
+    this.assertFinance(actor);
+    const row = await this.findItemOrFail(id);
+    if (!row.isActive) {
+      throw notFound('Item not found');
+    }
+    row.isActive = false;
+    await row.save();
   }
 
   async listItems(

@@ -101,6 +101,7 @@ export class QuotationsService {
     for (const line of dto.items) {
       let productName = line.productName.trim();
       let productId: Types.ObjectId | undefined;
+      let dataSheetUrl: string | undefined;
       if (line.productId) {
         if (!Types.ObjectId.isValid(line.productId)) {
           throw badRequest('Invalid product id');
@@ -111,6 +112,7 @@ export class QuotationsService {
         }
         productId = item._id;
         if (!productName) productName = `${item.sku} · ${item.name}`;
+        if (item.dataSheetUrl) dataSheetUrl = item.dataSheetUrl;
       }
       if (!productName) throw badRequest('Product name is required');
 
@@ -124,6 +126,7 @@ export class QuotationsService {
       items.push({
         productId,
         productName,
+        dataSheetUrl,
         unitPriceMinor: toMinorUnits(line.unitPrice),
         quantity: line.quantity,
         discountRate,
@@ -260,6 +263,7 @@ export class QuotationsService {
         id: item._id.toString(),
         productId: item.productId ? item.productId.toString() : null,
         productName: item.productName,
+        dataSheetUrl: item.dataSheetUrl ?? null,
         unitPrice: fromMinorUnits(item.unitPriceMinor),
         quantity: item.quantity,
         discount: item.discountRate,

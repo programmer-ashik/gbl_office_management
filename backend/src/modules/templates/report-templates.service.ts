@@ -21,6 +21,7 @@ function toPublic(doc: {
   headerConfig: PublicReportTemplate['headerConfig'];
   layoutStructure: TemplateBlock[];
   footerConfig: PublicReportTemplate['footerConfig'];
+  voucherConfig?: unknown;
   isDefault: boolean;
   updatedBy?: Types.ObjectId;
   updatedAt?: Date;
@@ -40,6 +41,8 @@ function toPublic(doc: {
       headerConfig: doc.headerConfig,
       layoutStructure: normalizeLayout(doc.layoutStructure ?? []),
       footerConfig: doc.footerConfig,
+      voucherConfig: (doc.voucherConfig ??
+        null) as PublicReportTemplate['voucherConfig'],
       isDefault: doc.isDefault,
       updatedBy: doc.updatedBy?.toString() ?? null,
       updatedAt: doc.updatedAt?.toISOString() ?? null,
@@ -64,7 +67,7 @@ export class ReportTemplatesService {
       .exec();
 
     if (!doc) return fallback;
-    return toPublic(doc as typeof doc & { _id: Types.ObjectId });
+    return toPublic(doc as never);
   }
 
   async getBalanceSheetTemplate(): Promise<PublicReportTemplate> {
@@ -103,6 +106,8 @@ export class ReportTemplatesService {
           })),
         ),
         footerConfig: dto.footerConfig as PublicReportTemplate['footerConfig'],
+        voucherConfig: (dto.voucherConfig ??
+          null) as PublicReportTemplate['voucherConfig'],
       },
       fallback,
     );
@@ -114,6 +119,7 @@ export class ReportTemplatesService {
       headerConfig: hydrated.headerConfig,
       footerConfig: hydrated.footerConfig,
       layoutStructure: hydrated.layoutStructure,
+      voucherConfig: hydrated.voucherConfig ?? undefined,
       isDefault: true,
       updatedBy: new Types.ObjectId(userId),
     };
@@ -128,6 +134,7 @@ export class ReportTemplatesService {
       existing.headerConfig = payload.headerConfig;
       existing.footerConfig = payload.footerConfig;
       existing.layoutStructure = payload.layoutStructure;
+      existing.voucherConfig = payload.voucherConfig;
       existing.isDefault = true;
       existing.updatedBy = payload.updatedBy;
       if (payload.companyLogoUrl) {
@@ -139,12 +146,13 @@ export class ReportTemplatesService {
       existing.markModified('headerConfig');
       existing.markModified('footerConfig');
       existing.markModified('layoutStructure');
+      existing.markModified('voucherConfig');
       await existing.save();
-      return toPublic(existing);
+      return toPublic(existing as never);
     }
 
     const created = await ReportTemplateModel.create(payload);
-    return toPublic(created);
+    return toPublic(created as never);
   }
 
   async saveBalanceSheetTemplate(

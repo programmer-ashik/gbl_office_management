@@ -16,6 +16,7 @@ import {
   IssueStockDto,
   ReceiveGoodsDto,
   ReturnGoodsDto,
+  UpdateItemDto,
 } from './dto/procurement.dto';
 import type { ProcurementService } from './procurement.service';
 
@@ -123,6 +124,41 @@ export function createItemsRouter(
     asyncHandler(async (req, res) => {
       const row = await procurementService.createItem(req.body, req.user!);
       sendSuccess(res, row, 'Item created successfully', 201);
+    }),
+  );
+
+  router.get(
+    '/:id',
+    auth,
+    requireRoles(...CATALOG_VIEW),
+    asyncHandler(async (req, res) => {
+      const row = await procurementService.getItem(req.params.id, req.user!);
+      sendSuccess(res, row, 'Item retrieved successfully');
+    }),
+  );
+
+  router.patch(
+    '/:id',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(UpdateItemDto),
+    asyncHandler(async (req, res) => {
+      const row = await procurementService.updateItem(
+        req.params.id,
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Item updated successfully');
+    }),
+  );
+
+  router.delete(
+    '/:id',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      await procurementService.deleteItem(req.params.id, req.user!);
+      sendSuccess(res, { id: req.params.id }, 'Item deleted successfully');
     }),
   );
 

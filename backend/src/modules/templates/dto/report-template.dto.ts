@@ -1,16 +1,18 @@
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
   IsIn,
   IsNumber,
-  IsObject,
   IsOptional,
   IsString,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+
+const emptyToUndefined = ({ value }: { value: unknown }) =>
+  value === '' || value === null ? undefined : value;
 
 class TemplateBlockStylesDto {
   @IsOptional()
@@ -52,7 +54,6 @@ class TemplateBlockDto {
   visible!: boolean;
 
   @IsOptional()
-  @IsObject()
   @ValidateNested()
   @Type(() => TemplateBlockStylesDto)
   styles?: TemplateBlockStylesDto;
@@ -68,11 +69,13 @@ class HeaderConfigDto {
   reportTitle!: string;
 
   @IsOptional()
+  @Transform(emptyToUndefined)
   @IsString()
   @MaxLength(400)
   address?: string;
 
   @IsOptional()
+  @Transform(emptyToUndefined)
   @IsString()
   @MaxLength(80)
   taxId?: string;
@@ -117,6 +120,48 @@ class FooterConfigDto {
   auditorLabel?: string;
 }
 
+class VoucherConfigDto {
+  @IsOptional()
+  @IsIn(['yellow', 'blue', 'emerald', 'crimson', 'charcoal'])
+  theme?: 'yellow' | 'blue' | 'emerald' | 'crimson' | 'charcoal';
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  @MaxLength(120)
+  companySubtitle?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  currencyLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  majorUnitLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  minorUnitLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  amountInWordsLabel?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  showWatermark?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  signatoryTitles?: string[];
+}
+
 export class SaveReportTemplateDto {
   @IsOptional()
   @IsString()
@@ -124,6 +169,7 @@ export class SaveReportTemplateDto {
   templateName?: string;
 
   @IsOptional()
+  @Transform(emptyToUndefined)
   @IsString()
   @MaxLength(500)
   companyLogoUrl?: string;
@@ -140,6 +186,11 @@ export class SaveReportTemplateDto {
   @ValidateNested()
   @Type(() => FooterConfigDto)
   footerConfig!: FooterConfigDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => VoucherConfigDto)
+  voucherConfig?: VoucherConfigDto;
 }
 
 /** @deprecated alias */
