@@ -21,10 +21,14 @@ import {
   downloadJournalVoucher,
   loadJournalVoucherTemplate,
   previewJournalVoucher,
+  resolveVoucherKind,
+  voucherKindTitle,
 } from '../utils/journalVoucherPdf'
 
 async function getJvTemplate() {
-  return loadJournalVoucherTemplate(() => api.journalVoucherTemplate())
+  return loadJournalVoucherTemplate(() => api.journalVoucherTemplate(), {
+    force: true,
+  })
 }
 
 export function JournalDetailPage() {
@@ -116,13 +120,17 @@ export function JournalDetailPage() {
     JOURNAL_TYPE_LABEL[entry.journalType as JournalType] ??
     entry.journalType ??
     'General'
+  const voucherKind = resolveVoucherKind(entry)
+  const voucherTitle = voucherKindTitle(voucherKind)
 
   return (
     <>
       <header className="workspace-header">
         <div>
-          <h1>Journal voucher</h1>
-          <p className="muted">{entry.entryNumber}</p>
+          <h1>{voucherTitle}</h1>
+          <p className="muted">
+            {entry.entryNumber} · {typeLabel}
+          </p>
         </div>
         <div className="table-actions">
           <button

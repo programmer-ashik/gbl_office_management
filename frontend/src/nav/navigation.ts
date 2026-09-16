@@ -392,7 +392,7 @@ export const NAV_SECTIONS: NavSection[] = [
             roles: [Role.ADMIN],
           },
           {
-            label: 'Journal Voucher Template',
+            label: 'Debit / Credit Voucher',
             to: '/settings/templates/journal-voucher',
             icon: 'journal',
             hint: 'JV PDF layout',

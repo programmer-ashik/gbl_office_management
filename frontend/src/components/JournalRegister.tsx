@@ -19,7 +19,9 @@ import {
 } from '../utils/journalVoucherPdf'
 
 async function getJvTemplate() {
-  return loadJournalVoucherTemplate(() => api.journalVoucherTemplate())
+  return loadJournalVoucherTemplate(() => api.journalVoucherTemplate(), {
+    force: true,
+  })
 }
 
 export function journalEditDisabledReason(entry: JournalEntry): string | undefined {

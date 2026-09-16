@@ -17,7 +17,7 @@ import { MetricCard } from "../components/MetricCard";
 import { Modal } from "../components/ui";
 import { money } from "../types/accounting";
 import { Role } from "../types/auth";
-import type { ProductCategory } from "../types/procurement";
+import type { ProductCategory, Warehouse } from "../types/procurement";
 import {
   PO_STATUS_LABEL,
   type Item,
@@ -32,6 +32,7 @@ export function ProcurementPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [supplierError, setSupplierError] = useState<string | null>(null);
   const [itemError, setItemError] = useState<string | null>(null);
@@ -46,16 +47,19 @@ export function ProcurementPage() {
   const [itemModalOpen, setItemModalOpen] = useState(false);
 
   async function load() {
-    const [vendorRows, itemRows, orderRows, categoryRows] = await Promise.all([
-      api.suppliers(),
-      api.items(),
-      api.purchaseOrders(),
-      api.productCategories().catch(() => [] as ProductCategory[]),
-    ]);
+    const [vendorRows, itemRows, orderRows, categoryRows, warehouseRows] =
+      await Promise.all([
+        api.suppliers(),
+        api.items(),
+        api.purchaseOrders(),
+        api.productCategories().catch(() => [] as ProductCategory[]),
+        api.warehouses().catch(() => [] as Warehouse[]),
+      ]);
     setSuppliers(vendorRows);
     setItems(itemRows);
     setOrders(orderRows);
     setCategories(categoryRows);
+    setWarehouses(warehouseRows);
   }
 
   useEffect(() => {
@@ -208,6 +212,7 @@ export function ProcurementPage() {
           error={itemError}
           categories={categories}
           suppliers={suppliers}
+          warehouses={warehouses}
         />
       </Modal>
 

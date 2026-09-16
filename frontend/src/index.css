@@ -258,6 +258,36 @@ input[type="date"] {
   min-width: 0;
 }
 
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.form-grid-3 > * {
+  min-width: 0;
+}
+
+.form-grid-3 .form-span-2 {
+  grid-column: span 2;
+}
+
+.form-grid-3 .form-span-3 {
+  grid-column: span 3;
+}
+
+@media (max-width: 900px) {
+  .form-grid-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid-3 .form-span-2,
+  .form-grid-3 .form-span-3 {
+    grid-column: auto;
+  }
+}
+
 .triple-row {
   grid-template-columns: 1fr 1.4fr 1.2fr;
 }

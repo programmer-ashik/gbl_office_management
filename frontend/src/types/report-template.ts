@@ -45,6 +45,19 @@ export type FooterConfig = {
   auditorLabel: string
 }
 
+/** Debit / Credit landscape voucher branding (settings + PDF). */
+export type VoucherConfig = {
+  theme: 'yellow' | 'blue' | 'emerald' | 'crimson' | 'charcoal'
+  companySubtitle: string
+  currencyLabel: string
+  majorUnitLabel: string
+  minorUnitLabel: string
+  amountInWordsLabel: string
+  showWatermark: boolean
+  /** Left sidebar signature titles (top → bottom) */
+  signatoryTitles: string[]
+}
+
 export type BalanceSheetTemplate = {
   id: string | null
   templateName: string
@@ -53,6 +66,7 @@ export type BalanceSheetTemplate = {
   headerConfig: HeaderConfig
   layoutStructure: TemplateBlock[]
   footerConfig: FooterConfig
+  voucherConfig?: VoucherConfig | null
   isDefault: boolean
   updatedBy: string | null
   updatedAt: string | null
@@ -159,6 +173,26 @@ export function defaultBalanceSheetTemplate(): BalanceSheetTemplate {
   }
 }
 
+export function defaultVoucherConfig(): VoucherConfig {
+  return {
+    theme: 'yellow',
+    companySubtitle: '',
+    currencyLabel: 'Amount in BDT',
+    majorUnitLabel: 'TAKA',
+    minorUnitLabel: 'PAISA',
+    amountInWordsLabel: 'Amount in words Taka:',
+    showWatermark: true,
+    signatoryTitles: [
+      'Head of A/C',
+      'Prepared by',
+      'Accounts Manager',
+      'Group Co-ordinator',
+      'Chief Executive Officer',
+      'Managing Director',
+    ],
+  }
+}
+
 export function defaultJournalVoucherTemplate(): JournalVoucherTemplate {
   return {
     id: null,
@@ -215,6 +249,7 @@ export function defaultJournalVoucherTemplate(): JournalVoucherTemplate {
       showManagingDirector: false,
       showAuditor: false,
     }),
+    voucherConfig: defaultVoucherConfig(),
     isDefault: true,
     updatedBy: null,
     updatedAt: null,
@@ -274,6 +309,16 @@ export function hydrateClientTemplate(
     footerConfig: {
       ...fallback.footerConfig,
       ...(partial.footerConfig ?? {}),
+    },
+    voucherConfig: {
+      ...defaultVoucherConfig(),
+      ...(fallback.voucherConfig ?? {}),
+      ...(partial.voucherConfig ?? {}),
+      signatoryTitles:
+        partial.voucherConfig?.signatoryTitles?.length
+          ? partial.voucherConfig.signatoryTitles
+          : (fallback.voucherConfig?.signatoryTitles ??
+            defaultVoucherConfig().signatoryTitles),
     },
     layoutStructure: ordered.length ? ordered : fallback.layoutStructure,
     isDefault: partial.isDefault ?? true,

@@ -71,6 +71,12 @@ export type Item = {
   model: string | null
   countryOfOrigin: string | null
   technicalSpecification: string | null
+  warranty: string | null
+  serialNumber: string | null
+  barcode: string | null
+  warehouseId: string | null
+  warehouseCode: string | null
+  dataSheetUrl: string | null
   categoryId: string | null
   subCategoryId: string | null
   supplierId: string | null

@@ -152,6 +152,7 @@ export function QuotationProductSelectPage() {
         productId: row.id,
         productName: `${row.sku} · ${row.name}`,
         unitPrice: row.unitPrice ?? stockMap.get(row.id)?.unitPrice ?? 0,
+        dataSheetUrl: row.dataSheetUrl,
       }))
     if (products.length === 0) {
       setError('Select at least one product')
@@ -319,7 +320,19 @@ export function QuotationProductSelectPage() {
                       </td>
                       <td>{row.sku}</td>
                       <td title={row.technicalSpecification ?? undefined}>
-                        {row.name}
+                        <div>{row.name}</div>
+                        {row.dataSheetUrl ? (
+                          <a
+                            href={row.dataSheetUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="muted"
+                            style={{ fontSize: 12 }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Data sheet
+                          </a>
+                        ) : null}
                       </td>
                       <td>{row.unit}</td>
                       <td>{row.brand ?? '—'}</td>

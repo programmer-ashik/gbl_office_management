@@ -78,7 +78,9 @@ export function downloadQuotationPdf(quotation: Quotation): void {
     startY: y,
     head: [['Product', 'Qty', 'Unit Price', 'Disc %', 'Line Total']],
     body: quotation.items.map((item) => [
-      item.productName,
+      item.dataSheetUrl
+        ? `${item.productName}\nData sheet: ${item.dataSheetUrl}`
+        : item.productName,
       String(item.quantity),
       money(item.unitPrice),
       String(item.discount),

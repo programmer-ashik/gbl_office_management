@@ -19,6 +19,7 @@ export type QuotationItem = {
   id: string
   productId: string | null
   productName: string
+  dataSheetUrl: string | null
   unitPrice: number
   quantity: number
   discount: number

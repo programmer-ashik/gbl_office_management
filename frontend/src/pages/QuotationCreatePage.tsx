@@ -30,6 +30,7 @@ type DraftLine = {
   key: string;
   productId: string;
   productName: string;
+  dataSheetUrl: string;
   unitPrice: string;
   quantity: string;
   discount: string;
@@ -40,6 +41,7 @@ function emptyLine(product?: QuotationSelectedProduct): DraftLine {
     key: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     productId: product?.productId ?? "",
     productName: product?.productName ?? "",
+    dataSheetUrl: product?.dataSheetUrl ?? "",
     unitPrice: product?.unitPrice != null ? String(product.unitPrice) : "",
     quantity: "1",
     discount: "0",
@@ -159,7 +161,13 @@ export function QuotationCreatePage() {
     if (isDetail || !canCreate) return;
 
     const draft = readQuotationCreateDraft();
-    let nextLines = draft?.lines?.length ? draft.lines : [emptyLine()];
+    let nextLines = draft?.lines?.length
+      ? draft.lines.map((line) => ({
+          ...emptyLine(),
+          ...line,
+          dataSheetUrl: line.dataSheetUrl ?? "",
+        }))
+      : [emptyLine()];
     let restored = Boolean(draft);
 
     if (draft) {
@@ -417,7 +425,20 @@ export function QuotationCreatePage() {
               <tbody>
                 {saved.items.map((item) => (
                   <tr key={item.id}>
-                    <td>{item.productName}</td>
+                    <td>
+                      <div>{item.productName}</div>
+                      {item.dataSheetUrl ? (
+                        <a
+                          href={item.dataSheetUrl}
+                          target='_blank'
+                          rel='noreferrer'
+                          className='muted'
+                          style={{ fontSize: 12 }}
+                        >
+                          Data sheet
+                        </a>
+                      ) : null}
+                    </td>
                     <td className='num'>{item.quantity}</td>
                     <td className='num'>{money(item.unitPrice)}</td>
                     <td className='num'>{item.discount}</td>
@@ -432,6 +453,17 @@ export function QuotationCreatePage() {
             {saved.items.map((item) => (
               <article key={item.id} className='quotation-line-card'>
                 <h3>{item.productName}</h3>
+                {item.dataSheetUrl ? (
+                  <p>
+                    <a
+                      href={item.dataSheetUrl}
+                      target='_blank'
+                      rel='noreferrer'
+                    >
+                      Data sheet
+                    </a>
+                  </p>
+                ) : null}
                 <p>Qty {item.quantity}</p>
                 <p>Unit {money(item.unitPrice)}</p>
                 <p>Disc {item.discount}%</p>
@@ -735,6 +767,18 @@ export function QuotationCreatePage() {
                         }
                         required
                       />
+                      {line.dataSheetUrl ? (
+                        <a
+                          href={line.dataSheetUrl}
+                          target='_blank'
+                          rel='noreferrer'
+                          className='muted'
+                          style={{ fontSize: 12 }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Data sheet
+                        </a>
+                      ) : null}
                     </td>
                     <td>
                       <input
@@ -835,6 +879,17 @@ export function QuotationCreatePage() {
                     required
                   />
                 </label>
+                {line.dataSheetUrl ? (
+                  <p>
+                    <a
+                      href={line.dataSheetUrl}
+                      target='_blank'
+                      rel='noreferrer'
+                    >
+                      Data sheet
+                    </a>
+                  </p>
+                ) : null}
                 <div className='name-row'>
                   <label>
                     Qty

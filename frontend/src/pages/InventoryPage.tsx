@@ -1,4 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -24,6 +29,62 @@ import {
   type Warehouse,
 } from "../types/procurement";
 
+const PAGE_SIZE = 15;
+
+function matchesQuery(haystack: string, q: string): boolean {
+  return haystack.toLowerCase().includes(q);
+}
+
+type IssueFlatRow = {
+  key: string;
+  issueNumber: string;
+  date: string;
+  projectId: string | null;
+  projectName: string;
+  journalNumber: string;
+  sku: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  amount: number;
+  isFirst: boolean;
+};
+
+function TablePager(props: {
+  page: number;
+  totalPages: number;
+  total: number;
+  onPage: (page: number) => void;
+}) {
+  const { page, totalPages, total, onPage } = props;
+  if (total === 0) return null;
+  return (
+    <div className='table-pagination'>
+      <p className='muted'>
+        Page {page} of {totalPages} · {total} rows
+      </p>
+      <div className='form-actions'>
+        <button
+          type='button'
+          className='ghost'
+          disabled={page <= 1}
+          onClick={() => onPage(page - 1)}
+        >
+          Previous
+        </button>
+        <button
+          type='button'
+          className='ghost'
+          disabled={page >= totalPages}
+          onClick={() => onPage(page + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function InventoryPage() {
   const { user } = useAuth();
   const isFinance = user?.role === Role.ADMIN || user?.role === Role.ACCOUNTANT;
@@ -39,23 +100,38 @@ export function InventoryPage() {
   const [itemId, setItemId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [itemForm, setItemForm] = useState<AddItemFormValues>(emptyAddItemValues());
+  const [itemForm, setItemForm] =
+    useState<AddItemFormValues>(emptyAddItemValues());
   const [error, setError] = useState<string | null>(null);
   const [itemError, setItemError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [itemModalOpen, setItemModalOpen] = useState(false);
 
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [stockSearch, setStockSearch] = useState("");
+  const [issuesSearch, setIssuesSearch] = useState("");
+  const [catalogPage, setCatalogPage] = useState(1);
+  const [stockPage, setStockPage] = useState(1);
+  const [issuesPage, setIssuesPage] = useState(1);
+
   async function load() {
-    const [itemRows, rows, issueRows, warehouseRows, projectRows, cats, vendors] =
-      await Promise.all([
-        api.items(),
-        api.inventory(),
-        api.stockIssues(),
-        api.warehouses(),
-        api.projects(),
-        api.productCategories().catch(() => [] as ProductCategory[]),
-        api.suppliers().catch(() => [] as Supplier[]),
-      ]);
+    const [
+      itemRows,
+      rows,
+      issueRows,
+      warehouseRows,
+      projectRows,
+      cats,
+      vendors,
+    ] = await Promise.all([
+      api.items(),
+      api.inventory(),
+      api.stockIssues(),
+      api.warehouses(),
+      api.projects(),
+      api.productCategories().catch(() => [] as ProductCategory[]),
+      api.suppliers().catch(() => [] as Supplier[]),
+    ]);
     const catalog = Array.isArray(itemRows) ? itemRows : [];
     const onHand = Array.isArray(rows) ? rows : [];
     const issueList = Array.isArray(issueRows) ? issueRows : [];
@@ -94,7 +170,9 @@ export function InventoryPage() {
       setItemId(created.id);
       await load();
     } catch (err) {
-      setItemError(err instanceof Error ? err.message : "Unable to create item");
+      setItemError(
+        err instanceof Error ? err.message : "Unable to create item",
+      );
     } finally {
       setSaving(false);
     }
@@ -132,6 +210,114 @@ export function InventoryPage() {
           value: row.id,
           label: `${row.sku} · ${row.name} (${row.unit})`,
         }));
+
+  const filteredCatalog = useMemo(() => {
+    const q = catalogSearch.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((row) =>
+      matchesQuery(
+        [
+          row.sku,
+          row.name,
+          row.unit,
+          row.brand ?? "",
+          row.model ?? "",
+          row.supplierName ?? "",
+          row.description ?? "",
+          row.serialNumber ?? "",
+          row.barcode ?? "",
+        ].join(" "),
+        q,
+      ),
+    );
+  }, [items, catalogSearch]);
+
+  const filteredStock = useMemo(() => {
+    const q = stockSearch.trim().toLowerCase();
+    if (!q) return stock;
+    return stock.filter((row) =>
+      matchesQuery(
+        [
+          row.warehouseCode,
+          row.warehouseName,
+          row.sku,
+          row.name,
+          row.unit,
+        ].join(" "),
+        q,
+      ),
+    );
+  }, [stock, stockSearch]);
+
+  const flatIssues = useMemo((): IssueFlatRow[] => {
+    return issues.flatMap((row) => {
+      const lines =
+        row.lines?.length > 0
+          ? row.lines
+          : [
+              {
+                sku: "—",
+                name: "—",
+                unit: "",
+                quantity: row.quantity ?? 0,
+                amount: row.amount,
+              },
+            ];
+      return lines.map((line, index) => ({
+        key: `${row.id}-${index}`,
+        issueNumber: row.issueNumber,
+        date: row.date.slice(0, 10),
+        projectId: row.projectId ?? null,
+        projectName: row.projectName || "—",
+        journalNumber: row.journalNumber,
+        sku: line.sku,
+        name: line.name,
+        unit: line.unit,
+        quantity: line.quantity,
+        amount: line.amount,
+        isFirst: index === 0,
+      }));
+    });
+  }, [issues]);
+
+  const filteredIssues = useMemo(() => {
+    const q = issuesSearch.trim().toLowerCase();
+    if (!q) return flatIssues;
+    return flatIssues.filter((row) =>
+      matchesQuery(
+        [
+          row.issueNumber,
+          row.date,
+          row.projectName,
+          row.sku,
+          row.name,
+          row.journalNumber,
+        ].join(" "),
+        q,
+      ),
+    );
+  }, [flatIssues, issuesSearch]);
+
+  useEffect(() => setCatalogPage(1), [catalogSearch]);
+  useEffect(() => setStockPage(1), [stockSearch]);
+  useEffect(() => setIssuesPage(1), [issuesSearch]);
+
+  const catalogPages = Math.max(1, Math.ceil(filteredCatalog.length / PAGE_SIZE));
+  const stockPages = Math.max(1, Math.ceil(filteredStock.length / PAGE_SIZE));
+  const issuesPages = Math.max(1, Math.ceil(filteredIssues.length / PAGE_SIZE));
+
+  const catalogRows = filteredCatalog.slice(
+    (catalogPage - 1) * PAGE_SIZE,
+    catalogPage * PAGE_SIZE,
+  );
+  const stockRows = filteredStock.slice(
+    (stockPage - 1) * PAGE_SIZE,
+    stockPage * PAGE_SIZE,
+  );
+  const issueRows = filteredIssues.slice(
+    (issuesPage - 1) * PAGE_SIZE,
+    issuesPage * PAGE_SIZE,
+  );
 
   return (
     <>
@@ -175,8 +361,8 @@ export function InventoryPage() {
       {isFinance ? (
         <Modal
           open={itemModalOpen}
-          title="Add item"
-          description="Catalog SKU with price, description, specification, and supplier."
+          title='Add item'
+          description='Catalog SKU with price, description, specification, and supplier.'
           onClose={() => {
             setItemModalOpen(false);
             setItemError(null);
@@ -191,70 +377,10 @@ export function InventoryPage() {
             error={itemError}
             categories={categories}
             suppliers={suppliers}
+            warehouses={warehouses}
           />
         </Modal>
       ) : null}
-
-      <section className='table-card'>
-        <h2>Catalog items</h2>
-        <p className='muted'>
-          Items added here are available on purchase orders. On-hand quantity
-          stays at zero until goods are received into a warehouse.
-        </p>
-        <table>
-          <thead>
-            <tr>
-              <th>SKU</th>
-              <th>Item</th>
-              <th>Unit</th>
-              <th className='num'>Price</th>
-              <th>Supplier</th>
-              <th>Description</th>
-              <th>On hand</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((row) => {
-              const onHand = stock
-                .filter((s) => s.itemId === row.id)
-                .reduce((sum, s) => sum + s.quantity, 0);
-              return (
-                <tr key={row.id}>
-                  <td>{row.sku}</td>
-                  <td>
-                    <div>{row.name}</div>
-                    {row.technicalSpecification ? (
-                      <div className='muted' style={{ fontSize: 12 }}>
-                        <ExpandableText
-                          text={row.technicalSpecification}
-                          maxChars={48}
-                        />
-                      </div>
-                    ) : null}
-                  </td>
-                  <td>{row.unit}</td>
-                  <td className='num'>
-                    {row.unitPrice != null ? money(row.unitPrice) : '—'}
-                  </td>
-                  <td>{row.supplierName ?? '—'}</td>
-                  <td>
-                    <ExpandableText text={row.description} maxChars={40} />
-                  </td>
-                  <td>{onHand > 0 ? `${qty(onHand)} ${row.unit}` : '—'}</td>
-                </tr>
-              );
-            })}
-            {items.length === 0 ? (
-              <tr>
-                <td colSpan={7} className='muted'>
-                  No catalog items yet. Use Add item to create one.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </section>
-
       {isFinance ? (
         <section className='table-card'>
           <h2>Issue to project</h2>
@@ -343,7 +469,95 @@ export function InventoryPage() {
       ) : null}
 
       <section className='table-card'>
-        <h2>On hand</h2>
+        <div className='table-head'>
+          <div>
+            <h2>Catalog items</h2>
+            <p className='muted'>
+              Items added here are available on purchase orders. On-hand
+              quantity stays at zero until goods are received into a warehouse.
+            </p>
+          </div>
+          <input
+            className='compact-search'
+            value={catalogSearch}
+            onChange={(e) => setCatalogSearch(e.target.value)}
+            placeholder='Search catalog…'
+            aria-label='Search catalog items'
+          />
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Item</th>
+              <th>Unit</th>
+              <th className='num'>Price</th>
+              <th>Supplier</th>
+              <th>Description</th>
+              <th>On hand</th>
+            </tr>
+          </thead>
+          <tbody>
+            {catalogRows.map((row) => {
+              const onHand = stock
+                .filter((s) => s.itemId === row.id)
+                .reduce((sum, s) => sum + s.quantity, 0);
+              return (
+                <tr key={row.id}>
+                  <td>{row.sku}</td>
+                  <td>
+                    <div>{row.name}</div>
+                    {row.technicalSpecification ? (
+                      <div className='muted' style={{ fontSize: 12 }}>
+                        <ExpandableText
+                          text={row.technicalSpecification}
+                          maxChars={48}
+                        />
+                      </div>
+                    ) : null}
+                  </td>
+                  <td>{row.unit}</td>
+                  <td className='num'>
+                    {row.unitPrice != null ? money(row.unitPrice) : "—"}
+                  </td>
+                  <td>{row.supplierName ?? "—"}</td>
+                  <td>
+                    <ExpandableText text={row.description} maxChars={40} />
+                  </td>
+                  <td>{onHand > 0 ? `${qty(onHand)} ${row.unit}` : "—"}</td>
+                </tr>
+              );
+            })}
+            {catalogRows.length === 0 ? (
+              <tr>
+                <td colSpan={7} className='muted'>
+                  {catalogSearch.trim()
+                    ? "No catalog items match this search."
+                    : "No catalog items yet. Use Add item to create one."}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+        <TablePager
+          page={Math.min(catalogPage, catalogPages)}
+          totalPages={catalogPages}
+          total={filteredCatalog.length}
+          onPage={setCatalogPage}
+        />
+      </section>
+
+      <section className='table-card'>
+        <div className='table-head'>
+          <h2>On hand</h2>
+          <input
+            className='compact-search'
+            value={stockSearch}
+            onChange={(e) => setStockSearch(e.target.value)}
+            placeholder='Search stock…'
+            aria-label='Search on-hand stock'
+          />
+        </div>
         <table>
           <thead>
             <tr>
@@ -355,7 +569,7 @@ export function InventoryPage() {
             </tr>
           </thead>
           <tbody>
-            {stock.map((row) => (
+            {stockRows.map((row) => (
               <tr key={`${row.warehouseId}-${row.itemId}`}>
                 <td>
                   {row.warehouseCode} · {row.warehouseName}
@@ -368,19 +582,36 @@ export function InventoryPage() {
                 <td>{money(row.value)}</td>
               </tr>
             ))}
-            {stock.length === 0 ? (
+            {stockRows.length === 0 ? (
               <tr>
                 <td colSpan={5} className='muted'>
-                  Warehouse is empty. Receive a warehouse PO first.
+                  {stockSearch.trim()
+                    ? "No stock rows match this search."
+                    : "Warehouse is empty. Receive a warehouse PO first."}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+        <TablePager
+          page={Math.min(stockPage, stockPages)}
+          totalPages={stockPages}
+          total={filteredStock.length}
+          onPage={setStockPage}
+        />
       </section>
 
       <section className='table-card'>
-        <h2>Issues</h2>
+        <div className='table-head'>
+          <h2>Issues</h2>
+          <input
+            className='compact-search'
+            value={issuesSearch}
+            onChange={(e) => setIssuesSearch(e.target.value)}
+            placeholder='Search issues…'
+            aria-label='Search stock issues'
+          />
+        </div>
         <table>
           <thead>
             <tr>
@@ -394,57 +625,51 @@ export function InventoryPage() {
             </tr>
           </thead>
           <tbody>
-            {issues.flatMap((row) => {
-              const lines =
-                row.lines?.length > 0
-                  ? row.lines
-                  : [
-                      {
-                        sku: "—",
-                        name: "—",
-                        unit: "",
-                        quantity: row.quantity ?? 0,
-                        amount: row.amount,
-                      },
-                    ];
-              return lines.map((line, index) => (
-                <tr key={`${row.id}-${index}`}>
-                  <td>{index === 0 ? row.issueNumber : ""}</td>
-                  <td>{index === 0 ? row.date.slice(0, 10) : ""}</td>
-                  <td>
-                    {index === 0 ? (
-                      row.projectId ? (
-                        <Link to={`/projects/${row.projectId}`}>
-                          {row.projectName}
-                        </Link>
-                      ) : (
-                        row.projectName || '—'
-                      )
+            {issueRows.map((row) => (
+              <tr key={row.key}>
+                <td>{row.isFirst ? row.issueNumber : ""}</td>
+                <td>{row.isFirst ? row.date : ""}</td>
+                <td>
+                  {row.isFirst ? (
+                    row.projectId ? (
+                      <Link to={`/projects/${row.projectId}`}>
+                        {row.projectName}
+                      </Link>
                     ) : (
-                      ""
-                    )}
-                  </td>
-                  <td>
-                    {line.sku} · {line.name}
-                  </td>
-                  <td>
-                    {qty(line.quantity)}
-                    {line.unit ? ` ${line.unit}` : ""}
-                  </td>
-                  <td>{money(line.amount)}</td>
-                  <td>{index === 0 ? row.journalNumber : ""}</td>
-                </tr>
-              ));
-            })}
-            {issues.length === 0 ? (
+                      row.projectName
+                    )
+                  ) : (
+                    ""
+                  )}
+                </td>
+                <td>
+                  {row.sku} · {row.name}
+                </td>
+                <td>
+                  {qty(row.quantity)}
+                  {row.unit ? ` ${row.unit}` : ""}
+                </td>
+                <td>{money(row.amount)}</td>
+                <td>{row.isFirst ? row.journalNumber : ""}</td>
+              </tr>
+            ))}
+            {issueRows.length === 0 ? (
               <tr>
                 <td colSpan={7} className='muted'>
-                  No stock issues yet.
+                  {issuesSearch.trim()
+                    ? "No issues match this search."
+                    : "No stock issues yet."}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+        <TablePager
+          page={Math.min(issuesPage, issuesPages)}
+          totalPages={issuesPages}
+          total={filteredIssues.length}
+          onPage={setIssuesPage}
+        />
       </section>
 
       {!itemModalOpen && error ? <p className='form-error'>{error}</p> : null}

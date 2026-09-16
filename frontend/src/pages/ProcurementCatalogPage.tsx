@@ -6,13 +6,21 @@ import {
   AddItemForm,
   addItemBodyFromValues,
   emptyAddItemValues,
+  itemToFormValues,
   type AddItemFormValues,
 } from "../components/AddItemForm";
 import { ExpandableText } from "../components/ExpandableText";
 import { Modal, Select } from "../components/ui";
 import { money } from "../types/accounting";
 import { Role } from "../types/auth";
-import type { Item, ProductCategory, Supplier } from "../types/procurement";
+import type {
+  Item,
+  ProductCategory,
+  Supplier,
+  Warehouse,
+} from "../types/procurement";
+
+type ItemModalMode = "create" | "edit" | "view";
 
 export function ProcurementCatalogPage() {
   const { user } = useAuth();
@@ -20,6 +28,7 @@ export function ProcurementCatalogPage() {
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [itemError, setItemError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -31,6 +40,8 @@ export function ProcurementCatalogPage() {
   const [catModal, setCatModal] = useState(false);
   const [subModal, setSubModal] = useState(false);
   const [itemModal, setItemModal] = useState(false);
+  const [itemModalMode, setItemModalMode] = useState<ItemModalMode>("create");
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [catName, setCatName] = useState("");
   const [catCode, setCatCode] = useState("");
   const [subName, setSubName] = useState("");
@@ -39,16 +50,18 @@ export function ProcurementCatalogPage() {
     useState<AddItemFormValues>(emptyAddItemValues());
 
   async function load() {
-    const [cats, productRows, vendorRows] = await Promise.all([
+    const [cats, productRows, vendorRows, warehouseRows] = await Promise.all([
       api.productCategories(),
       api.items(
         productSearch.trim() ? { search: productSearch.trim() } : undefined,
       ),
       api.suppliers().catch(() => [] as Supplier[]),
+      api.warehouses().catch(() => [] as Warehouse[]),
     ]);
     setCategories(cats);
     setItems(productRows);
     setSuppliers(vendorRows);
+    setWarehouses(warehouseRows);
   }
 
   useEffect(() => {
@@ -83,17 +96,51 @@ export function ProcurementCatalogPage() {
 
   const visibleItems = useMemo(() => {
     return items.filter((row) => {
-      if (selectedSubId && row.subCategoryId !== selectedSubId) return false;
-      if (
-        selectedCategoryId &&
-        !selectedSubId &&
-        row.categoryId !== selectedCategoryId
-      ) {
-        return false;
-      }
+      if (selectedSubId) return row.subCategoryId === selectedSubId;
+      if (selectedCategoryId) return row.categoryId === selectedCategoryId;
       return true;
     });
   }, [items, selectedCategoryId, selectedSubId]);
+
+  function openCreateItem() {
+    setItemModalMode("create");
+    setEditingItemId(null);
+    setItemForm(emptyAddItemValues());
+    setItemError(null);
+    setItemModal(true);
+  }
+
+  function openViewItem(row: Item) {
+    setItemModalMode("view");
+    setEditingItemId(row.id);
+    setItemForm(itemToFormValues(row));
+    setItemError(null);
+    setItemModal(true);
+  }
+
+  function openEditItem(row: Item) {
+    if (!isFinance) return;
+    setItemModalMode("edit");
+    setEditingItemId(row.id);
+    setItemForm(itemToFormValues(row));
+    setItemError(null);
+    setItemModal(true);
+  }
+
+  async function onDeleteItem(row: Item) {
+    if (!isFinance) return;
+    if (!window.confirm(`Delete product ${row.sku} · ${row.name}?`)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api.deleteItem(row.id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete product");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function onCreateCategory(event: FormEvent) {
     event.preventDefault();
@@ -140,25 +187,43 @@ export function ProcurementCatalogPage() {
     }
   }
 
-  async function onCreateItem(event: FormEvent) {
+  async function onSaveItem(event: FormEvent) {
     event.preventDefault();
     if (!isFinance) return;
+    if (itemModalMode === "view") return;
     setSaving(true);
     setItemError(null);
     setError(null);
     try {
-      await api.createItem(addItemBodyFromValues(itemForm));
+      const body = addItemBodyFromValues(itemForm);
+      if (itemModalMode === "edit" && editingItemId) {
+        await api.updateItem(editingItemId, body);
+      } else {
+        await api.createItem(body);
+      }
       setItemForm(emptyAddItemValues());
+      setEditingItemId(null);
       setItemModal(false);
       await load();
     } catch (err) {
       setItemError(
-        err instanceof Error ? err.message : "Unable to create product",
+        err instanceof Error
+          ? err.message
+          : itemModalMode === "edit"
+            ? "Unable to update product"
+            : "Unable to create product",
       );
     } finally {
       setSaving(false);
     }
   }
+
+  const itemModalTitle =
+    itemModalMode === "view"
+      ? "Product details"
+      : itemModalMode === "edit"
+        ? "Update product"
+        : "Add product";
 
   return (
     <>
@@ -189,20 +254,14 @@ export function ProcurementCatalogPage() {
               >
                 Add sub-category
               </button>
-              <button type='button' onClick={() => setItemModal(true)}>
+              <button type='button' onClick={openCreateItem}>
                 Add product
               </button>
             </>
           ) : null}
         </div>
       </header>
-      <div className=''>
-        {" "}
-        <p className='text-muted'>
-          Categories → sub-categories → products. Warehouse stock and project
-          issue stay on Material Allocation.
-        </p>
-      </div>
+
       {error ? <p className='form-error'>{error}</p> : null}
 
       <section className='catalog-layout catalog-layout-compact'>
@@ -212,38 +271,39 @@ export function ProcurementCatalogPage() {
               className='compact-search'
               value={categorySearch}
               onChange={(e) => setCategorySearch(e.target.value)}
-              placeholder='Search categories…'
+              placeholder='Categories…'
               aria-label='Search categories'
             />
           </div>
-          <button
-            type='button'
-            className={`catalog-cat-btn ${!selectedCategoryId ? "is-active" : ""}`}
-            onClick={() => {
-              setSelectedCategoryId("");
-              setSelectedSubId("");
-            }}
-          >
-            All products
-          </button>
           <ul className='catalog-cat-list'>
-            {filteredRoots.map((cat) => (
-              <li key={cat.id}>
+            <li>
+              <button
+                type='button'
+                className={`catalog-cat-btn ${!selectedCategoryId && !selectedSubId ? "is-active" : ""}`}
+                onClick={() => {
+                  setSelectedCategoryId("");
+                  setSelectedSubId("");
+                }}
+              >
+                All categories
+              </button>
+            </li>
+            {filteredRoots.map((row) => (
+              <li key={row.id}>
                 <button
                   type='button'
-                  className={`catalog-cat-btn ${selectedCategoryId === cat.id ? "is-active" : ""}`}
+                  className={`catalog-cat-btn ${selectedCategoryId === row.id && !selectedSubId ? "is-active" : ""}`}
                   onClick={() => {
-                    setSelectedCategoryId(cat.id);
+                    setSelectedCategoryId(row.id);
                     setSelectedSubId("");
                   }}
                 >
-                  {cat.name}
-                  {cat.code ? ` (${cat.code})` : ""}
+                  {row.name}
                 </button>
-                {selectedCategoryId === cat.id ? (
+                {selectedCategoryId === row.id ? (
                   <ul className='catalog-sub-list'>
                     {subs
-                      .filter((row) => row.parentId === cat.id)
+                      .filter((sub) => sub.parentId === row.id)
                       .map((sub) => (
                         <li key={sub.id}>
                           <button
@@ -292,6 +352,7 @@ export function ProcurementCatalogPage() {
                   <th>Supplier</th>
                   <th>Description</th>
                   <th>Category</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -316,12 +377,42 @@ export function ProcurementCatalogPage() {
                         {cat?.name ?? "—"}
                         {sub ? ` / ${sub.name}` : ""}
                       </td>
+                      <td>
+                        <div className='table-actions'>
+                          <button
+                            type='button'
+                            className='ghost'
+                            onClick={() => openViewItem(row)}
+                          >
+                            View
+                          </button>
+                          {isFinance ? (
+                            <>
+                              <button
+                                type='button'
+                                className='ghost'
+                                onClick={() => openEditItem(row)}
+                              >
+                                Update
+                              </button>
+                              <button
+                                type='button'
+                                className='ghost'
+                                disabled={saving}
+                                onClick={() => void onDeleteItem(row)}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
                 {visibleItems.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className='muted'>
+                    <td colSpan={8} className='muted'>
                       No products in this view.
                     </td>
                   </tr>
@@ -372,10 +463,12 @@ export function ProcurementCatalogPage() {
             <Select
               value={subParentId}
               onChange={setSubParentId}
-              options={roots.map((row) => ({ value: row.id, label: row.name }))}
-              searchable
-              portal
+              options={roots.map((row) => ({
+                value: row.id,
+                label: row.name,
+              }))}
               placeholder='Select category'
+              required
             />
           </label>
           <label>
@@ -395,22 +488,33 @@ export function ProcurementCatalogPage() {
 
       <Modal
         open={itemModal}
-        title='Add item'
-        description='Catalog SKU with price, description, specification, and supplier.'
+        title={itemModalTitle}
+        description={
+          itemModalMode === "view"
+            ? "Read-only product details."
+            : "Catalog SKU with price, description, specification, and supplier."
+        }
         onClose={() => {
           setItemModal(false);
           setItemError(null);
+          setEditingItemId(null);
         }}
         wide
       >
         <AddItemForm
           values={itemForm}
           onChange={(patch) => setItemForm((prev) => ({ ...prev, ...patch }))}
-          onSubmit={(e) => void onCreateItem(e)}
+          onSubmit={(e) => void onSaveItem(e)}
           saving={saving}
           error={itemError}
           categories={categories}
           suppliers={suppliers}
+          warehouses={warehouses}
+          mode={itemModalMode === "edit" ? "edit" : "create"}
+          readOnly={itemModalMode === "view"}
+          submitLabel={
+            itemModalMode === "edit" ? "Save changes" : "Add product"
+          }
         />
       </Modal>
     </>

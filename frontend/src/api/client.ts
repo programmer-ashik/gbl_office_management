@@ -369,6 +369,7 @@ export const api = {
         headerConfig: body.headerConfig,
         layoutStructure: body.layoutStructure,
         footerConfig: body.footerConfig,
+        voucherConfig: body.voucherConfig ?? undefined,
       }),
     }),
   journalVoucherTemplate: () =>
@@ -384,10 +385,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({
         templateName: body.templateName,
-        companyLogoUrl: body.companyLogoUrl ?? undefined,
+        companyLogoUrl: body.companyLogoUrl || undefined,
         headerConfig: body.headerConfig,
         layoutStructure: body.layoutStructure,
         footerConfig: body.footerConfig,
+        voucherConfig: body.voucherConfig || undefined,
       }),
     }),
   uploadTemplateLogo: async (file: File) => {
@@ -758,7 +760,7 @@ export const api = {
     return request<Item[]>(qs ? `/items?${qs}` : '/items')
   },
   createItem: (body: {
-    sku: string
+    sku?: string
     name: string
     unit: string
     description?: string
@@ -768,6 +770,11 @@ export const api = {
     model?: string
     countryOfOrigin?: string
     technicalSpecification?: string
+    warranty?: string
+    serialNumber?: string
+    barcode?: string
+    warehouseId?: string
+    dataSheetUrl?: string
     categoryId?: string
     subCategoryId?: string
     supplierId?: string
@@ -776,6 +783,36 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  item: (id: string) => request<Item>(`/items/${id}`),
+  updateItem: (
+    id: string,
+    body: {
+      sku?: string
+      name?: string
+      unit?: string
+      description?: string
+      unitPrice?: number
+      quantity?: number
+      brand?: string
+      model?: string
+      countryOfOrigin?: string
+      technicalSpecification?: string
+      warranty?: string
+      serialNumber?: string
+      barcode?: string
+      warehouseId?: string
+      dataSheetUrl?: string
+      categoryId?: string
+      subCategoryId?: string
+      supplierId?: string
+    },
+  ) =>
+    request<Item>(`/items/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteItem: (id: string) =>
+    request<{ id: string }>(`/items/${id}`, { method: 'DELETE' }),
   productCategories: () =>
     request<ProductCategory[]>('/product-categories'),
   createProductCategory: (body: {

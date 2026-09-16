@@ -6,6 +6,7 @@ export type QuotationSelectedProduct = {
   productId: string
   productName: string
   unitPrice?: number
+  dataSheetUrl?: string | null
 }
 
 export type QuotationProductSelectionPayload = {
@@ -26,6 +27,7 @@ export type QuotationCreateDraft = {
     key: string
     productId: string
     productName: string
+    dataSheetUrl?: string
     unitPrice: string
     quantity: string
     discount: string
