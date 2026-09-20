@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   );
 
   const accountsService = new AccountsService();
-  const journalService = new JournalService(accountsService);
+  const journalService = new JournalService(accountsService, {} as any);
   const ledgerService = new LedgerService();
   const bankingService = new BankingService(
     accountsService,

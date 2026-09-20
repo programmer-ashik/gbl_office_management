@@ -132,7 +132,10 @@ export function createItemsRouter(
     auth,
     requireRoles(...CATALOG_VIEW),
     asyncHandler(async (req, res) => {
-      const row = await procurementService.getItem(req.params.id, req.user!);
+      const row = await procurementService.getItem(
+        req.params.id as string,
+        req.user!,
+      );
       sendSuccess(res, row, 'Item retrieved successfully');
     }),
   );
@@ -144,7 +147,7 @@ export function createItemsRouter(
     validateBody(UpdateItemDto),
     asyncHandler(async (req, res) => {
       const row = await procurementService.updateItem(
-        req.params.id,
+        req.params.id as string,
         req.body,
         req.user!,
       );
@@ -157,8 +160,12 @@ export function createItemsRouter(
     auth,
     requireRoles(...FINANCE),
     asyncHandler(async (req, res) => {
-      await procurementService.deleteItem(req.params.id, req.user!);
-      sendSuccess(res, { id: req.params.id }, 'Item deleted successfully');
+      await procurementService.deleteItem(req.params.id as string, req.user!);
+      sendSuccess(
+        res,
+        { id: req.params.id as string },
+        'Item deleted successfully',
+      );
     }),
   );
 
