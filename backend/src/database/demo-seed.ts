@@ -32,6 +32,13 @@ const DEMO_USERS: Array<{
   role: Role;
 }> = [
   {
+    email: 'Admin@gblenterprise.com',
+    password: 'Admin@123!',
+    firstName: 'Admin',
+    lastName: 'Administration',
+    role: Role.ADMIN,
+  },
+  {
     email: 'accountant@gblenterprise.com',
     password: 'Acct123!',
     firstName: 'Office',
@@ -209,7 +216,9 @@ export async function seedDemoData(deps: SeedDeps): Promise<void> {
       console.log('Seeded demo client invoice (AR)');
     }
 
-    const supplier = await SupplierModel.findOne().sort({ createdAt: 1 }).exec();
+    const supplier = await SupplierModel.findOne()
+      .sort({ createdAt: 1 })
+      .exec();
     if (supplier && (await SupplierBillModel.countDocuments().exec()) === 0) {
       await deps.arApService.createBill(
         {

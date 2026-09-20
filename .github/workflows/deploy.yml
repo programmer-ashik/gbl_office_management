@@ -20,36 +20,18 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           envs: BRANCH
           script: |
-            # Set dynamic variables based on branch (main or staging)
-            TARGET_DIR="/var/www/$BRANCH"
-            BACKEND_NAME="$BRANCH-backend"
-            FRONTEND_NAME="$BRANCH-frontend"
-
-            # Assign appropriate frontend port
-            if [ "$BRANCH" == "main" ]; then
-              FRONTEND_PORT=3000
-            else
-              FRONTEND_PORT=3001
-            fi
-
-            echo "Deploying $BRANCH branch to $TARGET_DIR..."
-
-            # 1. Pull Latest Code
+            TARGET_DIR="/var/www/${{ github.ref_name }}"
             cd $TARGET_DIR
             git fetch origin
-            git reset --hard origin/$BRANCH
+            git reset --hard origin/${{ github.ref_name }}
 
-            # 2. Update and Restart Backend
-            cd backend
-            npm install --include=dev
-            npm run build
-            pm2 restart $BACKEND_NAME || pm2 start dist/main.js --name "$BACKEND_NAME"
-
-            # 3. Update and Restart Frontend
-            cd ../frontend
+            cd $TARGET_DIR/frontend
             npm install
             npm run build
-            pm2 restart $FRONTEND_NAME || PORT=$FRONTEND_PORT pm2 start npm --name "$FRONTEND_NAME" -- start
 
-            # 4. Save State
+            # Setup Backend (Node.js)
+            cd $TARGET_DIR/backend
+            npm install
+            pm2 stop ${{ github.ref_name }}-backend || true
+            pm2 start npm --name "${{ github.ref_name }}-backend" -- start
             pm2 save
