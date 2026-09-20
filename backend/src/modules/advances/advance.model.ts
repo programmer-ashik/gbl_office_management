@@ -39,6 +39,13 @@ export interface IAdvance {
   settlementJournalNumber?: string;
   settledAt?: Date;
   settledBy?: Types.ObjectId;
+  reimbursedMinor?: number;
+  reimbursedAt?: Date;
+  reimbursedBy?: Types.ObjectId;
+  reimbursementTreasuryId?: Types.ObjectId;
+  reimbursementAccountCode?: string;
+  reimbursementJournalId?: Types.ObjectId;
+  reimbursementJournalNumber?: string;
   payrollDeductedMinor?: number;
   rejectionReason?: string;
   createdAt?: Date;
@@ -105,6 +112,19 @@ const advanceSchema = new Schema<IAdvance>(
     settlementJournalNumber: { type: String },
     settledAt: { type: Date },
     settledBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    reimbursedMinor: { type: Number, min: 0, default: 0 },
+    reimbursedAt: { type: Date },
+    reimbursedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    reimbursementTreasuryId: {
+      type: Schema.Types.ObjectId,
+      ref: 'TreasuryAccount',
+    },
+    reimbursementAccountCode: { type: String },
+    reimbursementJournalId: {
+      type: Schema.Types.ObjectId,
+      ref: 'JournalEntry',
+    },
+    reimbursementJournalNumber: { type: String },
     payrollDeductedMinor: { type: Number, min: 0, default: 0 },
     rejectionReason: { type: String, trim: true, maxlength: 500 },
   },

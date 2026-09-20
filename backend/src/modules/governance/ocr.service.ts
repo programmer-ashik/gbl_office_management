@@ -41,7 +41,7 @@ export class OcrService {
       throw badRequest('Could not parse a positive amount from the receipt hint');
     }
 
-    let accountCode = '5200';
+    let accountCode = '5240';
     let description = 'Office expense (OCR)';
     let vendor: string | null = null;
 
@@ -50,7 +50,7 @@ export class OcrService {
       description = 'Travel & conveyance (OCR)';
       vendor = 'Transport vendor';
     } else if (/cement|steel|material|hardware|supply/.test(lower)) {
-      accountCode = '5000';
+      accountCode = '5110';
       description = 'Project materials (OCR)';
       vendor = 'Materials supplier';
     } else if (/labor|wage|worker|site/.test(lower)) {
@@ -58,7 +58,7 @@ export class OcrService {
       description = 'Labor cost (OCR)';
       vendor = 'Site labor';
     } else if (/stationery|print|office|utility|internet/.test(lower)) {
-      accountCode = '5200';
+      accountCode = '5240';
       description = 'Office expenses (OCR)';
       vendor = 'Office vendor';
     }

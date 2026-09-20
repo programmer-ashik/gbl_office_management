@@ -83,6 +83,7 @@ export function ApprovalsPage() {
             <tr>
               <th>Number</th>
               <th>Type</th>
+              <th>Project</th>
               <th>Amount</th>
               <th>Summary</th>
               <th>Step</th>
@@ -97,6 +98,7 @@ export function ApprovalsPage() {
                 <tr key={row.id}>
                   <td>{row.requestNumber}</td>
                   <td>{row.entityType}</td>
+                  <td>{row.projectCode ?? '—'}</td>
                   <td>{money(row.amount)}</td>
                   <td>{row.summary}</td>
                   <td>
@@ -135,7 +137,7 @@ export function ApprovalsPage() {
             })}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="muted">
+                <td colSpan={8} className="muted">
                   No approval requests yet.
                 </td>
               </tr>

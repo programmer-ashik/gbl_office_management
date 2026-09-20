@@ -150,8 +150,8 @@ describe('Phase 3 project management & budgeting (e2e)', () => {
         memo: 'Milestone invoice recognized',
         projectId,
         lines: [
-          { accountCode: '1100', debit: 200000 },
-          { accountCode: '4000', credit: 200000 },
+          { accountCode: '1121', debit: 200000 },
+          { accountCode: '4110', credit: 200000 },
         ],
       })
       .expect(201);
@@ -164,10 +164,10 @@ describe('Phase 3 project management & budgeting (e2e)', () => {
         memo: 'Site materials and travel',
         projectId,
         lines: [
-          { accountCode: '5000', debit: 80000 },
+          { accountCode: '5110', debit: 80000 },
           { accountCode: '5100', debit: 40000 },
           { accountCode: '5300', debit: 5000 },
-          { accountCode: '1000', credit: 125000 },
+          { accountCode: '1111', credit: 125000 },
         ],
       })
       .expect(201);
@@ -196,8 +196,8 @@ describe('Phase 3 project management & budgeting (e2e)', () => {
         memo: 'Advance to site engineer',
         projectId,
         lines: [
-          { accountCode: '1300', debit: 10000 },
-          { accountCode: '1000', credit: 10000 },
+          { accountCode: '1131', debit: 10000 },
+          { accountCode: '1111', credit: 10000 },
         ],
       })
       .expect(201);
@@ -234,8 +234,8 @@ describe('Phase 3 project management & budgeting (e2e)', () => {
         memo: 'Materials over budget',
         projectId: tightId,
         lines: [
-          { accountCode: '5000', debit: 1500 },
-          { accountCode: '1000', credit: 1500 },
+          { accountCode: '5110', debit: 1500 },
+          { accountCode: '1111', credit: 1500 },
         ],
       })
       .expect(201);

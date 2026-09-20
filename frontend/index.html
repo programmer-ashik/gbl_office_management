@@ -1,10 +1,27 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="colorful">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GBL Office | GBL Enterprise</title>
+    <script>
+      try {
+        var t = localStorage.getItem('gbl.uiTheme');
+        if (t === 'classic' || t === 'colorful') {
+          document.documentElement.setAttribute('data-theme', t);
+        }
+        var th = localStorage.getItem('gbl.tableHeader');
+        if (th) {
+          var parsed = JSON.parse(th);
+          if (parsed && typeof parsed === 'object') {
+            if (parsed.bg) document.documentElement.style.setProperty('--theme-table-head-bg', parsed.bg);
+            if (parsed.color) document.documentElement.style.setProperty('--theme-table-head-color', parsed.color);
+            if (parsed.fontSize) document.documentElement.style.setProperty('--theme-table-head-size', parsed.fontSize);
+          }
+        }
+      } catch (e) {}
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

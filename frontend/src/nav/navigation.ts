@@ -8,6 +8,8 @@ export type NavItem = {
   hint?: string
   icon: NavIconName
   roles: Role[]
+  /** Nested submenu items (e.g. Voucher Template → BS / JV). */
+  children?: NavItem[]
 }
 
 export type NavSection = {
@@ -67,7 +69,7 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'projects',
     label: 'Projects & Budgeting',
     icon: 'projects',
-    roles: PROJECT_VIEW,
+    roles: ALL,
     items: [
       {
         label: 'All Projects',
@@ -90,6 +92,14 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: 'site',
         hint: 'Site · Material mapping',
         roles: PROJECT_VIEW,
+      },
+      {
+        label: 'Quotations',
+        to: '/quotations',
+        end: true,
+        icon: 'invoice',
+        hint: 'Create · Audit · PDF',
+        roles: ALL,
       },
     ],
   },
@@ -148,7 +158,7 @@ export const NAV_SECTIONS: NavSection[] = [
         label: 'Bank Reconciliation',
         to: '/banking/reconciliation',
         icon: 'reconcile',
-        hint: 'Statement matching',
+        hint: 'Statement · Match · Adjust',
         roles: FINANCE,
       },
     ],
@@ -197,6 +207,13 @@ export const NAV_SECTIONS: NavSection[] = [
         roles: PROJECT_VIEW,
       },
       {
+        label: 'Product Catalog',
+        to: '/procurement/catalog',
+        icon: 'inventory',
+        hint: 'Categories · Products',
+        roles: PROJECT_VIEW,
+      },
+      {
         label: 'Material Allocation',
         to: '/inventory',
         icon: 'inventory',
@@ -226,18 +243,24 @@ export const NAV_SECTIONS: NavSection[] = [
         roles: FINANCE,
       },
       {
-        label: 'Attendance & Time',
+        label: 'Attendance & loans',
         to: '/payroll/time',
         icon: 'time',
-        hint: 'Labor · Allocation',
+        hint: 'Time · Advances · Loans',
         roles: FINANCE,
       },
       {
-        label: 'Salary Disbursement',
-        to: '/payroll',
-        end: true,
+        label: 'Salary Structures',
+        to: '/payroll/structures',
         icon: 'payroll',
-        hint: 'Advance deduction',
+        hint: 'Gross · Breakdown',
+        roles: FINANCE,
+      },
+      {
+        label: 'Process Payroll',
+        to: '/payroll/process',
+        icon: 'payroll',
+        hint: 'Accrue · Disburse',
         roles: FINANCE,
       },
     ],
@@ -280,7 +303,14 @@ export const NAV_SECTIONS: NavSection[] = [
         label: 'Trial Balance',
         to: '/trial-balance',
         icon: 'balance',
-        hint: 'Balance sheet check',
+        hint: 'Debit · Credit check',
+        roles: FINANCE,
+      },
+      {
+        label: 'Balance Sheet',
+        to: '/balance-sheet',
+        icon: 'balance',
+        hint: 'Statement of position',
         roles: FINANCE,
       },
       {
@@ -313,10 +343,10 @@ export const NAV_SECTIONS: NavSection[] = [
         roles: ALL,
       },
       {
-        label: 'Chart of Accounts',
-        to: '/settings/accounts',
-        icon: 'accounts',
-        hint: 'Double-entry CoA',
+        label: 'Payroll Rules',
+        to: '/settings/payroll',
+        icon: 'payroll',
+        hint: 'Salary % · Allowances',
         roles: FINANCE,
       },
       {
@@ -340,6 +370,36 @@ export const NAV_SECTIONS: NavSection[] = [
         hint: 'Security · History',
         roles: FINANCE,
       },
+      {
+        label: 'Voucher Template',
+        to: '/settings/templates/balance-sheet',
+        icon: 'reports',
+        hint: 'PDF · Layout · Appearance',
+        roles: [Role.ADMIN],
+        children: [
+          {
+            label: 'Appearance',
+            to: '/settings/appearance',
+            icon: 'settings',
+            hint: 'Theme · Table headers',
+            roles: [Role.ADMIN],
+          },
+          {
+            label: 'BS Template',
+            to: '/settings/templates/balance-sheet',
+            icon: 'balance',
+            hint: 'Balance sheet layout',
+            roles: [Role.ADMIN],
+          },
+          {
+            label: 'Debit / Credit Voucher',
+            to: '/settings/templates/journal-voucher',
+            icon: 'journal',
+            hint: 'JV PDF layout',
+            roles: [Role.ADMIN],
+          },
+        ],
+      },
     ],
   },
 ]
@@ -348,7 +408,18 @@ export function sectionsForRole(role: Role): NavSection[] {
   return NAV_SECTIONS.filter((section) => section.roles.includes(role))
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => item.roles.includes(role)),
+      items: section.items
+        .filter((item) => item.roles.includes(role))
+        .map((item) =>
+          item.children
+            ? {
+                ...item,
+                children: item.children.filter((child) =>
+                  child.roles.includes(role),
+                ),
+              }
+            : item,
+        ),
     }))
     .filter((section) => section.items.length > 0)
 }

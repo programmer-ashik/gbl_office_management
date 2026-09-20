@@ -8,6 +8,9 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 import { fromMinorUnits, toMinorUnits } from '../../common/utils/money';
 import { LedgerLineModel } from '../accounting/ledger.model';
 import { CounterModel } from '../accounting/counter.model';
+import { fromMilliQty } from '../../common/utils/quantity';
+import { StockIssueModel } from '../procurement/stock-issue.model';
+import { ItemModel } from '../procurement/item.model';
 import { UserModel } from '../users/user.model';
 import type {
   CreateProjectDto,
@@ -29,6 +32,32 @@ export type PublicClient = {
   address: string | null;
 };
 
+export type PublicProjectMaterialIssue = {
+  id: string;
+  issueNumber: string;
+  date: string;
+  sku: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitCost: number;
+  amount: number;
+  journalNumber: string;
+};
+
+export type PublicProjectMaterialSummary = {
+  itemId: string;
+  sku: string;
+  name: string;
+  unit: string;
+  brand: string | null;
+  model: string | null;
+  countryOfOrigin: string | null;
+  quantity: number;
+  unitCost: number;
+  amount: number;
+};
+
 export type PublicProject = {
   id: string;
   code: string;
@@ -43,12 +72,18 @@ export type PublicProject = {
   description: string | null;
   createdAt: string | null;
   financials: ProjectFinancials;
+  materialIssues: PublicProjectMaterialIssue[];
+  materialsSummary: PublicProjectMaterialSummary[];
 };
 
 export class ProjectsService {
   toPublic(
     project: ProjectDocument,
     financials?: ProjectFinancials,
+    materials?: {
+      materialIssues: PublicProjectMaterialIssue[];
+      materialsSummary: PublicProjectMaterialSummary[];
+    },
   ): PublicProject {
     return {
       id: project._id.toString(),
@@ -74,6 +109,8 @@ export class ProjectsService {
       financials:
         financials ??
         emptyFinancials(project.contractValueMinor, project.totalBudgetMinor),
+      materialIssues: materials?.materialIssues ?? [],
+      materialsSummary: materials?.materialsSummary ?? [],
     };
   }
 
@@ -127,11 +164,15 @@ export class ProjectsService {
     if (actor) {
       this.assertCanAccessProject(actor, project);
     }
-    const financialsById = await this.aggregateFinancials([project._id]);
+    const [financialsById, materials] = await Promise.all([
+      this.aggregateFinancials([project._id]),
+      this.aggregateMaterialIssues(project._id),
+    ]);
     return this.toPublic(
       project,
       financialsById.get(project._id.toString()) ??
         emptyFinancials(project.contractValueMinor, project.totalBudgetMinor),
+      materials,
     );
   }
 
@@ -354,6 +395,86 @@ export class ProjectsService {
     return `PRJ-${year}-${String(seq).padStart(5, '0')}`;
   }
 
+  private async aggregateMaterialIssues(projectId: Types.ObjectId): Promise<{
+    materialIssues: PublicProjectMaterialIssue[];
+    materialsSummary: PublicProjectMaterialSummary[];
+  }> {
+    const rows = await StockIssueModel.find({ projectId })
+      .sort({ date: 1, issueNumber: 1 })
+      .exec();
+
+    const materialIssues: PublicProjectMaterialIssue[] = rows.flatMap((row) =>
+      row.lines.map((line) => {
+        const quantity = fromMilliQty(line.quantityMilli);
+        const amount = fromMinorUnits(line.amountMinor);
+        return {
+          id: `${row._id.toString()}:${line.itemId.toString()}`,
+          issueNumber: row.issueNumber,
+          date: row.date.toISOString(),
+          sku: line.sku,
+          name: line.name,
+          unit: line.unit,
+          quantity,
+          unitCost:
+            quantity > 0 ? Number((amount / quantity).toFixed(4)) : 0,
+          amount,
+          journalNumber: row.journalNumber,
+        };
+      }),
+    );
+
+    const byItem = new Map<
+      string,
+      Omit<PublicProjectMaterialSummary, 'unitCost'> & { unitCost: number }
+    >();
+    for (const row of rows) {
+      for (const line of row.lines) {
+        const itemId = line.itemId.toString();
+        const quantity = fromMilliQty(line.quantityMilli);
+        const amount = fromMinorUnits(line.amountMinor);
+        const current = byItem.get(itemId) ?? {
+          itemId,
+          sku: line.sku,
+          name: line.name,
+          unit: line.unit,
+          brand: null,
+          model: null,
+          countryOfOrigin: null,
+          quantity: 0,
+          unitCost: 0,
+          amount: 0,
+        };
+        current.quantity += quantity;
+        current.amount += amount;
+        byItem.set(itemId, current);
+      }
+    }
+
+    const itemIds = [...byItem.keys()].map((id) => new Types.ObjectId(id));
+    if (itemIds.length > 0) {
+      const items = await ItemModel.find({ _id: { $in: itemIds } })
+        .select('brand model countryOfOrigin')
+        .exec();
+      for (const item of items) {
+        const summary = byItem.get(item._id.toString());
+        if (!summary) continue;
+        summary.brand = item.brand?.trim() || null;
+        summary.model = item.model?.trim() || null;
+        summary.countryOfOrigin = item.countryOfOrigin?.trim() || null;
+      }
+    }
+
+    const materialsSummary = [...byItem.values()].map((row) => ({
+      ...row,
+      unitCost:
+        row.quantity > 0
+          ? Number((row.amount / row.quantity).toFixed(4))
+          : 0,
+    }));
+
+    return { materialIssues, materialsSummary };
+  }
+
   private async aggregateFinancials(
     projectIds: Types.ObjectId[],
   ): Promise<Map<string, ProjectFinancials>> {
@@ -375,6 +496,7 @@ export class ProjectsService {
       accountType: AccountType;
       debitMinor: number;
       creditMinor: number;
+      lastDate: Date;
     }>([
       { $match: { projectId: { $in: projectIds } } },
       {
@@ -384,6 +506,7 @@ export class ProjectsService {
           accountType: { $first: '$accountType' },
           debitMinor: { $sum: '$debitMinor' },
           creditMinor: { $sum: '$creditMinor' },
+          lastDate: { $max: '$date' },
         },
       },
     ]);
@@ -398,6 +521,7 @@ export class ProjectsService {
         accountType: row.accountType,
         debitMinor: row.debitMinor,
         creditMinor: row.creditMinor,
+        lastDate: row.lastDate,
       });
       rollupsByProject.set(projectId, list);
     }

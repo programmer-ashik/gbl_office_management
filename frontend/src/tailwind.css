@@ -1,0 +1,30 @@
+/**
+ * Tailwind utilities for NEW UI work.
+ * Preflight is intentionally omitted so existing index.css design stays intact.
+ */
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@theme {
+  --color-navy: var(--navy);
+  --color-navy-deep: var(--navy-deep);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-gold: var(--gold);
+  --color-gold-dark: var(--gold-dark);
+  --color-teal: var(--teal);
+  --color-danger: var(--danger);
+  --color-ok: var(--ok);
+
+  --font-sans: var(--sans);
+  --font-display: var(--display);
+
+  --radius-app: var(--radius);
+  --radius-theme: var(--theme-radius, var(--radius));
+}

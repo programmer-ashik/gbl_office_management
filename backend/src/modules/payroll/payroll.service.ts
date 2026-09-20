@@ -13,16 +13,41 @@ import type { BankingService } from '../banking/banking.service';
 import type { ProjectsService } from '../projects/projects.service';
 import type { UsersService } from '../users/users.service';
 import {
+  ADMIN_SALARY_CODE,
   allocateLaborByTime,
-  buildPayrollJournalLines,
+  buildAccrualJournalLines,
+  buildDisbursementJournalLines,
   proposeAdvanceDeductions,
+  proposeFacilityDeductions,
 } from './allocation';
+import {
+  buildPayrollSlipsPdf,
+  buildSalarySlipPdf,
+} from './salary-slip-pdf';
 import type {
+  CreateSalaryFacilityDto,
   CreateTimeLogDto,
   DisbursePayrollDto,
   GeneratePayrollDto,
+  PostPayrollDto,
+  PreviewSalaryBreakdownDto,
+  UpdatePayrollSettingsDto,
   UpsertSalaryStructureDto,
 } from './dto/payroll.dto';
+import { AccountType } from '../../common/enums/account-type.enum';
+import { AccountModel } from '../accounting/account.model';
+import { SystemAccountCode } from '../accounting/system-account-codes';
+import { JournalEntityType } from '../accounting/journal.enums';
+import {
+  SalaryFacilityKind,
+  SalaryFacilityModel,
+  SalaryFacilityStatus,
+  type SalaryFacilityDocument,
+} from './salary-facility.model';
+import {
+  PayrollSettingsModel,
+  PAYROLL_SETTINGS_KEY,
+} from './payroll-settings.model';
 import {
   PayrollRunModel,
   type PayrollRunDocument,
@@ -32,8 +57,21 @@ import {
   type SalaryStructureDocument,
 } from './salary-structure.model';
 import { TimeLogModel, type TimeLogDocument } from './time-log.model';
+import {
+  breakdownToLegacyComponents,
+  calculateSalaryBreakdown,
+  DEFAULT_PAYROLL_RULE_CONFIG,
+  type PayrollRuleConfig,
+  type SalaryBreakdownResult,
+} from './salary-breakdown';
+import {
+  ConveyanceType,
+  MedicalAllowanceType,
+} from '../../common/enums/payroll.enum';
 
 const FINANCE_ROLES = new Set([Role.ADMIN, Role.ACCOUNTANT]);
+
+export type PublicPayrollSettings = PayrollRuleConfig;
 
 export type PublicSalaryStructure = {
   id: string;
@@ -43,6 +81,21 @@ export type PublicSalaryStructure = {
   allowances: Array<{ name: string; amount: number }>;
   deductions: Array<{ name: string; amount: number }>;
   gross: number;
+  grossSalary: number;
+  customBreakdownApplied: boolean;
+  breakdown: {
+    basicSalary: number;
+    houseRent: number;
+    medicalAllowance: number;
+    conveyanceAllowance: number;
+    otherAllowances: number;
+  };
+  deductionsDetail: {
+    providentFund: number;
+    taxDeduction: number;
+    advanceAdjustment: number;
+  };
+  netPayable: number;
   structuralDeductions: number;
   isActive: boolean;
 };
@@ -51,7 +104,8 @@ export type PublicTimeLog = {
   id: string;
   employeeId: string;
   employeeName: string;
-  projectId: string;
+  kind: 'project' | 'administrative';
+  projectId: string | null;
   projectCode: string;
   projectName: string;
   periodYear: number;
@@ -59,6 +113,24 @@ export type PublicTimeLog = {
   unit: string;
   quantity: number;
   notes: string | null;
+};
+
+export type PublicSalaryFacility = {
+  id: string;
+  facilityNumber: string;
+  kind: 'salary_advance' | 'salary_loan';
+  status: string;
+  employeeId: string;
+  employeeName: string;
+  principal: number;
+  installment: number;
+  installmentCount: number;
+  repaid: number;
+  outstanding: number;
+  purpose: string;
+  treasuryAccountCode: string | null;
+  journalNumber: string | null;
+  disbursedAt: string;
 };
 
 export type PublicPayrollRun = {
@@ -70,22 +142,37 @@ export type PublicPayrollRun = {
   totalGross: number;
   totalStructuralDeductions: number;
   totalAdvanceDeductions: number;
+  totalFacilityDeductions: number;
   totalNetPay: number;
+  accrualJournalNumber: string | null;
+  postedAt: string | null;
   journalNumber: string | null;
   disbursedAt: string | null;
+  treasuryAccountCode: string | null;
   lines: Array<{
     employeeId: string;
     employeeName: string;
     basic: number;
     allowances: number;
     structuralDeductions: number;
+    providentFund: number;
+    taxDeduction: number;
+    structureAdvance: number;
     gross: number;
     advanceDeductions: Array<{
       advanceId: string;
       advanceNumber: string;
       amount: number;
     }>;
+    facilityDeductions: Array<{
+      facilityId: string;
+      facilityNumber: string;
+      kind: 'salary_advance' | 'salary_loan';
+      label: string;
+      amount: number;
+    }>;
     totalAdvanceDeductions: number;
+    totalFacilityDeductions: number;
     netPay: number;
     allocations: Array<{
       projectId: string;
@@ -118,6 +205,45 @@ export class PayrollService {
       }));
   }
 
+  async getPayrollSettings(
+    actor: AuthenticatedUser,
+  ): Promise<PublicPayrollSettings> {
+    this.assertFinance(actor);
+    return this.loadPayrollSettings();
+  }
+
+  async updatePayrollSettings(
+    dto: UpdatePayrollSettingsDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicPayrollSettings> {
+    if (actor.role !== Role.ADMIN) {
+      throw forbidden('Only admin can update payroll settings');
+    }
+    const row = await PayrollSettingsModel.findOneAndUpdate(
+      { key: PAYROLL_SETTINGS_KEY },
+      {
+        key: PAYROLL_SETTINGS_KEY,
+        basicPercentOfGross: dto.basicPercentOfGross,
+        houseRentPercentOfBasic: dto.houseRentPercentOfBasic,
+        medicalType: dto.medicalType,
+        medicalValue: dto.medicalValue,
+        conveyanceType: dto.conveyanceType,
+        conveyanceValue: dto.conveyanceValue,
+      },
+      { upsert: true, new: true },
+    ).exec();
+    return this.toPublicPayrollSettings(row!);
+  }
+
+  async previewSalaryBreakdown(
+    dto: PreviewSalaryBreakdownDto,
+    actor: AuthenticatedUser,
+  ): Promise<SalaryBreakdownResult> {
+    this.assertFinance(actor);
+    const config = await this.loadPayrollSettings();
+    return this.resolveBreakdown(dto.grossSalary, config, dto);
+  }
+
   async listSalaryStructures(
     actor: AuthenticatedUser,
   ): Promise<PublicSalaryStructure[]> {
@@ -134,31 +260,168 @@ export class PayrollService {
   ): Promise<PublicSalaryStructure> {
     this.assertFinance(actor);
     const employee = await this.usersService.findByIdOrFail(dto.employeeId);
-    const basicMinor = toMinorUnits(dto.basic);
-    const allowances = (dto.allowances ?? []).map((row) => ({
-      name: row.name.trim(),
-      amountMinor: toMinorUnits(row.amount),
-    }));
-    const deductions = (dto.deductions ?? []).map((row) => ({
-      name: row.name.trim(),
-      amountMinor: toMinorUnits(row.amount),
-    }));
-
     const employeeName = `${employee.firstName} ${employee.lastName}`;
+    const config = await this.loadPayrollSettings();
+
+    let breakdown: SalaryBreakdownResult;
+    if (dto.grossSalary != null && dto.grossSalary > 0) {
+      breakdown = this.resolveBreakdown(dto.grossSalary, config, dto);
+    } else if (dto.basic != null && dto.basic > 0) {
+      // Legacy path: basic + free-form allowances/deductions
+      const allowances = (dto.allowances ?? []).map((row) => ({
+        name: row.name.trim(),
+        amount: row.amount,
+      }));
+      const deductions = (dto.deductions ?? []).map((row) => ({
+        name: row.name.trim(),
+        amount: row.amount,
+      }));
+      const allowanceTotal = allowances.reduce((s, r) => s + r.amount, 0);
+      const deductionTotal = deductions.reduce((s, r) => s + r.amount, 0);
+      const gross = dto.basic + allowanceTotal;
+      const house = allowances.find((a) => /house/i.test(a.name))?.amount ?? 0;
+      const medical =
+        allowances.find((a) => /medical/i.test(a.name))?.amount ?? 0;
+      const conveyance =
+        allowances.find((a) => /conveyance|transport/i.test(a.name))?.amount ??
+        0;
+      const other = Math.max(
+        0,
+        allowanceTotal - house - medical - conveyance,
+      );
+      breakdown = {
+        grossSalary: gross,
+        basicSalary: dto.basic,
+        houseRent: house,
+        medicalAllowance: medical,
+        conveyanceAllowance: conveyance,
+        otherAllowances: other,
+        providentFund:
+          deductions.find((d) => /provident|pf/i.test(d.name))?.amount ?? 0,
+        taxDeduction:
+          deductions.find((d) => /tax|ait/i.test(d.name))?.amount ?? 0,
+        advanceAdjustment:
+          deductions.find((d) => /advance/i.test(d.name))?.amount ?? 0,
+        netPayable: gross - deductionTotal,
+      };
+    } else {
+      throw badRequest('grossSalary (or legacy basic) is required');
+    }
+
+    const useCustom = Boolean(
+      dto.customBreakdownApplied ?? dto.customOverride,
+    );
+    const legacy = breakdownToLegacyComponents(breakdown);
     const row = await SalaryStructureModel.findOneAndUpdate(
       { employeeId: employee._id },
       {
         employeeId: employee._id,
         employeeName,
-        basicMinor,
-        allowances,
-        deductions,
+        grossSalaryMinor: toMinorUnits(breakdown.grossSalary),
+        customBreakdownApplied: useCustom,
+        breakdown: {
+          basicSalaryMinor: toMinorUnits(breakdown.basicSalary),
+          houseRentMinor: toMinorUnits(breakdown.houseRent),
+          medicalAllowanceMinor: toMinorUnits(breakdown.medicalAllowance),
+          conveyanceAllowanceMinor: toMinorUnits(
+            breakdown.conveyanceAllowance,
+          ),
+          otherAllowancesMinor: toMinorUnits(breakdown.otherAllowances),
+        },
+        deductionDetail: {
+          providentFundMinor: toMinorUnits(breakdown.providentFund),
+          taxDeductionMinor: toMinorUnits(breakdown.taxDeduction),
+          advanceAdjustmentMinor: toMinorUnits(breakdown.advanceAdjustment),
+        },
+        netPayableMinor: toMinorUnits(breakdown.netPayable),
+        basicMinor: toMinorUnits(legacy.basic),
+        allowances: legacy.allowances.map((item) => ({
+          name: item.name,
+          amountMinor: toMinorUnits(item.amount),
+        })),
+        deductions: legacy.deductions.map((item) => ({
+          name: item.name,
+          amountMinor: toMinorUnits(item.amount),
+        })),
         isActive: true,
       },
       { upsert: true, new: true },
     ).exec();
 
     return this.toPublicSalaryStructure(row!);
+  }
+
+  private resolveBreakdown(
+    grossSalary: number,
+    config: PayrollRuleConfig,
+    dto: {
+      customBreakdownApplied?: boolean;
+      customOverride?: boolean;
+      breakdown?: {
+        basicSalary?: number;
+        houseRent?: number;
+        medicalAllowance?: number;
+        conveyanceAllowance?: number;
+        otherAllowances?: number;
+      };
+      deductionsDetail?: {
+        providentFund?: number;
+        taxDeduction?: number;
+        advanceAdjustment?: number;
+      };
+    },
+  ): SalaryBreakdownResult {
+    const useCustom = Boolean(
+      dto.customBreakdownApplied ?? dto.customOverride,
+    );
+    return calculateSalaryBreakdown(
+      grossSalary,
+      config,
+      useCustom
+        ? {
+            basicSalary: dto.breakdown?.basicSalary,
+            houseRent: dto.breakdown?.houseRent,
+            medicalAllowance: dto.breakdown?.medicalAllowance,
+            conveyanceAllowance: dto.breakdown?.conveyanceAllowance,
+            otherAllowances: dto.breakdown?.otherAllowances,
+            providentFund: dto.deductionsDetail?.providentFund,
+            taxDeduction: dto.deductionsDetail?.taxDeduction,
+            advanceAdjustment: dto.deductionsDetail?.advanceAdjustment,
+          }
+        : {
+            providentFund: dto.deductionsDetail?.providentFund,
+            taxDeduction: dto.deductionsDetail?.taxDeduction,
+            advanceAdjustment: dto.deductionsDetail?.advanceAdjustment,
+          },
+    );
+  }
+
+  private async loadPayrollSettings(): Promise<PayrollRuleConfig> {
+    const row = await PayrollSettingsModel.findOne({
+      key: PAYROLL_SETTINGS_KEY,
+    }).exec();
+    if (!row) {
+      return { ...DEFAULT_PAYROLL_RULE_CONFIG };
+    }
+    return this.toPublicPayrollSettings(row);
+  }
+
+  private toPublicPayrollSettings(row: {
+    basicPercentOfGross: number;
+    houseRentPercentOfBasic: number;
+    medicalType: MedicalAllowanceType;
+    medicalValue: number;
+    conveyanceType: ConveyanceType;
+    conveyanceValue: number;
+  }): PublicPayrollSettings {
+    return {
+      basicPercentOfGross: row.basicPercentOfGross,
+      houseRentPercentOfBasic: row.houseRentPercentOfBasic,
+      medicalType: row.medicalType,
+      medicalValue: row.medicalValue,
+      conveyanceType: row.conveyanceType,
+      conveyanceValue: row.conveyanceValue,
+    };
   }
 
   async listTimeLogs(
@@ -179,12 +442,34 @@ export class PayrollService {
   ): Promise<PublicTimeLog> {
     this.assertFinance(actor);
     const employee = await this.usersService.findByIdOrFail(dto.employeeId);
-    const project = await this.projectsService.getById(dto.projectId);
+    const kind = dto.kind === 'administrative' ? 'administrative' : 'project';
     const quantityMilli = toMilliQty(dto.quantity);
 
+    if (kind === 'administrative') {
+      const created = await TimeLogModel.create({
+        employeeId: employee._id,
+        employeeName: `${employee.firstName} ${employee.lastName}`,
+        kind: 'administrative',
+        projectCode: 'HQ',
+        projectName: 'Administrative / HQ',
+        periodYear: dto.periodYear,
+        periodMonth: dto.periodMonth,
+        unit: dto.unit,
+        quantityMilli,
+        notes: dto.notes?.trim(),
+        createdBy: new Types.ObjectId(actor.userId),
+      });
+      return this.toPublicTimeLog(created);
+    }
+
+    if (!dto.projectId) {
+      throw badRequest('Project is required for project time logs');
+    }
+    const project = await this.projectsService.getById(dto.projectId);
     const created = await TimeLogModel.create({
       employeeId: employee._id,
       employeeName: `${employee.firstName} ${employee.lastName}`,
+      kind: 'project',
       projectId: new Types.ObjectId(project.id),
       projectCode: project.code,
       projectName: project.name,
@@ -196,6 +481,91 @@ export class PayrollService {
       createdBy: new Types.ObjectId(actor.userId),
     });
     return this.toPublicTimeLog(created);
+  }
+
+  async listSalaryFacilities(
+    actor: AuthenticatedUser,
+  ): Promise<PublicSalaryFacility[]> {
+    this.assertFinance(actor);
+    const rows = await SalaryFacilityModel.find()
+      .sort({ disbursedAt: -1 })
+      .exec();
+    return rows.map((row) => this.toPublicSalaryFacility(row));
+  }
+
+  async createSalaryFacility(
+    dto: CreateSalaryFacilityDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicSalaryFacility> {
+    this.assertFinance(actor);
+    const employee = await this.usersService.findByIdOrFail(dto.employeeId);
+    if (!employee.isActive) {
+      throw badRequest('Employee is inactive');
+    }
+    const principalMinor = toMinorUnits(dto.principal);
+    const installmentMinor = toMinorUnits(dto.installment);
+    if (installmentMinor > principalMinor) {
+      throw badRequest('Installment cannot exceed principal');
+    }
+    const expected = installmentMinor * dto.installmentCount;
+    if (expected < principalMinor) {
+      // allow last installment to be smaller — ok if count * installment >= principal roughly
+    }
+    const treasury = await this.bankingService.requireActive(dto.treasuryId);
+    const date = this.parseDate(dto.date);
+    const kind =
+      dto.kind === SalaryFacilityKind.LOAN
+        ? SalaryFacilityKind.LOAN
+        : SalaryFacilityKind.ADVANCE;
+    const facilityNumber = await this.nextNumber(
+      kind === SalaryFacilityKind.LOAN ? 'salary-loan' : 'salary-advance',
+      kind === SalaryFacilityKind.LOAN ? 'SLN' : 'SAD',
+    );
+
+    // Disburse: Dr 1131 Advance to Staff / Cr Cash|Bank — cash out, receivable up
+    const journal = await this.journalService.post(
+      {
+        date: date.toISOString(),
+        memo: `${kind === SalaryFacilityKind.LOAN ? 'Salary loan' : 'Salary advance'} ${facilityNumber}`,
+        reference: facilityNumber,
+        lines: [
+          {
+            accountCode: SystemAccountCode.EMPLOYEE_ADVANCES,
+            debit: fromMinorUnits(principalMinor),
+            description: `${facilityNumber} · ${employee.firstName} ${employee.lastName}`,
+            entityType: JournalEntityType.EMPLOYEE,
+            entityId: employee._id.toString(),
+          },
+          {
+            accountCode: treasury.glAccountCode,
+            credit: fromMinorUnits(principalMinor),
+            description: `${facilityNumber} disbursement`,
+          },
+        ],
+      },
+      actor.userId,
+      'system',
+    );
+
+    const created = await SalaryFacilityModel.create({
+      facilityNumber,
+      kind,
+      status: SalaryFacilityStatus.ACTIVE,
+      employeeId: employee._id,
+      employeeName: `${employee.firstName} ${employee.lastName}`,
+      principalMinor,
+      installmentMinor,
+      installmentCount: dto.installmentCount,
+      repaidMinor: 0,
+      purpose: dto.purpose.trim(),
+      treasuryId: new Types.ObjectId(treasury.id),
+      treasuryAccountCode: treasury.glAccountCode,
+      journalId: new Types.ObjectId(journal.id),
+      journalNumber: journal.entryNumber,
+      disbursedAt: date,
+      createdBy: new Types.ObjectId(actor.userId),
+    });
+    return this.toPublicSalaryFacility(created);
   }
 
   async listRuns(actor: AuthenticatedUser): Promise<PublicPayrollRun[]> {
@@ -243,6 +613,10 @@ export class PayrollService {
       (sum, row) => sum + row.totalAdvanceDeductionMinor,
       0,
     );
+    const totalFacilityDeductionMinor = lines.reduce(
+      (sum, row) => sum + (row.totalFacilityDeductionMinor ?? 0),
+      0,
+    );
     const totalNetPayMinor = lines.reduce((sum, row) => sum + row.netPayMinor, 0);
 
     const created = await PayrollRunModel.create({
@@ -253,28 +627,34 @@ export class PayrollService {
       lines,
       totalGrossMinor,
       totalStructuralDeductionMinor,
-      totalAdvanceDeductionMinor,
+      totalAdvanceDeductionMinor:
+        totalAdvanceDeductionMinor + totalFacilityDeductionMinor,
       totalNetPayMinor,
       createdBy: new Types.ObjectId(actor.userId),
     });
     return this.toPublicPayrollRun(created);
   }
 
-  async disburseRun(
+  /** Step 1 — Post accrual journal (draft → posted). */
+  async postRun(
     id: string,
-    dto: DisbursePayrollDto,
     actor: AuthenticatedUser,
+    dto?: PostPayrollDto,
   ): Promise<PublicPayrollRun> {
     this.assertFinance(actor);
     const run = await this.findRunOrFail(id);
     if (run.status !== PayrollRunStatus.DRAFT) {
-      throw badRequest('Only draft payroll runs can be disbursed');
+      throw badRequest('Only draft payroll runs can be posted');
     }
-    const treasury = await this.bankingService.requireActive(dto.treasuryId);
-    const date = this.parseDate(dto.date);
+
+    const adminSalaryAccountCode = await this.resolveSalaryExpenseAccount(
+      dto?.salaryExpenseAccountCode,
+    );
 
     const journalLines = run.lines.flatMap((line) =>
-      buildPayrollJournalLines({
+      buildAccrualJournalLines({
+        employeeId: line.employeeId.toString(),
+        employeeName: line.employeeName,
         allocations: line.allocations.map((row) => ({
           projectId: row.projectId.toString(),
           projectCode: row.projectCode,
@@ -282,23 +662,32 @@ export class PayrollService {
           quantityMilli: row.quantityMilli,
           amountMinor: row.amountMinor,
         })),
+        grossMinor: line.grossMinor,
         advanceDeductions: line.advanceDeductions.map((row) => ({
           advanceId: row.advanceId.toString(),
           advanceNumber: row.advanceNumber,
           projectId: row.projectId.toString(),
           amountMinor: row.amountMinor,
         })),
-        structuralDeductionMinor: line.structuralDeductionMinor,
+        facilityDeductions: (line.facilityDeductions ?? []).map((row) => ({
+          facilityId: row.facilityId.toString(),
+          facilityNumber: row.facilityNumber,
+          kind: row.kind,
+          label: row.label,
+          amountMinor: row.amountMinor,
+        })),
+        structureAdvanceMinor: line.structureAdvanceMinor ?? 0,
+        providentFundMinor: line.providentFundMinor ?? 0,
+        taxDeductionMinor: line.taxDeductionMinor ?? 0,
         netPayMinor: line.netPayMinor,
-        treasuryAccountCode: treasury.glAccountCode,
-        employeeName: line.employeeName,
+        adminSalaryAccountCode,
       }),
     );
 
     const journal = await this.journalService.post(
       {
-        date: date.toISOString(),
-        memo: `Payroll ${run.sheetNumber} · ${run.periodYear}-${String(run.periodMonth).padStart(2, '0')}`,
+        date: new Date().toISOString(),
+        memo: `Payroll accrual ${run.sheetNumber} · ${run.periodYear}-${String(run.periodMonth).padStart(2, '0')}`,
         reference: run.sheetNumber,
         lines: journalLines,
       },
@@ -306,25 +695,87 @@ export class PayrollService {
       'system',
     );
 
+    const postedAt = new Date();
     for (const line of run.lines) {
       for (const deduction of line.advanceDeductions) {
         const advance = await AdvanceModel.findById(deduction.advanceId).exec();
-        if (!advance) {
-          continue;
-        }
-        const deducted = (advance.payrollDeductedMinor ?? 0) + deduction.amountMinor;
+        if (!advance) continue;
+        const deducted =
+          (advance.payrollDeductedMinor ?? 0) + deduction.amountMinor;
         advance.payrollDeductedMinor = deducted;
-        const outstanding =
-          (advance.disbursedMinor ?? 0) - deducted;
+        const outstanding = (advance.disbursedMinor ?? 0) - deducted;
         if (outstanding <= 0) {
           advance.status = AdvanceStatus.SETTLED;
           advance.spentMinor = advance.disbursedMinor;
-          advance.settledAt = date;
+          advance.settledAt = postedAt;
           advance.settledBy = new Types.ObjectId(actor.userId);
         }
         await advance.save();
       }
+      for (const deduction of line.facilityDeductions ?? []) {
+        const facility = await SalaryFacilityModel.findById(
+          deduction.facilityId,
+        ).exec();
+        if (!facility) continue;
+        facility.repaidMinor = (facility.repaidMinor ?? 0) + deduction.amountMinor;
+        if (facility.repaidMinor >= facility.principalMinor) {
+          facility.status = SalaryFacilityStatus.SETTLED;
+          facility.settledAt = postedAt;
+          facility.repaidMinor = facility.principalMinor;
+        }
+        await facility.save();
+      }
     }
+
+    run.status = PayrollRunStatus.POSTED;
+    run.accrualJournalId = new Types.ObjectId(journal.id);
+    run.accrualJournalNumber = journal.entryNumber;
+    run.postedAt = postedAt;
+    run.postedBy = new Types.ObjectId(actor.userId);
+    await run.save();
+
+    return this.toPublicPayrollRun(run);
+  }
+
+  /** Step 2 — Pay net salaries from treasury (posted → disbursed). */
+  async disburseRun(
+    id: string,
+    dto: DisbursePayrollDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicPayrollRun> {
+    this.assertFinance(actor);
+    const run = await this.findRunOrFail(id);
+    if (run.status !== PayrollRunStatus.POSTED) {
+      throw badRequest(
+        'Post monthly payroll (accrual) before executing disbursement',
+      );
+    }
+    const treasury = await this.bankingService.requireActive(dto.treasuryId);
+    const date = this.parseDate(dto.date);
+
+    const journalLines = run.lines.flatMap((line) =>
+      buildDisbursementJournalLines({
+        employeeId: line.employeeId.toString(),
+        employeeName: line.employeeName,
+        netPayMinor: line.netPayMinor,
+        treasuryAccountCode: treasury.glAccountCode,
+      }),
+    );
+
+    if (journalLines.length === 0) {
+      throw badRequest('Nothing to disburse — net pay is zero for all lines');
+    }
+
+    const journal = await this.journalService.post(
+      {
+        date: date.toISOString(),
+        memo: `Payroll disbursement ${run.sheetNumber} · ${run.periodYear}-${String(run.periodMonth).padStart(2, '0')}`,
+        reference: run.sheetNumber,
+        lines: journalLines,
+      },
+      actor.userId,
+      'system',
+    );
 
     run.status = PayrollRunStatus.DISBURSED;
     run.treasuryId = new Types.ObjectId(treasury.id);
@@ -338,6 +789,22 @@ export class PayrollService {
     return this.toPublicPayrollRun(run);
   }
 
+  async buildSalarySlipPdfBuffer(
+    runId: string,
+    employeeId: string | undefined,
+    actor: AuthenticatedUser,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    this.assertFinance(actor);
+    const run = await this.findRunOrFail(runId);
+    if (run.status !== PayrollRunStatus.DISBURSED) {
+      throw badRequest('Salary slips are available after disbursement');
+    }
+    if (employeeId) {
+      return buildSalarySlipPdf(run, employeeId);
+    }
+    return buildPayrollSlipsPdf(run);
+  }
+
   private async buildPayrollLine(
     structure: SalaryStructureDocument,
     periodYear: number,
@@ -347,21 +814,38 @@ export class PayrollService {
       (sum, row) => sum + row.amountMinor,
       0,
     );
-    const structuralDeductionMinor = structure.deductions.reduce(
-      (sum, row) => sum + row.amountMinor,
-      0,
-    );
-    const grossMinor = structure.basicMinor + allowancesMinor;
+    const providentFundMinor =
+      structure.deductionDetail?.providentFundMinor ??
+      structure.deductions
+        .filter((d) => /provident|pf/i.test(d.name))
+        .reduce((s, d) => s + d.amountMinor, 0);
+    const taxDeductionMinor =
+      structure.deductionDetail?.taxDeductionMinor ??
+      structure.deductions
+        .filter((d) => /tax|ait/i.test(d.name))
+        .reduce((s, d) => s + d.amountMinor, 0);
+    const structureAdvanceMinor =
+      structure.deductionDetail?.advanceAdjustmentMinor ??
+      structure.deductions
+        .filter((d) => /advance/i.test(d.name))
+        .reduce((s, d) => s + d.amountMinor, 0);
+    const structuralDeductionMinor =
+      providentFundMinor + taxDeductionMinor + structureAdvanceMinor;
+    const grossMinor =
+      structure.grossSalaryMinor ?? structure.basicMinor + allowancesMinor;
 
     const logs = await TimeLogModel.find({
       employeeId: structure.employeeId,
       periodYear,
       periodMonth,
     }).exec();
+    const projectLogs = logs.filter(
+      (row) => row.kind !== 'administrative' && row.projectId,
+    );
     const allocations = allocateLaborByTime({
       grossMinor,
-      logs: logs.map((row) => ({
-        projectId: row.projectId.toString(),
+      logs: projectLogs.map((row) => ({
+        projectId: row.projectId!.toString(),
         projectCode: row.projectCode,
         projectName: row.projectName,
         quantityMilli: row.quantityMilli,
@@ -389,12 +873,35 @@ export class PayrollService {
         .filter((row) => row.outstandingMinor > 0),
     });
 
+    const facilities = await SalaryFacilityModel.find({
+      employeeId: structure.employeeId,
+      status: SalaryFacilityStatus.ACTIVE,
+    })
+      .sort({ disbursedAt: 1 })
+      .exec();
+
+    const facilityProposal = proposeFacilityDeductions({
+      poolMinor: advanceProposal.netPayMinor,
+      facilities: facilities
+        .map((row) => ({
+          facilityId: row._id.toString(),
+          facilityNumber: row.facilityNumber,
+          kind: row.kind,
+          installmentMinor: row.installmentMinor,
+          outstandingMinor: row.principalMinor - row.repaidMinor,
+        }))
+        .filter((row) => row.outstandingMinor > 0),
+    });
+
     return {
       employeeId: structure.employeeId,
       employeeName: structure.employeeName,
       basicMinor: structure.basicMinor,
       allowancesMinor,
       structuralDeductionMinor,
+      providentFundMinor,
+      taxDeductionMinor,
+      structureAdvanceMinor,
       grossMinor,
       advanceDeductions: advanceProposal.deductions.map((row) => ({
         advanceId: new Types.ObjectId(row.advanceId),
@@ -402,8 +909,16 @@ export class PayrollService {
         projectId: new Types.ObjectId(row.projectId),
         amountMinor: row.amountMinor,
       })),
+      facilityDeductions: facilityProposal.deductions.map((row) => ({
+        facilityId: new Types.ObjectId(row.facilityId),
+        facilityNumber: row.facilityNumber,
+        kind: row.kind,
+        label: row.label,
+        amountMinor: row.amountMinor,
+      })),
       totalAdvanceDeductionMinor: advanceProposal.totalAdvanceDeductionMinor,
-      netPayMinor: advanceProposal.netPayMinor,
+      totalFacilityDeductionMinor: facilityProposal.totalFacilityDeductionMinor,
+      netPayMinor: facilityProposal.remainingPoolMinor,
       allocations: allocations.map((row) => ({
         projectId: new Types.ObjectId(row.projectId),
         projectCode: row.projectCode,
@@ -425,6 +940,47 @@ export class PayrollService {
       (sum, item) => sum + item.amountMinor,
       0,
     );
+    const grossFromLegacy = fromMinorUnits(row.basicMinor + allowancesMinor);
+    const grossSalary = row.grossSalaryMinor != null
+      ? fromMinorUnits(row.grossSalaryMinor)
+      : grossFromLegacy;
+
+    const breakdown = row.breakdown
+      ? {
+          basicSalary: fromMinorUnits(row.breakdown.basicSalaryMinor),
+          houseRent: fromMinorUnits(row.breakdown.houseRentMinor),
+          medicalAllowance: fromMinorUnits(
+            row.breakdown.medicalAllowanceMinor,
+          ),
+          conveyanceAllowance: fromMinorUnits(
+            row.breakdown.conveyanceAllowanceMinor,
+          ),
+          otherAllowances: fromMinorUnits(row.breakdown.otherAllowancesMinor),
+        }
+      : {
+          basicSalary: fromMinorUnits(row.basicMinor),
+          houseRent: 0,
+          medicalAllowance: 0,
+          conveyanceAllowance: 0,
+          otherAllowances: fromMinorUnits(allowancesMinor),
+        };
+
+    const deductionsDetail = row.deductionDetail
+      ? {
+          providentFund: fromMinorUnits(
+            row.deductionDetail.providentFundMinor,
+          ),
+          taxDeduction: fromMinorUnits(row.deductionDetail.taxDeductionMinor),
+          advanceAdjustment: fromMinorUnits(
+            row.deductionDetail.advanceAdjustmentMinor,
+          ),
+        }
+      : {
+          providentFund: 0,
+          taxDeduction: 0,
+          advanceAdjustment: 0,
+        };
+
     return {
       id: row._id.toString(),
       employeeId: row.employeeId.toString(),
@@ -438,7 +994,17 @@ export class PayrollService {
         name: item.name,
         amount: fromMinorUnits(item.amountMinor),
       })),
-      gross: fromMinorUnits(row.basicMinor + allowancesMinor),
+      gross: grossSalary,
+      grossSalary,
+      customBreakdownApplied: Boolean(row.customBreakdownApplied),
+      breakdown,
+      deductionsDetail,
+      netPayable:
+        row.netPayableMinor != null
+          ? fromMinorUnits(row.netPayableMinor)
+          : fromMinorUnits(
+              row.basicMinor + allowancesMinor - structuralDeductionMinor,
+            ),
       structuralDeductions: fromMinorUnits(structuralDeductionMinor),
       isActive: row.isActive,
     };
@@ -449,7 +1015,8 @@ export class PayrollService {
       id: row._id.toString(),
       employeeId: row.employeeId.toString(),
       employeeName: row.employeeName,
-      projectId: row.projectId.toString(),
+      kind: row.kind === 'administrative' ? 'administrative' : 'project',
+      projectId: row.projectId ? row.projectId.toString() : null,
       projectCode: row.projectCode,
       projectName: row.projectName,
       periodYear: row.periodYear,
@@ -460,7 +1027,34 @@ export class PayrollService {
     };
   }
 
+  private toPublicSalaryFacility(
+    row: SalaryFacilityDocument,
+  ): PublicSalaryFacility {
+    const outstanding = Math.max(0, row.principalMinor - row.repaidMinor);
+    return {
+      id: row._id.toString(),
+      facilityNumber: row.facilityNumber,
+      kind: row.kind,
+      status: row.status,
+      employeeId: row.employeeId.toString(),
+      employeeName: row.employeeName,
+      principal: fromMinorUnits(row.principalMinor),
+      installment: fromMinorUnits(row.installmentMinor),
+      installmentCount: row.installmentCount,
+      repaid: fromMinorUnits(row.repaidMinor),
+      outstanding: fromMinorUnits(outstanding),
+      purpose: row.purpose,
+      treasuryAccountCode: row.treasuryAccountCode ?? null,
+      journalNumber: row.journalNumber ?? null,
+      disbursedAt: row.disbursedAt.toISOString(),
+    };
+  }
+
   private toPublicPayrollRun(row: PayrollRunDocument): PublicPayrollRun {
+    const totalFacility = row.lines.reduce(
+      (sum, line) => sum + (line.totalFacilityDeductionMinor ?? 0),
+      0,
+    );
     return {
       id: row._id.toString(),
       sheetNumber: row.sheetNumber,
@@ -470,22 +1064,39 @@ export class PayrollService {
       totalGross: fromMinorUnits(row.totalGrossMinor),
       totalStructuralDeductions: fromMinorUnits(row.totalStructuralDeductionMinor),
       totalAdvanceDeductions: fromMinorUnits(row.totalAdvanceDeductionMinor),
+      totalFacilityDeductions: fromMinorUnits(totalFacility),
       totalNetPay: fromMinorUnits(row.totalNetPayMinor),
+      accrualJournalNumber: row.accrualJournalNumber ?? null,
+      postedAt: row.postedAt ? row.postedAt.toISOString() : null,
       journalNumber: row.journalNumber ?? null,
       disbursedAt: row.disbursedAt ? row.disbursedAt.toISOString() : null,
+      treasuryAccountCode: row.treasuryAccountCode ?? null,
       lines: row.lines.map((line) => ({
         employeeId: line.employeeId.toString(),
         employeeName: line.employeeName,
         basic: fromMinorUnits(line.basicMinor),
         allowances: fromMinorUnits(line.allowancesMinor),
         structuralDeductions: fromMinorUnits(line.structuralDeductionMinor),
+        providentFund: fromMinorUnits(line.providentFundMinor ?? 0),
+        taxDeduction: fromMinorUnits(line.taxDeductionMinor ?? 0),
+        structureAdvance: fromMinorUnits(line.structureAdvanceMinor ?? 0),
         gross: fromMinorUnits(line.grossMinor),
         advanceDeductions: line.advanceDeductions.map((item) => ({
           advanceId: item.advanceId.toString(),
           advanceNumber: item.advanceNumber,
           amount: fromMinorUnits(item.amountMinor),
         })),
+        facilityDeductions: (line.facilityDeductions ?? []).map((item) => ({
+          facilityId: item.facilityId.toString(),
+          facilityNumber: item.facilityNumber,
+          kind: item.kind,
+          label: item.label,
+          amount: fromMinorUnits(item.amountMinor),
+        })),
         totalAdvanceDeductions: fromMinorUnits(line.totalAdvanceDeductionMinor),
+        totalFacilityDeductions: fromMinorUnits(
+          line.totalFacilityDeductionMinor ?? 0,
+        ),
         netPay: fromMinorUnits(line.netPayMinor),
         allocations: line.allocations.map((item) => ({
           projectId: item.projectId.toString(),
@@ -532,5 +1143,33 @@ export class PayrollService {
       throw notFound('Payroll run not found');
     }
     return row;
+  }
+
+  /**
+   * HQ / office salary expense must be a postable expense leaf.
+   * Defaults to 5230 Office Employee Salary. Project labor remains 5120.
+   */
+  private async resolveSalaryExpenseAccount(
+    code?: string,
+  ): Promise<string> {
+    const requested = (code?.trim() || ADMIN_SALARY_CODE).toUpperCase();
+    if (requested === SystemAccountCode.PROJECT_LABOR) {
+      throw badRequest(
+        'Use a non-project salary expense head (e.g. 5230). Project labor 5120 is applied automatically from time logs.',
+      );
+    }
+    const account = await AccountModel.findOne({
+      code: requested,
+      isActive: true,
+    }).exec();
+    if (!account) {
+      throw badRequest(`Salary expense account ${requested} not found`);
+    }
+    if (!account.isPostable || account.type !== AccountType.EXPENSE) {
+      throw badRequest(
+        `${requested} is not a postable expense account — select a leaf under Expenses`,
+      );
+    }
+    return account.code;
   }
 }

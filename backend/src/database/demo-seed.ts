@@ -1,10 +1,16 @@
+import { BillPaymentType, InvoiceType } from '../common/enums/ar-ap.enum';
 import { Role } from '../common/enums/role.enum';
 import { ProjectStatus } from '../common/enums/project-status.enum';
+import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { hashPassword } from '../common/utils/crypto.util';
 import { toMinorUnits } from '../common/utils/money';
 import { CounterModel } from '../modules/accounting/counter.model';
 import type { JournalService } from '../modules/accounting/journal.service';
+import type { ArApService } from '../modules/ar-ap/ar-ap.service';
+import { ClientInvoiceModel } from '../modules/ar-ap/client-invoice.model';
+import { SupplierBillModel } from '../modules/ar-ap/supplier-bill.model';
 import type { BankingService } from '../modules/banking/banking.service';
+import { CustomerModel } from '../modules/customers/customer.model';
 import { ItemModel } from '../modules/procurement/item.model';
 import { SupplierModel } from '../modules/procurement/supplier.model';
 import { ProjectModel } from '../modules/projects/project.model';
@@ -15,6 +21,7 @@ type SeedDeps = {
   usersService: UsersService;
   bankingService: BankingService;
   journalService: JournalService;
+  arApService: ArApService;
 };
 
 const DEMO_USERS: Array<{
@@ -64,7 +71,7 @@ async function nextNumber(scope: string, prefix: string): Promise<string> {
 }
 
 /**
- * Idempotent demo seed for real MongoDB deployments.
+ * Idempotent demo seed for real MongoDB deployments (new CoA leaf codes).
  */
 export async function seedDemoData(deps: SeedDeps): Promise<void> {
   for (const row of DEMO_USERS) {
@@ -83,6 +90,29 @@ export async function seedDemoData(deps: SeedDeps): Promise<void> {
 
   const pm = await UserModel.findOne({ email: 'pm@gblenterprise.com' }).exec();
   const admin = await UserModel.findOne({ role: Role.ADMIN }).exec();
+
+  if ((await CustomerModel.countDocuments().exec()) === 0) {
+    await CustomerModel.create([
+      {
+        customerNumber: await nextNumber('customer', 'CUS'),
+        name: 'ABC Construction Ltd',
+        contactName: 'Accounts',
+        email: 'ar@abcconstruction.test',
+        phone: '+8801711000001',
+        isActive: true,
+      },
+      {
+        customerNumber: await nextNumber('customer', 'CUS'),
+        name: 'GBL Properties Ltd',
+        contactName: 'Billing Desk',
+        email: 'billing@gblproperties.test',
+        phone: '+8801700000000',
+        isActive: true,
+      },
+    ]);
+    console.log('Seeded demo customers');
+  }
+
   const projectCount = await ProjectModel.countDocuments().exec();
   if (projectCount === 0 && admin) {
     await ProjectModel.create({
@@ -129,8 +159,8 @@ export async function seedDemoData(deps: SeedDeps): Promise<void> {
   }
 
   const treasury = await deps.bankingService.list();
-  const cash = treasury.find((row) => row.glAccountCode === '1000');
-  const bank = treasury.find((row) => row.glAccountCode === '1010');
+  const cash = treasury.find((row) => row.glAccountCode === '1111');
+  const bank = treasury.find((row) => row.glAccountCode === '1112');
   if (
     cash &&
     bank &&
@@ -142,14 +172,57 @@ export async function seedDemoData(deps: SeedDeps): Promise<void> {
       {
         date: '2026-01-01',
         memo: 'Opening capital (seed)',
+        journalType: 'opening_balance',
+        reference: 'SEED-OB-001',
         lines: [
-          { accountCode: '1000', debit: 150_000 },
-          { accountCode: '1010', debit: 850_000 },
-          { accountCode: '3000', credit: 1_000_000 },
+          { accountCode: '1111', debit: 150_000 },
+          { accountCode: '1112', debit: 850_000 },
+          { accountCode: '3100', credit: 1_000_000 },
         ],
       },
       admin._id.toString(),
     );
-    console.log('Seeded opening cash and bank balances');
+    console.log('Seeded opening cash and bank balances (balanced BS)');
+  }
+
+  if (admin) {
+    const actor: AuthenticatedUser = {
+      userId: admin._id.toString(),
+      email: admin.email,
+      role: admin.role,
+    };
+
+    const project = await ProjectModel.findOne().sort({ createdAt: 1 }).exec();
+    if (project && (await ClientInvoiceModel.countDocuments().exec()) === 0) {
+      await deps.arApService.createInvoice(
+        {
+          projectId: project._id.toString(),
+          type: InvoiceType.MILESTONE,
+          date: '2026-08-01',
+          dueDate: '2026-08-20',
+          amount: 75_000,
+          description: 'Demo milestone — foundation complete',
+          milestoneLabel: 'Foundation',
+        },
+        actor,
+      );
+      console.log('Seeded demo client invoice (AR)');
+    }
+
+    const supplier = await SupplierModel.findOne().sort({ createdAt: 1 }).exec();
+    if (supplier && (await SupplierBillModel.countDocuments().exec()) === 0) {
+      await deps.arApService.createBill(
+        {
+          supplierId: supplier._id.toString(),
+          paymentType: BillPaymentType.CREDIT,
+          date: '2026-08-05',
+          dueDate: '2026-09-05',
+          amount: 18_500,
+          description: 'Demo credit bill — office supplies',
+        },
+        actor,
+      );
+      console.log('Seeded demo supplier bill (AP)');
+    }
   }
 }

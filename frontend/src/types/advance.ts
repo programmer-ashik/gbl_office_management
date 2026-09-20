@@ -57,7 +57,46 @@ export type Advance = {
   returnAccountCode: string | null
   settlementJournalNumber: string | null
   settledAt: string | null
+  reimbursementDue: number
+  reimbursedAmount: number
+  reimbursementJournalNumber: string | null
+  reimbursedAt: string | null
   rejectionReason: string | null
+}
+
+export type EmployeeLedgerStatus =
+  | 'DEBIT_BALANCE'
+  | 'CREDIT_BALANCE'
+  | 'SETTLED'
+
+export type EmployeeLedgerReport = {
+  employeeId: string
+  employeeName: string
+  totalAdvancesGiven: number
+  totalExpenseSettled: number
+  totalReimbursed: number
+  runningBalance: number
+  status: EmployeeLedgerStatus
+  lines: Array<{
+    id: string
+    date: string
+    journalEntryNumber: string
+    accountCode: string
+    accountName: string
+    description: string
+    debit: number
+    credit: number
+    runningBalance: number
+    voucherType: string
+    status: EmployeeLedgerStatus
+    advanceId: string | null
+    canReimburse: boolean
+  }>
+  openReimbursements: Array<{
+    advanceId: string
+    advanceNumber: string
+    amount: number
+  }>
 }
 
 export type AdvanceProjectOption = {

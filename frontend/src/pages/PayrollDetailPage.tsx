@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { money } from '../types/accounting'
 import { PAYROLL_STATUS_LABEL, type PayrollRun } from '../types/payroll'
+import { MetricCard } from '../components/MetricCard'
 
 export function PayrollDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -35,27 +36,36 @@ export function PayrollDetailPage() {
             <span className={`status-pill status-${row.status}`}>
               {PAYROLL_STATUS_LABEL[row.status]}
             </span>
-            {row.journalNumber ? ` · ${row.journalNumber}` : null}
+            {row.accrualJournalNumber
+              ? ` · Accrual ${row.accrualJournalNumber}`
+              : null}
+            {row.journalNumber ? ` · Payout ${row.journalNumber}` : null}
           </p>
         </div>
-        <Link to="/payroll" className="ghost-link">
-          Payroll
-        </Link>
+        <div className="form-actions">
+          {row.status === 'disbursed' ? (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => void api.downloadPayrollSalarySlipsPdf(row.id)}
+            >
+              Salary slips PDF
+            </button>
+          ) : null}
+          <Link to="/payroll/process" className="ghost-link">
+            Process payroll
+          </Link>
+        </div>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Gross</h3>
-          <p className="stat-value">{money(row.totalGross)}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Advance deductions</h3>
-          <p className="stat-value">{money(row.totalAdvanceDeductions)}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Net pay</h3>
-          <p className="stat-value">{money(row.totalNetPay)}</p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard variant="blue" title="Gross" value={money(row.totalGross)} />
+        <MetricCard
+          variant="amber"
+          title="Advance deductions"
+          value={money(row.totalAdvanceDeductions)}
+        />
+        <MetricCard variant="green" title="Net pay" value={money(row.totalNetPay)} />
       </section>
 
       {row.lines.map((line) => (
@@ -96,7 +106,7 @@ export function PayrollDetailPage() {
                 <tr key={item.projectId}>
                   <td>
                     <Link to={`/projects/${item.projectId}`}>
-                      {item.projectCode} · {item.projectName}
+                      {item.projectName}
                     </Link>
                   </td>
                   <td>{item.quantity}</td>

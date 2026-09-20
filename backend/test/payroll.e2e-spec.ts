@@ -85,8 +85,8 @@ describe('Phase 8 payroll and project cost allocation (e2e)', () => {
         date: '2026-09-01',
         memo: 'Opening cash',
         lines: [
-          { accountCode: '1010', debit: 1_000_000 },
-          { accountCode: '3000', credit: 1_000_000 },
+          { accountCode: '1112', debit: 1_000_000 },
+          { accountCode: '3100', credit: 1_000_000 },
         ],
       })
       .expect(201);
@@ -179,7 +179,31 @@ describe('Phase 8 payroll and project cost allocation (e2e)', () => {
     expect(line.allocations[1].amount).toBe(11_250);
   });
 
-  it('disburses payroll and posts labor cost to projects', async () => {
+  it('posts accrual then disburses payroll and posts labor cost to projects', async () => {
+    const posted = await request(app)
+      .post(`/api/v1/payroll/runs/${payrollRunId}/post`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ salaryExpenseAccountCode: '5230' })
+      .expect(200);
+
+    expect(posted.body.data.status).toBe('posted');
+    expect(posted.body.data.accrualJournalNumber).toMatch(/^JE-/);
+
+    const advanceAfterPost = await request(app)
+      .get('/api/v1/advances')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .expect(200);
+    expect(
+      (advanceAfterPost.body.data as { items: Array<{ status: string }> })
+        .items[0].status,
+    ).toBe(AdvanceStatus.SETTLED);
+
+    const laborAfterPost = await request(app)
+      .get('/api/v1/ledgers/5120')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(laborAfterPost.body.data.account.balance).toBe(45_000);
+
     const disbursed = await request(app)
       .post(`/api/v1/payroll/runs/${payrollRunId}/disburse`)
       .set('Authorization', `Bearer ${adminToken}`)
@@ -203,18 +227,5 @@ describe('Phase 8 payroll and project cost allocation (e2e)', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
     expect(projectB.body.data.financials.directCost).toBe(11_250);
-
-    const advance = await request(app)
-      .get('/api/v1/advances')
-      .set('Authorization', `Bearer ${employeeToken}`)
-      .expect(200);
-    const row = (advance.body.data as Array<{ status: string }>)[0];
-    expect(row.status).toBe(AdvanceStatus.SETTLED);
-
-    const laborLedger = await request(app)
-      .get('/api/v1/ledgers/5100')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .expect(200);
-    expect(laborLedger.body.data.account.balance).toBe(45_000);
   });
 });

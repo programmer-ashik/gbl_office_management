@@ -1,5 +1,6 @@
 import type { ClientSession } from 'mongoose';
 import { Types } from 'mongoose';
+import { AccountType } from '../../common/enums/account-type.enum';
 import { AuditAction } from '../../common/enums/governance.enum';
 import { Role } from '../../common/enums/role.enum';
 import { badRequest, notFound } from '../../common/errors/app-error';
@@ -28,6 +29,7 @@ import {
   type JournalEntityType as EntityType,
   type JournalType as JournalTypeValue,
 } from './journal.enums';
+import { SystemAccountCode } from './system-account-codes';
 import {
   JournalEntryModel,
   type IJournalLine,
@@ -148,6 +150,16 @@ export type JournalSummary = {
 };
 
 export class JournalService {
+  private onManualPosted:
+    | ((journal: PublicJournal, userId: string) => Promise<void>)
+    | null = null;
+  private onJournalReversed:
+    | ((originalJournalId: string, userId: string) => Promise<void>)
+    | null = null;
+  private assertJournalReversible:
+    | ((originalJournalId: string) => Promise<void>)
+    | null = null;
+
   constructor(
     private readonly accountsService: AccountsService,
     private readonly projectsService: ProjectsService,
@@ -155,6 +167,42 @@ export class JournalService {
     private readonly usersService?: UsersService,
     private readonly customersService?: CustomersService,
   ) {}
+
+  /** Wire AR/AP sub-ledger sync without a circular constructor dependency. */
+  setArApHooks(hooks: {
+    onManualPosted?: (journal: PublicJournal, userId: string) => Promise<void>;
+    onJournalReversed?: (
+      originalJournalId: string,
+      userId: string,
+    ) => Promise<void>;
+    assertJournalReversible?: (originalJournalId: string) => Promise<void>;
+  }): void {
+    this.onManualPosted = hooks.onManualPosted ?? null;
+    this.onJournalReversed = hooks.onJournalReversed ?? null;
+    this.assertJournalReversible = hooks.assertJournalReversible ?? null;
+  }
+
+  private async notifyManualPosted(
+    journal: PublicJournal,
+    userId: string,
+  ): Promise<void> {
+    if (
+      journal.source !== 'manual' ||
+      journal.status !== JournalStatus.POSTED ||
+      !this.onManualPosted
+    ) {
+      return;
+    }
+    await this.onManualPosted(journal, userId);
+  }
+
+  private async notifyReversed(
+    originalJournalId: string,
+    userId: string,
+  ): Promise<void> {
+    if (!this.onJournalReversed) return;
+    await this.onJournalReversed(originalJournalId, userId);
+  }
 
   toPublic(entry: JournalEntryDocument): PublicJournal {
     return {
@@ -212,6 +260,204 @@ export class JournalService {
       requireBalance: true,
       writeLedger: true,
     });
+  }
+
+  /**
+   * Balanced Opening Balance for a newly created postable account.
+   * Debit-normal (asset/expense): Dr account / Cr owner capital (3100).
+   * Credit-normal (liability/equity/revenue): Cr account / Dr owner capital.
+   * Creating 3100 itself: Dr cash (1111) / Cr 3100.
+   */
+  async postOpeningBalanceForNewAccount(input: {
+    accountCode: string;
+    accountType: AccountType;
+    amount: number;
+    userId: string;
+    date?: string;
+  }): Promise<PublicJournal> {
+    const amount = Number(input.amount);
+    if (!Number.isFinite(amount) || amount < 0.01) {
+      throw badRequest('Opening balance must be at least 0.01');
+    }
+
+    const code = input.accountCode.trim().toUpperCase();
+    const entityRequiredCodes = [
+      SystemAccountCode.ACCOUNTS_RECEIVABLE,
+      SystemAccountCode.ACCOUNTS_PAYABLE,
+      SystemAccountCode.SUBCONTRACTOR_PAYABLE,
+      SystemAccountCode.EMPLOYEE_ADVANCES,
+      SystemAccountCode.EMPLOYEE_PAYABLES,
+    ] as const;
+    if ((entityRequiredCodes as readonly string[]).includes(code)) {
+      throw badRequest(
+        `Opening balance on ${code} needs a customer/supplier/employee. Create the account without amount, then post an Opening Balance journal with the entity selected.`,
+      );
+    }
+
+    const account = await this.accountsService.findByCodeOrFail(code);
+    if (!account.isPostable) {
+      throw badRequest('Opening balance is only allowed on postable (leaf) accounts');
+    }
+    if (!account.isActive) {
+      throw badRequest(`Account ${code} is inactive`);
+    }
+
+    const capitalCode = SystemAccountCode.OWNER_CAPITAL;
+    const cashCode = SystemAccountCode.CASH;
+    let lines: JournalLineDto[];
+
+    if (code === capitalCode) {
+      await this.accountsService.findByCodeOrFail(cashCode);
+      lines = [
+        {
+          accountCode: cashCode,
+          debit: amount,
+          description: `Opening balance for ${code}`,
+        },
+        {
+          accountCode: capitalCode,
+          credit: amount,
+          description: `Opening capital ${code}`,
+        },
+      ];
+    } else {
+      await this.accountsService.findByCodeOrFail(capitalCode);
+      const isDebitNormal =
+        input.accountType === AccountType.ASSET ||
+        input.accountType === AccountType.EXPENSE;
+      if (isDebitNormal) {
+        lines = [
+          {
+            accountCode: code,
+            debit: amount,
+            description: `Opening balance ${code}`,
+          },
+          {
+            accountCode: capitalCode,
+            credit: amount,
+            description: `Opening equity offset for ${code}`,
+          },
+        ];
+      } else {
+        lines = [
+          {
+            accountCode: capitalCode,
+            debit: amount,
+            description: `Opening equity offset for ${code}`,
+          },
+          {
+            accountCode: code,
+            credit: amount,
+            description: `Opening balance ${code}`,
+          },
+        ];
+      }
+    }
+
+    const date =
+      input.date && !Number.isNaN(new Date(input.date).getTime())
+        ? new Date(input.date).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+
+    return this.post(
+      {
+        date,
+        memo: `Opening balance for account ${code}`,
+        reference: `OB-${code}`,
+        journalType: JournalType.OPENING_BALANCE,
+        lines,
+        intent: 'post',
+      },
+      input.userId,
+      'manual',
+    );
+  }
+
+  /**
+   * Party opening balance under control accounts (AR / AP / employee).
+   * Does not create AR invoices or AP bills (opening_balance sync is skipped).
+   */
+  async postPartyOpeningBalance(input: {
+    accountCode: string;
+    entityType: 'customer' | 'supplier' | 'employee';
+    entityId: string;
+    amount: number;
+    userId: string;
+    projectId?: string;
+    date?: string;
+  }): Promise<PublicJournal> {
+    const amount = Number(input.amount);
+    if (!Number.isFinite(amount) || amount < 0.01) {
+      throw badRequest('Opening balance must be at least 0.01');
+    }
+
+    const code = input.accountCode.trim().toUpperCase();
+    const capitalCode = SystemAccountCode.OWNER_CAPITAL;
+    await this.accountsService.findByCodeOrFail(code);
+    await this.accountsService.findByCodeOrFail(capitalCode);
+
+    const isReceivableLike =
+      code === SystemAccountCode.ACCOUNTS_RECEIVABLE ||
+      code === SystemAccountCode.EMPLOYEE_ADVANCES;
+    const isPayableLike =
+      code === SystemAccountCode.ACCOUNTS_PAYABLE ||
+      code === SystemAccountCode.SUBCONTRACTOR_PAYABLE ||
+      code === SystemAccountCode.EMPLOYEE_PAYABLES;
+
+    if (!isReceivableLike && !isPayableLike) {
+      throw badRequest(
+        'Party opening balance is only supported on receivable / payable control accounts',
+      );
+    }
+
+    const partyLine: JournalLineDto = isReceivableLike
+      ? {
+          accountCode: code,
+          debit: amount,
+          description: `Opening balance`,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          projectId: input.projectId,
+        }
+      : {
+          accountCode: code,
+          credit: amount,
+          description: `Opening balance`,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          projectId: input.projectId,
+        };
+
+    const offsetLine: JournalLineDto = isReceivableLike
+      ? {
+          accountCode: capitalCode,
+          credit: amount,
+          description: `Opening equity offset`,
+        }
+      : {
+          accountCode: capitalCode,
+          debit: amount,
+          description: `Opening equity offset`,
+        };
+
+    const date =
+      input.date && !Number.isNaN(new Date(input.date).getTime())
+        ? new Date(input.date).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+
+    return this.post(
+      {
+        date,
+        memo: `Opening balance · ${code} · ${input.entityType}`,
+        reference: `OB-${code}-${input.entityId.slice(-6)}`,
+        journalType: JournalType.OPENING_BALANCE,
+        projectId: input.projectId,
+        lines: [partyLine, offsetLine],
+        intent: 'post',
+      },
+      input.userId,
+      'manual',
+    );
   }
 
   /** Save/update draft — may be unbalanced; no ledger impact. */
@@ -353,7 +599,7 @@ export class JournalService {
   ): Promise<PublicJournal[]> {
     const filter = this.buildListFilter(filters);
     const entries = await JournalEntryModel.find(filter)
-      .sort({ date: -1, entryNumber: -1 })
+      .sort({ createdAt: -1, date: -1, entryNumber: -1 })
       .limit(limit)
       .exec();
     return entries.map((entry) => this.toPublic(entry));
@@ -394,6 +640,10 @@ export class JournalService {
     const original = await this.findByIdOrFail(id);
     if (original.status !== JournalStatus.POSTED) {
       throw badRequest('Only posted journals can be reversed');
+    }
+
+    if (this.assertJournalReversible) {
+      await this.assertJournalReversible(original._id.toString());
     }
 
     const reversing = await this.post(
@@ -441,6 +691,8 @@ export class JournalService {
         status: 'posted',
       },
     );
+
+    await this.notifyReversed(original._id.toString(), userId);
 
     return reversing;
   }
@@ -584,6 +836,15 @@ export class JournalService {
         ? `Journal posted: ${publicEntry.entryNumber}`
         : `Journal draft saved: ${publicEntry.entryNumber}`,
     );
+    if (options.writeLedger) {
+      try {
+        await this.notifyManualPosted(publicEntry, userId);
+      } catch (error) {
+        await LedgerLineModel.deleteMany({ journalEntryId: entry._id }).exec();
+        await JournalEntryModel.deleteOne({ _id: entry._id }).exec();
+        throw error;
+      }
+    }
     return publicEntry;
   }
 
@@ -664,6 +925,9 @@ export class JournalService {
         : `Journal updated: ${publicEntry.entryNumber}`,
       before as unknown as Record<string, unknown>,
     );
+    if (options.postNow) {
+      await this.notifyManualPosted(publicEntry, userId);
+    }
     return publicEntry;
   }
 
@@ -765,14 +1029,23 @@ export class JournalService {
 
     let type = entityType;
     if (!type) {
-      if (accountCode === '1100') type = JournalEntityType.CUSTOMER;
-      else if (accountCode === '2000') type = JournalEntityType.SUPPLIER;
-      else if (accountCode === '1300' || accountCode === '2100') {
+      if (accountCode === SystemAccountCode.ACCOUNTS_RECEIVABLE) {
+        type = JournalEntityType.CUSTOMER;
+      } else if (
+        accountCode === SystemAccountCode.ACCOUNTS_PAYABLE ||
+        accountCode === SystemAccountCode.SUBCONTRACTOR_PAYABLE
+      ) {
+        type = JournalEntityType.SUPPLIER;
+      } else if (
+        accountCode === SystemAccountCode.EMPLOYEE_ADVANCES ||
+        accountCode === SystemAccountCode.EMPLOYEE_PAYABLES
+      ) {
         type = JournalEntityType.EMPLOYEE;
       } else if (
-        accountCode === '1000' ||
-        accountCode === '1010' ||
-        accountCode === '1020'
+        accountCode === SystemAccountCode.CASH ||
+        accountCode === SystemAccountCode.BANK ||
+        accountCode === SystemAccountCode.BANK_ALT ||
+        accountCode === SystemAccountCode.MOBILE_BANKING
       ) {
         type = JournalEntityType.TREASURY;
       } else {
@@ -826,12 +1099,13 @@ export class JournalService {
   private async writeLedgerLines(
     entry: JournalEntryDocument,
     byCode: Map<string, { _id: Types.ObjectId; code: string; name: string; type: string }>,
-    memo: string,
+    _memo: string,
     session: ClientSession,
   ): Promise<void> {
     await LedgerLineModel.insertMany(
       entry.lines.map((line) => {
         const account = byCode.get(line.accountCode)!;
+        const lineDescription = line.description?.trim();
         return {
           journalEntryId: entry._id,
           journalEntryNumber: entry.entryNumber,
@@ -840,7 +1114,9 @@ export class JournalService {
           accountName: line.accountName,
           accountType: account.type,
           date: entry.date,
-          memo: line.description || memo,
+          memo: entry.memo,
+          description: lineDescription || entry.memo,
+          reference: entry.reference,
           debitMinor: line.debitMinor,
           creditMinor: line.creditMinor,
           projectId: line.projectId,

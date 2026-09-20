@@ -54,6 +54,22 @@ export type CreateApprovalInput = {
   projectCode?: string;
 };
 
+/** Pure step builder — with projectId adds PM; otherwise accountant → admin only. */
+export function buildApprovalSteps(hasProject: boolean): IApprovalStep[] {
+  const steps: IApprovalStep[] = [];
+  if (hasProject) {
+    steps.push({
+      role: ApprovalStepRole.PROJECT_MANAGER,
+      status: 'pending',
+    });
+  }
+  steps.push(
+    { role: ApprovalStepRole.ACCOUNTANT, status: 'pending' },
+    { role: ApprovalStepRole.ADMIN, status: 'pending' },
+  );
+  return steps;
+}
+
 export class ApprovalService {
   constructor(
     private readonly projectsService: ProjectsService,
@@ -297,18 +313,7 @@ export class ApprovalService {
   }
 
   private buildSteps(hasProject: boolean): IApprovalStep[] {
-    const steps: IApprovalStep[] = [];
-    if (hasProject) {
-      steps.push({
-        role: ApprovalStepRole.PROJECT_MANAGER,
-        status: 'pending',
-      });
-    }
-    steps.push(
-      { role: ApprovalStepRole.ACCOUNTANT, status: 'pending' },
-      { role: ApprovalStepRole.ADMIN, status: 'pending' },
-    );
-    return steps;
+    return buildApprovalSteps(hasProject);
   }
 
   private assertCanDecideStep(

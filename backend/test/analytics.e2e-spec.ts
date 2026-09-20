@@ -70,7 +70,7 @@ describe('Phase 10 analytics and end-to-end integration (e2e)', () => {
       kind: string;
       glAccountCode: string;
     }>;
-    cashId = channels.find((row) => row.glAccountCode === '1000')!.id;
+    cashId = channels.find((row) => row.glAccountCode === '1111')!.id;
     bankId = channels.find((row) => row.kind === 'commercial_bank')!.id;
 
     await request(app)
@@ -80,9 +80,9 @@ describe('Phase 10 analytics and end-to-end integration (e2e)', () => {
         date: '2026-08-01',
         memo: 'Opening capital',
         lines: [
-          { accountCode: '1000', debit: 100_000 },
-          { accountCode: '1010', debit: 400_000 },
-          { accountCode: '3000', credit: 500_000 },
+          { accountCode: '1111', debit: 100_000 },
+          { accountCode: '1112', debit: 400_000 },
+          { accountCode: '3100', credit: 500_000 },
         ],
       })
       .expect(201);
@@ -153,7 +153,7 @@ describe('Phase 10 analytics and end-to-end integration (e2e)', () => {
       .send({
         lines: [
           {
-            accountCode: '5000',
+            accountCode: '5110',
             amount: 8_000,
             description: 'Tools charged to project',
           },

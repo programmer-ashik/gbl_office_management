@@ -2,6 +2,11 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import {
+  AddSupplierForm,
+  emptyAddSupplierValues,
+  type AddSupplierFormValues,
+} from '../components/AddSupplierForm'
 import { Role } from '../types/auth'
 import type { Supplier } from '../types/procurement'
 
@@ -11,9 +16,7 @@ export function VendorsPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [name, setName] = useState('')
-  const [contactName, setContactName] = useState('')
-  const [phone, setPhone] = useState('')
+  const [form, setForm] = useState<AddSupplierFormValues>(emptyAddSupplierValues)
 
   async function load() {
     const rows = await api.suppliers()
@@ -33,13 +36,12 @@ export function VendorsPage() {
     setError(null)
     try {
       await api.createSupplier({
-        name,
-        contactName: contactName || undefined,
-        phone: phone || undefined,
+        name: form.name,
+        contactName: form.contactName || undefined,
+        phone: form.phone || undefined,
+        address: form.address || undefined,
       })
-      setName('')
-      setContactName('')
-      setPhone('')
+      setForm(emptyAddSupplierValues())
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create supplier')
@@ -65,36 +67,14 @@ export function VendorsPage() {
             <h2>Add supplier</h2>
             <p className="muted">Creates a vendor record for POs and payables</p>
           </div>
-          <form className="stack-form" onSubmit={(event) => void onCreate(event)}>
-            <div className="name-row">
-              <label>
-                Name
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  minLength={2}
-                />
-              </label>
-              <label>
-                Contact
-                <input
-                  value={contactName}
-                  onChange={(e) => setContactName(e.target.value)}
-                />
-              </label>
-              <label>
-                Phone
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} />
-              </label>
-            </div>
-            <div className="form-actions">
-              <button type="submit" disabled={saving}>
-                {saving ? 'Saving…' : 'Create supplier'}
-              </button>
-            </div>
-            {error ? <p className="form-error">{error}</p> : null}
-          </form>
+          <AddSupplierForm
+            values={form}
+            onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
+            onSubmit={(event) => void onCreate(event)}
+            saving={saving}
+            error={error}
+            submitLabel="Create supplier"
+          />
         </section>
       ) : null}
 
@@ -111,6 +91,7 @@ export function VendorsPage() {
               <th>Name</th>
               <th>Contact</th>
               <th>Phone</th>
+              <th>Address</th>
               <th>Terms</th>
               <th>Status</th>
             </tr>
@@ -126,13 +107,14 @@ export function VendorsPage() {
                 </td>
                 <td>{row.contactName ?? '—'}</td>
                 <td>{row.phone ?? '—'}</td>
+                <td>{row.address ?? '—'}</td>
                 <td>{row.paymentTermsDays} days</td>
                 <td>{row.isActive ? 'Active' : 'Inactive'}</td>
               </tr>
             ))}
             {suppliers.length === 0 ? (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={7} className="muted">
                   No suppliers yet.
                 </td>
               </tr>

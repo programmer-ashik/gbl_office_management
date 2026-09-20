@@ -10,6 +10,7 @@ import {
   type InvoiceCollection,
 } from '../types/ar-ap'
 import type { TreasuryAccount } from '../types/banking'
+import { MetricCard } from '../components/MetricCard'
 
 export function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -78,7 +79,7 @@ export function InvoiceDetailPage() {
           <p className="eyebrow">{row.invoiceNumber}</p>
           <h1>{row.clientName}</h1>
           <p className="muted">
-            {row.projectCode} · {INVOICE_TYPE_LABEL[row.type]}
+            {row.projectName} · {INVOICE_TYPE_LABEL[row.type]}
             {row.milestoneLabel ? ` · ${row.milestoneLabel}` : ''}
           </p>
         </div>
@@ -87,25 +88,28 @@ export function InvoiceDetailPage() {
         </Link>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Invoiced</h3>
-          <p className="stat-value">{money(row.amount)}</p>
-          <p className="muted">Journal {row.journalNumber}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Collected</h3>
-          <p className="stat-value">{money(row.paidAmount)}</p>
-        </article>
-        <article className="stat-card">
-          <h3>Open</h3>
-          <p className="stat-value">{money(row.openAmount)}</p>
-          <p className="muted">
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="blue"
+          title="Invoiced"
+          value={money(row.amount)}
+          meta={`Journal ${row.journalNumber}`}
+        />
+        <MetricCard
+          variant="green"
+          title="Collected"
+          value={money(row.paidAmount)}
+        />
+        <MetricCard
+          variant="amber"
+          title="Open"
+          value={money(row.openAmount)}
+          meta={
             <span className={`status-pill status-${row.status}`}>
               {INVOICE_STATUS_LABEL[row.status]}
             </span>
-          </p>
-        </article>
+          }
+        />
       </section>
 
       {canCollect ? (

@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Modal, Select } from '../components/ui'
@@ -126,6 +127,7 @@ export function EmployeesPage() {
               onChange={setRole}
               options={ROLE_OPTIONS}
               placeholder="Select role"
+              portal={false}
             />
           </label>
           <div className="form-actions">
@@ -156,7 +158,9 @@ export function EmployeesPage() {
             {rows.map((row) => (
               <tr key={row.id}>
                 <td>
-                  {row.firstName} {row.lastName}
+                  <Link to={`/employees/${row.id}/ledger`}>
+                    {row.firstName} {row.lastName}
+                  </Link>
                 </td>
                 <td>{row.email}</td>
                 <td>{ROLE_LABEL[row.role]}</td>

@@ -1,5 +1,5 @@
-import { Outlet } from 'react-router-dom'
 import { AppSidebar } from './AppSidebar'
+import { PageTransition } from './PageTransition'
 import { useAuth } from '../auth/AuthContext'
 
 export function AppLayout() {
@@ -12,7 +12,7 @@ export function AppLayout() {
     <div className="app-shell">
       <AppSidebar />
       <main className="workspace">
-        <Outlet />
+        <PageTransition />
       </main>
     </div>
   )

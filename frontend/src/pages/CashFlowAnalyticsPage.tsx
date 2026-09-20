@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { MetricCard } from '../components/MetricCard'
 import { money } from '../types/accounting'
 import type { CashFlowForecast } from '../types/analytics'
 import { Role } from '../types/auth'
@@ -78,35 +79,38 @@ export function CashFlowAnalyticsPage() {
               {cashFlow.asOf.slice(0, 10)}
             </p>
           </div>
-          <section className="grid">
-            <article className="stat-card">
-              <h3>Opening cash</h3>
-              <p className="stat-value">{money(cashFlow.openingCash)}</p>
-            </article>
-            <article className="stat-card">
-              <h3>Projected inflows</h3>
-              <p className="stat-value gain">{money(cashFlow.totalInflow)}</p>
-              <p className="muted">Open AR {money(cashFlow.sources.openReceivables)}</p>
-            </article>
-            <article className="stat-card">
-              <h3>Projected outflows</h3>
-              <p className="stat-value loss">{money(cashFlow.totalOutflow)}</p>
-              <p className="muted">
-                AP {money(cashFlow.sources.openPayables)} · Scheduled{' '}
-                {money(cashFlow.sources.scheduledSupplierPayments)} · Payroll{' '}
-                {money(cashFlow.sources.draftPayroll)}
-              </p>
-            </article>
-            <article className="stat-card">
-              <h3>Projected close</h3>
-              <p
-                className={
-                  cashFlow.projectedClosingCash < 0 ? 'stat-value loss' : 'stat-value'
-                }
-              >
-                {money(cashFlow.projectedClosingCash)}
-              </p>
-            </article>
+          <section className="grid metric-card-grid">
+            <MetricCard
+              variant="blue"
+              title="Opening cash"
+              value={money(cashFlow.openingCash)}
+            />
+            <MetricCard
+              variant="green"
+              title="Projected inflows"
+              value={money(cashFlow.totalInflow)}
+              valueTone="up"
+              meta={`Open AR ${money(cashFlow.sources.openReceivables)}`}
+            />
+            <MetricCard
+              variant="red"
+              title="Projected outflows"
+              value={money(cashFlow.totalOutflow)}
+              valueTone="down"
+              meta={
+                <>
+                  AP {money(cashFlow.sources.openPayables)} · Scheduled{' '}
+                  {money(cashFlow.sources.scheduledSupplierPayments)} · Payroll{' '}
+                  {money(cashFlow.sources.draftPayroll)}
+                </>
+              }
+            />
+            <MetricCard
+              variant="amber"
+              title="Projected close"
+              value={money(cashFlow.projectedClosingCash)}
+              valueTone={cashFlow.projectedClosingCash < 0 ? 'down' : 'default'}
+            />
           </section>
 
           <div className="cashflow-bars">
@@ -132,25 +136,29 @@ export function CashFlowAnalyticsPage() {
       ) : null}
 
       {cashFlow ? (
-        <section className="grid">
-          <article className="stat-card">
-            <h3>Open receivables</h3>
-            <p className="stat-value">{money(cashFlow.sources.openReceivables)}</p>
-          </article>
-          <article className="stat-card">
-            <h3>Open payables</h3>
-            <p className="stat-value">{money(cashFlow.sources.openPayables)}</p>
-          </article>
-          <article className="stat-card">
-            <h3>Scheduled supplier payments</h3>
-            <p className="stat-value">
-              {money(cashFlow.sources.scheduledSupplierPayments)}
-            </p>
-          </article>
-          <article className="stat-card">
-            <h3>Draft payroll</h3>
-            <p className="stat-value">{money(cashFlow.sources.draftPayroll)}</p>
-          </article>
+        <section className="grid metric-card-grid">
+          <MetricCard
+            variant="green"
+            title="Open receivables"
+            value={money(cashFlow.sources.openReceivables)}
+            valueTone="up"
+          />
+          <MetricCard
+            variant="red"
+            title="Open payables"
+            value={money(cashFlow.sources.openPayables)}
+            valueTone="down"
+          />
+          <MetricCard
+            variant="amber"
+            title="Scheduled supplier payments"
+            value={money(cashFlow.sources.scheduledSupplierPayments)}
+          />
+          <MetricCard
+            variant="purple"
+            title="Draft payroll"
+            value={money(cashFlow.sources.draftPayroll)}
+          />
         </section>
       ) : !error ? (
         <section className="table-card">

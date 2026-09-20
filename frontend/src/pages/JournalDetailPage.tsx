@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { ExpandableText } from '../components/ExpandableText'
+import {
+  journalDeleteDisabledReason,
+  journalEditDisabledReason,
+  journalReverseDisabledReason,
+} from '../components/JournalRegister'
+import { MetricCard } from '../components/MetricCard'
 import {
   JOURNAL_STATUS_LABEL,
   JOURNAL_TYPE_LABEL,
@@ -12,13 +19,17 @@ import {
 import type { Project } from '../types/project'
 import {
   downloadJournalVoucher,
+  loadJournalVoucherTemplate,
   previewJournalVoucher,
+  resolveVoucherKind,
+  voucherKindTitle,
 } from '../utils/journalVoucherPdf'
-import {
-  journalDeleteDisabledReason,
-  journalEditDisabledReason,
-  journalReverseDisabledReason,
-} from '../components/JournalRegister'
+
+async function getJvTemplate() {
+  return loadJournalVoucherTemplate(() => api.journalVoucherTemplate(), {
+    force: true,
+  })
+}
 
 export function JournalDetailPage() {
   const { id } = useParams()
@@ -109,19 +120,30 @@ export function JournalDetailPage() {
     JOURNAL_TYPE_LABEL[entry.journalType as JournalType] ??
     entry.journalType ??
     'General'
+  const voucherKind = resolveVoucherKind(entry)
+  const voucherTitle = voucherKindTitle(voucherKind)
 
   return (
     <>
       <header className="workspace-header">
         <div>
-          <h1>Journal voucher</h1>
-          <p className="muted">{entry.entryNumber}</p>
+          <h1>{voucherTitle}</h1>
+          <p className="muted">
+            {entry.entryNumber} · {typeLabel}
+          </p>
         </div>
         <div className="table-actions">
-          <button type="button" className="ghost" onClick={() => previewJournalVoucher(entry)}>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => void getJvTemplate().then((t) => previewJournalVoucher(entry, t))}
+          >
             Preview PDF
           </button>
-          <button type="button" onClick={() => downloadJournalVoucher(entry)}>
+          <button
+            type="button"
+            onClick={() => void getJvTemplate().then((t) => downloadJournalVoucher(entry, t))}
+          >
             Download PDF
           </button>
           {!editReason ? (
@@ -162,31 +184,15 @@ export function JournalDetailPage() {
 
       {error ? <p className="form-error">{error}</p> : null}
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Date</h3>
-          <p className="stat-value" style={{ fontSize: 'var(--text-xl)' }}>
-            {entry.date.slice(0, 10)}
-          </p>
-        </article>
-        <article className="stat-card">
-          <h3>Status</h3>
-          <p className="stat-value" style={{ fontSize: 'var(--text-xl)' }}>
-            {JOURNAL_STATUS_LABEL[entry.status] ?? entry.status}
-          </p>
-        </article>
-        <article className="stat-card">
-          <h3>Type</h3>
-          <p className="stat-value" style={{ fontSize: 'var(--text-xl)' }}>
-            {typeLabel}
-          </p>
-        </article>
-        <article className="stat-card">
-          <h3>Project</h3>
-          <p className="stat-value" style={{ fontSize: 'var(--text-xl)' }}>
-            {projectLabel}
-          </p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard variant="blue" title="Date" value={entry.date.slice(0, 10)} />
+        <MetricCard
+          variant="amber"
+          title="Status"
+          value={JOURNAL_STATUS_LABEL[entry.status] ?? entry.status}
+        />
+        <MetricCard variant="purple" title="Type" value={typeLabel} />
+        <MetricCard variant="teal" title="Project" value={projectLabel} />
       </section>
 
       <section className="table-card">
@@ -233,10 +239,12 @@ export function JournalDetailPage() {
                   <td>
                     {line.projectId
                       ? (projects.find((project) => project.id === line.projectId)
-                          ?.code ?? 'Tagged')
+                          ?.name ?? 'Tagged')
                       : '—'}
                   </td>
-                  <td>{line.description ?? '—'}</td>
+                  <td>
+                    <ExpandableText text={line.description} maxChars={48} />
+                  </td>
                   <td className="num amount-debit-cell">
                     {line.debit > 0 ? money(line.debit) : '—'}
                   </td>

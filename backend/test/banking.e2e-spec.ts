@@ -61,8 +61,8 @@ describe('Phase 4 banking, cash and petty cash (e2e)', () => {
       bookBalance: number;
     }>;
     const byKind = new Map(rows.map((row) => [row.kind, row]));
-    expect(byKind.get(TreasuryKind.CASH)?.glAccountCode).toBe('1000');
-    expect(byKind.get(TreasuryKind.COMMERCIAL_BANK)?.glAccountCode).toBe('1010');
+    expect(byKind.get(TreasuryKind.CASH)?.glAccountCode).toBe('1111');
+    expect(byKind.get(TreasuryKind.COMMERCIAL_BANK)?.glAccountCode).toBe('1112');
     expect(byKind.get(TreasuryKind.MOBILE_BANKING)?.glAccountCode).toBe('1020');
     cashId = byKind.get(TreasuryKind.CASH)!.id;
     bankId = byKind.get(TreasuryKind.COMMERCIAL_BANK)!.id;
@@ -108,8 +108,8 @@ describe('Phase 4 banking, cash and petty cash (e2e)', () => {
         date: '2026-09-01',
         memo: 'Opening cash',
         lines: [
-          { accountCode: '1000', debit: 50000 },
-          { accountCode: '3000', credit: 50000 },
+          { accountCode: '1111', debit: 50000 },
+          { accountCode: '3100', credit: 50000 },
         ],
       })
       .expect(201);

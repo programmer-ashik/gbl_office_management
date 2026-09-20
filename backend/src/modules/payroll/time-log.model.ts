@@ -1,10 +1,13 @@
 import { HydratedDocument, Model, Schema, Types, model, models } from 'mongoose';
 import { TimeUnit } from '../../common/enums/payroll.enum';
 
+export type TimeLogKind = 'project' | 'administrative';
+
 export interface ITimeLog {
   employeeId: Types.ObjectId;
   employeeName: string;
-  projectId: Types.ObjectId;
+  kind: TimeLogKind;
+  projectId?: Types.ObjectId;
   projectCode: string;
   projectName: string;
   periodYear: number;
@@ -28,10 +31,17 @@ const timeLogSchema = new Schema<ITimeLog>(
       index: true,
     },
     employeeName: { type: String, required: true },
+    kind: {
+      type: String,
+      required: true,
+      enum: ['project', 'administrative'],
+      default: 'project',
+      index: true,
+    },
     projectId: {
       type: Schema.Types.ObjectId,
       ref: 'Project',
-      required: true,
+      required: false,
       index: true,
     },
     projectCode: { type: String, required: true },
@@ -50,9 +60,22 @@ const timeLogSchema = new Schema<ITimeLog>(
   { timestamps: true, collection: 'time_logs' },
 );
 
+// Project rows: one log per employee/project/period
 timeLogSchema.index(
   { employeeId: 1, projectId: 1, periodYear: 1, periodMonth: 1 },
-  { unique: true },
+  {
+    unique: true,
+    partialFilterExpression: { kind: 'project', projectId: { $type: 'objectId' } },
+  },
+);
+
+// Admin rows: one HQ log per employee/period
+timeLogSchema.index(
+  { employeeId: 1, kind: 1, periodYear: 1, periodMonth: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { kind: 'administrative' },
+  },
 );
 
 export const TimeLogModel =

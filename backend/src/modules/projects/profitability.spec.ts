@@ -17,29 +17,29 @@ describe('computeProjectFinancials', () => {
   it('computes gross and net profit from tagged revenue and costs', () => {
     const result = computeProjectFinancials(5_000_000, 2_000_000, [
       {
-        accountCode: '4000',
+        accountCode: '4110',
         accountName: 'Project Revenue',
         accountType: AccountType.REVENUE,
         debitMinor: 0,
         creditMinor: 3_000_000,
       },
       {
-        accountCode: '5000',
-        accountName: 'Project Materials',
+        accountCode: '5110',
+        accountName: 'Raw Material Expenses',
         accountType: AccountType.EXPENSE,
         debitMinor: 800_000,
         creditMinor: 0,
       },
       {
-        accountCode: '5100',
-        accountName: 'Labor Cost',
+        accountCode: '5120',
+        accountName: 'Direct Project Labor / Site Salary',
         accountType: AccountType.EXPENSE,
         debitMinor: 400_000,
         creditMinor: 0,
       },
       {
-        accountCode: '5300',
-        accountName: 'Travel & Conveyance',
+        accountCode: '5240',
+        accountName: 'Office Petty Cash Expenses',
         accountType: AccountType.EXPENSE,
         debitMinor: 50_000,
         creditMinor: 0,
@@ -62,14 +62,14 @@ describe('computeProjectFinancials', () => {
   it('ignores asset lines such as employee advances', () => {
     const result = computeProjectFinancials(100_000, 50_000, [
       {
-        accountCode: '1300',
+        accountCode: '1131',
         accountName: 'Employee Advances',
         accountType: AccountType.ASSET,
         debitMinor: 20_000,
         creditMinor: 0,
       },
       {
-        accountCode: '5000',
+        accountCode: '5110',
         accountName: 'Project Materials',
         accountType: AccountType.EXPENSE,
         debitMinor: 10_000,
@@ -80,13 +80,13 @@ describe('computeProjectFinancials', () => {
     expect(result.totalCost).toBe(100);
     expect(result.netProfit).toBe(-100);
     expect(result.breakdown).toHaveLength(1);
-    expect(result.breakdown[0].accountCode).toBe('5000');
+    expect(result.breakdown[0].accountCode).toBe('5110');
   });
 
   it('flags over-budget when actual cost exceeds the threshold', () => {
     const result = computeProjectFinancials(200_000, 50_000, [
       {
-        accountCode: '5000',
+        accountCode: '5110',
         accountName: 'Project Materials',
         accountType: AccountType.EXPENSE,
         debitMinor: 60_000,

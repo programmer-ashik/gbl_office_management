@@ -5,6 +5,7 @@ import type {
   JournalEntry,
   JournalSummary,
   JournalWriteBody,
+  BalanceSheetReport,
   TrialBalance,
 } from '../types/accounting'
 import type {
@@ -14,6 +15,7 @@ import type {
   OverdueNotice,
   SupplierBill,
   SupplierPayment,
+  VendorLedger,
 } from '../types/ar-ap'
 import type {
   ApprovalRequest,
@@ -23,8 +25,14 @@ import type {
 import type {
   Advance,
   AdvanceProjectOption,
+  EmployeeLedgerReport,
   ExpenseAccountOption,
 } from '../types/advance'
+import type {
+  CreateQuotationBody,
+  Quotation,
+  QuotationStatus,
+} from '../types/quotation'
 import type { ApiError, ApiSuccess, AuthResult, HealthStatus, PublicUser, Role } from '../types/auth'
 import type {
   FundTransfer,
@@ -36,6 +44,9 @@ import type { CreateProjectBody, Project, ProjectStatus } from '../types/project
 import type {
   PayrollEmployee,
   PayrollRun,
+  PayrollSettings,
+  SalaryBreakdownPreview,
+  SalaryFacility,
   SalaryStructure,
   TimeLog,
 } from '../types/payroll'
@@ -44,13 +55,14 @@ import type {
   CashFlowForecast,
   FinancialStatements,
 } from '../types/analytics'
+import type { BalanceSheetTemplate } from '../types/report-template'
 import type {
   Item,
+  ProductCategory,
   PurchaseOrder,
   StockIssue,
   StockRow,
   Supplier,
-  VendorLedger,
   Warehouse,
 } from '../types/procurement'
 
@@ -145,6 +157,46 @@ async function request<T>(
   return json.data
 }
 
+async function downloadBlob(path: string, fallbackName: string): Promise<void> {
+  const headers = new Headers()
+  const token = getAccessToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  let res = await fetch(`${API_BASE}${path}`, {
+    headers,
+    credentials: 'include',
+  })
+
+  if (res.status === 401) {
+    const refreshed = await tryRefresh()
+    if (refreshed) {
+      const retryHeaders = new Headers()
+      const next = getAccessToken()
+      if (next) retryHeaders.set('Authorization', `Bearer ${next}`)
+      res = await fetch(`${API_BASE}${path}`, {
+        headers: retryHeaders,
+        credentials: 'include',
+      })
+    }
+  }
+
+  if (!res.ok) {
+    const err = (await res.json().catch(() => null)) as ApiError | null
+    throw new ApiRequestError(err?.message ?? 'Download failed', res.status)
+  }
+
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') ?? ''
+  const match = /filename="?([^"]+)"?/i.exec(disposition)
+  const filename = match?.[1] ?? fallbackName
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 export const api = {
   health: () => request<HealthStatus>('/health'),
   signup: (body: {
@@ -182,15 +234,57 @@ export const api = {
       body: JSON.stringify(body),
     }),
   accounts: () => request<Account[]>('/accounts'),
+  nextAccountCode: (type: Account['type'], parentCode?: string) => {
+    const query = new URLSearchParams({ type })
+    if (parentCode) query.set('parentCode', parentCode)
+    return request<{ code: string }>(`/accounts/next-code?${query}`)
+  },
+  postPartyOpeningBalance: (body: {
+    accountCode: string
+    entityType: 'customer' | 'supplier' | 'employee'
+    entityId: string
+    amount: number
+    projectId?: string
+    date?: string
+  }) =>
+    request<JournalEntry>('/accounts/party-opening-balance', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   createAccount: (body: {
     code: string
     name: string
     type: Account['type']
     description?: string
+    parentCode?: string
+    isPostable?: boolean
+    openingBalance?: number
   }) =>
-    request<Account>('/accounts', {
+    request<
+      Account & {
+        openingJournalId?: string
+        openingJournalNumber?: string
+      }
+    >('/accounts', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  updateAccount: (
+    id: string,
+    body: {
+      name?: string
+      description?: string
+      isActive?: boolean
+      isPostable?: boolean
+    },
+  ) =>
+    request<Account>(`/accounts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteAccount: (id: string) =>
+    request<{ id: string; code: string }>(`/accounts/${id}`, {
+      method: 'DELETE',
     }),
   journals: (params?: {
     projectId?: string
@@ -251,12 +345,109 @@ export const api = {
       method: 'DELETE',
     }),
   trialBalance: () => request<TrialBalance>('/reports/trial-balance'),
+  balanceSheet: (asOfDate?: string) => {
+    const query = asOfDate
+      ? `?asOfDate=${encodeURIComponent(asOfDate)}`
+      : ''
+    return request<BalanceSheetReport>(`/reports/balance-sheet${query}`)
+  },
+  balanceSheetTemplate: () =>
+    request<BalanceSheetTemplate>('/templates/balance-sheet'),
+  saveBalanceSheetTemplate: (body: Omit<
+    BalanceSheetTemplate,
+    'id' | 'isDefault' | 'updatedBy' | 'updatedAt' | 'reportType'
+  > & {
+    templateName?: string
+    companyLogoUrl?: string | null
+    reportType?: 'BALANCE_SHEET'
+  }) =>
+    request<BalanceSheetTemplate>('/templates/balance-sheet', {
+      method: 'POST',
+      body: JSON.stringify({
+        templateName: body.templateName,
+        companyLogoUrl: body.companyLogoUrl ?? undefined,
+        headerConfig: body.headerConfig,
+        layoutStructure: body.layoutStructure,
+        footerConfig: body.footerConfig,
+        voucherConfig: body.voucherConfig ?? undefined,
+      }),
+    }),
+  journalVoucherTemplate: () =>
+    request<BalanceSheetTemplate>('/templates/journal-voucher'),
+  saveJournalVoucherTemplate: (body: Omit<
+    BalanceSheetTemplate,
+    'id' | 'isDefault' | 'updatedBy' | 'updatedAt' | 'reportType'
+  > & {
+    templateName?: string
+    companyLogoUrl?: string | null
+  }) =>
+    request<BalanceSheetTemplate>('/templates/journal-voucher', {
+      method: 'POST',
+      body: JSON.stringify({
+        templateName: body.templateName,
+        companyLogoUrl: body.companyLogoUrl || undefined,
+        headerConfig: body.headerConfig,
+        layoutStructure: body.layoutStructure,
+        footerConfig: body.footerConfig,
+        voucherConfig: body.voucherConfig || undefined,
+      }),
+    }),
+  uploadTemplateLogo: async (file: File) => {
+    const form = new FormData()
+    form.append('logo', file)
+    const headers = new Headers()
+    const token = getAccessToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    const res = await fetch(`${API_BASE}/templates/upload-logo`, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: form,
+    })
+    if (res.status === 401) {
+      const refreshed = await tryRefresh()
+      if (refreshed) {
+        const retryHeaders = new Headers()
+        const next = getAccessToken()
+        if (next) retryHeaders.set('Authorization', `Bearer ${next}`)
+        const retry = await fetch(`${API_BASE}/templates/upload-logo`, {
+          method: 'POST',
+          headers: retryHeaders,
+          credentials: 'include',
+          body: form,
+        })
+        if (!retry.ok) {
+          const err = (await retry.json().catch(() => null)) as ApiError | null
+          throw new ApiRequestError(
+            err?.message ?? 'Logo upload failed',
+            retry.status,
+          )
+        }
+        const json = (await retry.json()) as ApiSuccess<{ url: string }>
+        return json.data
+      }
+    }
+    if (!res.ok) {
+      const err = (await res.json().catch(() => null)) as ApiError | null
+      throw new ApiRequestError(err?.message ?? 'Logo upload failed', res.status)
+    }
+    const json = (await res.json()) as ApiSuccess<{ url: string }>
+    return json.data
+  },
   ledger: (
     accountCode: string,
-    params?: { asOf?: string; entityType?: string; entityId?: string },
+    params?: {
+      asOf?: string
+      fromDate?: string
+      toDate?: string
+      entityType?: string
+      entityId?: string
+    },
   ) => {
     const query = new URLSearchParams()
     if (params?.asOf) query.set('asOf', params.asOf)
+    if (params?.fromDate) query.set('fromDate', params.fromDate)
+    if (params?.toDate) query.set('toDate', params.toDate)
     if (params?.entityType) query.set('entityType', params.entityType)
     if (params?.entityId) query.set('entityId', params.entityId)
     const qs = query.toString()
@@ -278,6 +469,37 @@ export const api = {
     request<Customer>('/customers', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  quotations: (params?: {
+    createdBy?: string
+    projectId?: string
+    status?: QuotationStatus
+    fromDate?: string
+    toDate?: string
+  }) => {
+    const query = new URLSearchParams()
+    if (params?.createdBy) query.set('createdBy', params.createdBy)
+    if (params?.projectId) query.set('projectId', params.projectId)
+    if (params?.status) query.set('status', params.status)
+    if (params?.fromDate) query.set('fromDate', params.fromDate)
+    if (params?.toDate) query.set('toDate', params.toDate)
+    const qs = query.toString()
+    return request<Quotation[]>(qs ? `/quotations?${qs}` : '/quotations')
+  },
+  quotation: (id: string) => request<Quotation>(`/quotations/${id}`),
+  createQuotation: (body: CreateQuotationBody) =>
+    request<Quotation>('/quotations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateQuotationStatus: (
+    id: string,
+    status: QuotationStatus,
+    projectId?: string,
+  ) =>
+    request<Quotation>(`/quotations/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, projectId }),
     }),
   projects: (status?: ProjectStatus) =>
     request<Project[]>(status ? `/projects?status=${status}` : '/projects'),
@@ -343,13 +565,63 @@ export const api = {
     }),
   importReconciliation: (
     treasuryId: string,
-    body: { asOf: string; statementBalance: number; csv: string },
+    body: {
+      asOf?: string
+      statementBalance?: number
+      csv?: string
+      pdfBase64?: string
+      openingBalance?: number
+      fileName?: string
+    },
   ) =>
     request<Reconciliation>(`/treasury/${treasuryId}/reconciliations`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  previewStatement: (
+    treasuryId: string,
+    body: { csv?: string; pdfBase64?: string },
+  ) =>
+    request<{
+      lineCount: number
+      openingBalance: number | null
+      closingBalance: number | null
+      periodFrom: string | null
+      periodTo: string | null
+      asOf: string | null
+      sampleLines: Array<{
+        date: string
+        description: string
+        amount: number
+        reference?: string
+      }>
+    }>(`/treasury/${treasuryId}/reconciliations/preview`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  listTreasuryReconciliations: (treasuryId: string) =>
+    request<Reconciliation[]>(`/treasury/${treasuryId}/reconciliations`),
   reconciliation: (id: string) => request<Reconciliation>(`/reconciliations/${id}`),
+  autoMatchReconciliation: (id: string) =>
+    request<Reconciliation>(`/reconciliations/${id}/auto-match`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  adjustReconciliation: (
+    id: string,
+    body: {
+      kind: 'bank_charge' | 'bank_interest'
+      amount: number
+      date: string
+      memo?: string
+      reference?: string
+      projectId?: string
+    },
+  ) =>
+    request<Reconciliation>(`/reconciliations/${id}/adjust`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   matchReconciliation: (
     id: string,
     body: { statementLineId: string; ledgerLineId: string },
@@ -358,12 +630,66 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  unmatchReconciliation: (
+    id: string,
+    body: { statementLineId: string },
+  ) =>
+    request<Reconciliation>(`/reconciliations/${id}/unmatch`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   completeReconciliation: (id: string) =>
     request<Reconciliation>(`/reconciliations/${id}/complete`, {
       method: 'POST',
       body: JSON.stringify({}),
     }),
-  advances: () => request<Advance[]>('/advances'),
+  advances: (params?: {
+    projectId?: string
+    employeeId?: string
+    startDate?: string
+    endDate?: string
+    status?: string
+    page?: number
+    pageSize?: number
+  }) => {
+    const query = new URLSearchParams()
+    if (params?.projectId) query.set('projectId', params.projectId)
+    if (params?.employeeId) query.set('employeeId', params.employeeId)
+    if (params?.startDate) query.set('startDate', params.startDate)
+    if (params?.endDate) query.set('endDate', params.endDate)
+    if (params?.status) query.set('status', params.status)
+    if (params?.page) query.set('page', String(params.page))
+    if (params?.pageSize) query.set('pageSize', String(params.pageSize))
+    const qs = query.toString()
+    return request<{
+      items: Advance[]
+      total: number
+      page: number
+      pageSize: number
+    }>(qs ? `/advances?${qs}` : '/advances')
+  },
+  downloadAdvancePdf: (id: string) =>
+    downloadBlob(`/advances/${id}/pdf`, `advance-${id}.pdf`),
+  downloadProjectAdvanceReportPdf: (params: {
+    projectId: string
+    employeeId?: string
+    startDate?: string
+    endDate?: string
+  }) => {
+    const query = new URLSearchParams()
+    query.set('projectId', params.projectId)
+    if (params.employeeId) query.set('employeeId', params.employeeId)
+    if (params.startDate) query.set('startDate', params.startDate)
+    if (params.endDate) query.set('endDate', params.endDate)
+    return downloadBlob(
+      `/advances/project-report/pdf?${query.toString()}`,
+      'project-advance-report.pdf',
+    )
+  },
+  employeeAdvanceBalance: (id: string) =>
+    request<{ employeeId: string; unsettledAdvanceBalance: number }>(
+      `/employees/${id}/advance-balance`,
+    ),
   advance: (id: string) => request<Advance>(`/advances/${id}`),
   advanceProjects: () => request<AdvanceProjectOption[]>('/advances/projects'),
   expenseAccounts: () =>
@@ -396,22 +722,105 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
     }),
+  reimburseAdvance: (
+    id: string,
+    body: { treasuryId: string; date?: string; memo?: string },
+  ) =>
+    request<Advance>(`/advances/${id}/reimburse`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  employeeLedger: (id: string) =>
+    request<EmployeeLedgerReport>(`/employees/${id}/ledger`),
   suppliers: () => request<Supplier[]>('/suppliers'),
   supplier: (id: string) => request<Supplier>(`/suppliers/${id}`),
   vendorLedger: (id: string) => request<VendorLedger>(`/suppliers/${id}/ledger`),
   createSupplier: (body: {
     name: string
     contactName?: string
+    email?: string
     phone?: string
+    address?: string
     paymentTermsDays?: number
   }) =>
     request<Supplier>('/suppliers', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  items: () => request<Item[]>('/items'),
-  createItem: (body: { sku: string; name: string; unit: string }) =>
+  items: (params?: {
+    categoryId?: string
+    subCategoryId?: string
+    search?: string
+  }) => {
+    const query = new URLSearchParams()
+    if (params?.categoryId) query.set('categoryId', params.categoryId)
+    if (params?.subCategoryId) query.set('subCategoryId', params.subCategoryId)
+    if (params?.search) query.set('search', params.search)
+    const qs = query.toString()
+    return request<Item[]>(qs ? `/items?${qs}` : '/items')
+  },
+  createItem: (body: {
+    sku?: string
+    name: string
+    unit: string
+    description?: string
+    unitPrice?: number
+    quantity?: number
+    brand?: string
+    model?: string
+    countryOfOrigin?: string
+    technicalSpecification?: string
+    warranty?: string
+    serialNumber?: string
+    barcode?: string
+    warehouseId?: string
+    dataSheetUrl?: string
+    categoryId?: string
+    subCategoryId?: string
+    supplierId?: string
+  }) =>
     request<Item>('/items', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  item: (id: string) => request<Item>(`/items/${id}`),
+  updateItem: (
+    id: string,
+    body: {
+      sku?: string
+      name?: string
+      unit?: string
+      description?: string
+      unitPrice?: number
+      quantity?: number
+      brand?: string
+      model?: string
+      countryOfOrigin?: string
+      technicalSpecification?: string
+      warranty?: string
+      serialNumber?: string
+      barcode?: string
+      warehouseId?: string
+      dataSheetUrl?: string
+      categoryId?: string
+      subCategoryId?: string
+      supplierId?: string
+    },
+  ) =>
+    request<Item>(`/items/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteItem: (id: string) =>
+    request<{ id: string }>(`/items/${id}`, { method: 'DELETE' }),
+  productCategories: () =>
+    request<ProductCategory[]>('/product-categories'),
+  createProductCategory: (body: {
+    name: string
+    code?: string
+    parentId?: string
+  }) =>
+    request<ProductCategory>('/product-categories', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -433,7 +842,12 @@ export const api = {
     }),
   receiveGoods: (
     id: string,
-    body: { date: string; lines: Array<{ lineId: string; quantity: number }> },
+    body: {
+      date: string
+      paymentMethod?: 'due' | 'cash' | 'bank'
+      treasuryId?: string
+      lines: Array<{ lineId: string; quantity: number }>
+    },
   ) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/receive`, {
       method: 'POST',
@@ -539,10 +953,52 @@ export const api = {
   apAging: (asOf?: string) =>
     request<AgingReport>(`/payables/aging${asOf ? `?asOf=${asOf}` : ''}`),
   payrollEmployees: () => request<PayrollEmployee[]>('/payroll/employees'),
+  payrollSettings: () => request<PayrollSettings>('/payroll/settings'),
+  updatePayrollSettings: (body: PayrollSettings) =>
+    request<PayrollSettings>('/payroll/settings', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  previewSalaryBreakdown: (body: {
+    grossSalary: number
+    customBreakdownApplied?: boolean
+    breakdown?: Partial<{
+      basicSalary: number
+      houseRent: number
+      medicalAllowance: number
+      conveyanceAllowance: number
+      otherAllowances: number
+    }>
+    deductionsDetail?: Partial<{
+      providentFund: number
+      taxDeduction: number
+      advanceAdjustment: number
+    }>
+  }) =>
+    request<SalaryBreakdownPreview>('/payroll/salary-structures/preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   salaryStructures: () => request<SalaryStructure[]>('/payroll/salary-structures'),
   upsertSalaryStructure: (body: {
     employeeId: string
-    basic: number
+    grossSalary?: number
+    customBreakdownApplied?: boolean
+    breakdown?: {
+      basicSalary?: number
+      houseRent?: number
+      medicalAllowance?: number
+      conveyanceAllowance?: number
+      otherAllowances?: number
+    }
+    deductionsDetail?: {
+      providentFund?: number
+      taxDeduction?: number
+      advanceAdjustment?: number
+    }
+    customOverride?: boolean
+    /** @deprecated Prefer grossSalary + breakdown */
+    basic?: number
     allowances?: Array<{ name: string; amount: number }>
     deductions?: Array<{ name: string; amount: number }>
   }) =>
@@ -556,7 +1012,8 @@ export const api = {
     ),
   createTimeLog: (body: {
     employeeId: string
-    projectId: string
+    kind?: 'project' | 'administrative'
+    projectId?: string
     periodYear: number
     periodMonth: number
     unit: 'hours' | 'days'
@@ -567,6 +1024,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  salaryFacilities: () =>
+    request<SalaryFacility[]>('/payroll/salary-facilities'),
+  createSalaryFacility: (body: {
+    employeeId: string
+    kind: 'salary_advance' | 'salary_loan'
+    principal: number
+    installment: number
+    installmentCount: number
+    treasuryId: string
+    date: string
+    purpose: string
+  }) =>
+    request<SalaryFacility>('/payroll/salary-facilities', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   payrollRuns: () => request<PayrollRun[]>('/payroll/runs'),
   payrollRun: (id: string) => request<PayrollRun>(`/payroll/runs/${id}`),
   generatePayroll: (body: { periodYear: number; periodMonth: number }) =>
@@ -574,11 +1047,28 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  postPayroll: (
+    id: string,
+    body?: { salaryExpenseAccountCode?: string },
+  ) =>
+    request<PayrollRun>(`/payroll/runs/${id}/post`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
   disbursePayroll: (id: string, body: { treasuryId: string; date: string }) =>
     request<PayrollRun>(`/payroll/runs/${id}/disburse`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  downloadPayrollSalarySlipsPdf: (id: string, employeeId?: string) => {
+    const qs = employeeId
+      ? `?employeeId=${encodeURIComponent(employeeId)}`
+      : ''
+    return downloadBlob(
+      `/payroll/runs/${id}/salary-slips/pdf${qs}`,
+      `payroll-${id}-slips.pdf`,
+    )
+  },
   auditLogs: (entityType?: string) =>
     request<AuditLog[]>(
       `/audit${entityType ? `?entityType=${encodeURIComponent(entityType)}` : ''}`,

@@ -64,6 +64,31 @@ export type Item = {
   sku: string
   name: string
   unit: string
+  description: string | null
+  unitPrice: number | null
+  quantity: number | null
+  brand: string | null
+  model: string | null
+  countryOfOrigin: string | null
+  technicalSpecification: string | null
+  warranty: string | null
+  serialNumber: string | null
+  barcode: string | null
+  warehouseId: string | null
+  warehouseCode: string | null
+  dataSheetUrl: string | null
+  categoryId: string | null
+  subCategoryId: string | null
+  supplierId: string | null
+  supplierName: string | null
+  isActive: boolean
+}
+
+export type ProductCategory = {
+  id: string
+  name: string
+  code: string | null
+  parentId: string | null
   isActive: boolean
 }
 
@@ -123,16 +148,29 @@ export type StockRow = {
   value: number
 }
 
+export type StockIssueLine = {
+  itemId: string
+  sku: string
+  name: string
+  unit: string
+  quantity: number
+  unitCost: number
+  amount: number
+}
+
 export type StockIssue = {
   id: string
   issueNumber: string
   warehouseCode: string
   warehouseName: string
+  projectId?: string
   projectCode: string
   projectName: string
   date: string
+  quantity: number
   amount: number
   journalNumber: string
+  lines: StockIssueLine[]
 }
 
 export type VendorLedger = {

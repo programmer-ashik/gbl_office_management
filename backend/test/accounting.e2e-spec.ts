@@ -51,7 +51,7 @@ describe('Phase 2 double-entry engine (e2e)', () => {
     const codes = (res.body.data as Array<{ code: string; type: string }>).map(
       (row) => row.code,
     );
-    expect(codes).toEqual(expect.arrayContaining(['1000', '2000', '3000', '4000', '5000']));
+    expect(codes).toEqual(expect.arrayContaining(['1111', '2111', '3100', '4110', '5110']));
     const types = new Set(
       (res.body.data as Array<{ type: string }>).map((row) => row.type),
     );
@@ -68,8 +68,8 @@ describe('Phase 2 double-entry engine (e2e)', () => {
         date: '2026-09-02',
         memo: 'Unbalanced opening',
         lines: [
-          { accountCode: '1000', debit: 1000 },
-          { accountCode: '3000', credit: 900 },
+          { accountCode: '1111', debit: 1000 },
+          { accountCode: '3100', credit: 900 },
         ],
       })
       .expect(400);
@@ -87,8 +87,8 @@ describe('Phase 2 double-entry engine (e2e)', () => {
         memo: 'Owner capital introduced',
         reference: 'OPEN-1',
         lines: [
-          { accountCode: '1000', debit: 50000 },
-          { accountCode: '3000', credit: 50000 },
+          { accountCode: '1111', debit: 50000 },
+          { accountCode: '3100', credit: 50000 },
         ],
       })
       .expect(201);
@@ -115,8 +115,8 @@ describe('Phase 2 double-entry engine (e2e)', () => {
         date: '2026-09-02',
         memo: 'Office supplies from cash',
         lines: [
-          { accountCode: '5200', debit: 2500.5 },
-          { accountCode: '1000', credit: 2500.5 },
+          { accountCode: '5240', debit: 2500.5 },
+          { accountCode: '1111', credit: 2500.5 },
         ],
       })
       .expect(201);
@@ -139,8 +139,8 @@ describe('Phase 2 double-entry engine (e2e)', () => {
         date: '2026-09-02',
         memo: 'Unauthorized',
         lines: [
-          { accountCode: '1000', debit: 10 },
-          { accountCode: '3000', credit: 10 },
+          { accountCode: '1111', debit: 10 },
+          { accountCode: '3100', credit: 10 },
         ],
       })
       .expect(403);
@@ -156,8 +156,8 @@ describe('Phase 2 double-entry engine (e2e)', () => {
         date: '2026-08-15',
         memo: 'gbl-2026-08-15-Cash in Hand-Owner Equity-',
         lines: [
-          { accountCode: '1000', debit: 1_000 },
-          { accountCode: '3000', credit: 1_000 },
+          { accountCode: '1111', debit: 1_000 },
+          { accountCode: '3100', credit: 1_000 },
         ],
       })
       .expect(201);
@@ -187,8 +187,8 @@ describe('Phase 2 double-entry engine (e2e)', () => {
         date: '2026-08-16',
         memo: 'gbl-2026-08-16-Cash in Hand-Owner Equity-',
         lines: [
-          { accountCode: '1000', debit: 1_500 },
-          { accountCode: '3000', credit: 1_500 },
+          { accountCode: '1111', debit: 1_500 },
+          { accountCode: '3100', credit: 1_500 },
         ],
       })
       .expect(200);

@@ -53,13 +53,20 @@ import { ProcurementService } from './modules/procurement/procurement.service';
 import {
   createInventoryRouter,
   createItemsRouter,
+  createProductCategoriesRouter,
   createPurchaseOrdersRouter,
   createSuppliersRouter,
   createWarehousesRouter,
 } from './modules/procurement/procurement.routes';
 import { CustomersService } from './modules/customers/customers.service';
 import { createCustomersRouter } from './modules/customers/customers.routes';
+import { QuotationsService } from './modules/quotations/quotations.service';
+import { createQuotationsRouter } from './modules/quotations/quotations.routes';
+import { ReportTemplatesService } from './modules/templates/report-templates.service';
+import { createTemplatesRouter } from './modules/templates/templates.routes';
 import { seedDemoData } from './database/demo-seed';
+import path from 'node:path';
+import fs from 'node:fs';
 
 export async function createApp(): Promise<Express> {
   const config = loadConfig();
@@ -106,6 +113,7 @@ export async function createApp(): Promise<Express> {
   const procurementService = new ProcurementService(
     journalService,
     projectsService,
+    bankingService,
   );
   await procurementService.seedDefaults();
   const arApService = new ArApService(
@@ -114,6 +122,14 @@ export async function createApp(): Promise<Express> {
     accountsService,
     bankingService,
   );
+  journalService.setArApHooks({
+    onManualPosted: (journal, userId) =>
+      arApService.syncFromManualJournal(journal, userId),
+    assertJournalReversible: (journalId) =>
+      arApService.assertLinkedJournalReversible(journalId),
+    onJournalReversed: (journalId, userId) =>
+      arApService.voidLinkedToJournal(journalId, userId),
+  });
   const payrollService = new PayrollService(
     journalService,
     projectsService,
@@ -122,14 +138,25 @@ export async function createApp(): Promise<Express> {
   );
   const analyticsService = new AnalyticsService(ledgerService, bankingService);
   const employeesService = new EmployeesService(usersService);
+  const templatesService = new ReportTemplatesService();
+  const quotationsService = new QuotationsService(usersService);
 
   if (!config.mongodb.memory) {
-    await seedDemoData({ usersService, bankingService, journalService });
+    await seedDemoData({
+      usersService,
+      bankingService,
+      journalService,
+      arApService,
+    });
   }
 
   const app = express();
   app.set('trust proxy', 1);
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use(
     cors({
       origin: config.corsOrigins,
@@ -139,20 +166,33 @@ export async function createApp(): Promise<Express> {
   app.use(express.json({ limit: '3mb' }));
   app.use(cookieParser());
 
+  const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+  fs.mkdirSync(path.join(uploadsRoot, 'logos'), { recursive: true });
+  app.use('/uploads', express.static(uploadsRoot));
+
   app.use('/api/v1/health', createHealthRouter());
   app.use('/api/v1/auth', createAuthRouter(authService, usersService));
   app.use('/api/v1/users', createUsersRouter(usersService, authService));
   app.use(
     '/api/v1/employees',
-    createEmployeesRouter(employeesService, authService, usersService),
+    createEmployeesRouter(employeesService, advancesService, authService, usersService),
   );
   app.use(
     '/api/v1/customers',
     createCustomersRouter(customersService, authService, usersService),
   );
   app.use(
+    '/api/v1/quotations',
+    createQuotationsRouter(quotationsService, authService, usersService),
+  );
+  app.use(
     '/api/v1/accounts',
-    createAccountsRouter(accountsService, authService, usersService),
+    createAccountsRouter(
+      accountsService,
+      authService,
+      usersService,
+      journalService,
+    ),
   );
   app.use(
     '/api/v1/journals',
@@ -170,6 +210,10 @@ export async function createApp(): Promise<Express> {
   app.use(
     '/api/v1/reports',
     createReportsRouter(ledgerService, authService, usersService),
+  );
+  app.use(
+    '/api/v1/templates',
+    createTemplatesRouter(templatesService, authService, usersService),
   );
   app.use(
     '/api/v1/projects',
@@ -236,6 +280,10 @@ export async function createApp(): Promise<Express> {
   app.use(
     '/api/v1/items',
     createItemsRouter(procurementService, authService, usersService),
+  );
+  app.use(
+    '/api/v1/product-categories',
+    createProductCategoriesRouter(procurementService, authService, usersService),
   );
   app.use(
     '/api/v1/warehouses',

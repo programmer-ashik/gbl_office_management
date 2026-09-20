@@ -114,17 +114,46 @@ export class StatementLineInputDto {
   reference?: string;
 }
 
-export class ImportReconciliationDto {
-  @IsDateString()
-  asOf: string;
+export class PreviewStatementDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200000)
+  csv?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(12_000_000)
+  pdfBase64?: string;
+}
+
+export class ImportReconciliationDto {
+  @IsOptional()
+  @IsDateString()
+  asOf?: string;
+
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
-  statementBalance: number;
+  statementBalance?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  openingBalance?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  fileName?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(200000)
   csv?: string;
+
+  /** Base64-encoded PDF bank statement (optionally data-URL prefixed). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(12_000_000)
+  pdfBase64?: string;
 
   @IsOptional()
   @IsArray()
@@ -140,4 +169,42 @@ export class MatchReconciliationDto {
 
   @IsMongoId()
   ledgerLineId: string;
+}
+
+export class UnmatchReconciliationDto {
+  @IsMongoId()
+  statementLineId: string;
+}
+
+export enum BankAdjustKind {
+  BANK_CHARGE = 'bank_charge',
+  BANK_INTEREST = 'bank_interest',
+}
+
+export class AdjustReconciliationDto {
+  @IsEnum(BankAdjustKind)
+  kind: BankAdjustKind;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  amount: number;
+
+  @IsDateString()
+  date: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  memo?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  reference?: string;
+
+  /** Optional project tag for project-wise reporting (charges / interest). */
+  @IsOptional()
+  @IsMongoId()
+  projectId?: string;
 }

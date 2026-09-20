@@ -13,7 +13,12 @@ export interface ILedgerLine {
   accountName: string;
   accountType: AccountType;
   date: Date;
+  /** Journal header memo / memo number (e.g. gbl-YYYY-MM-DD-…). */
   memo: string;
+  /** Line-level narration for the transaction. */
+  description?: string;
+  /** Journal reference (bill/invoice/PO number). */
+  reference?: string;
   debitMinor: number;
   creditMinor: number;
   projectId?: Types.ObjectId;
@@ -49,6 +54,8 @@ const ledgerLineSchema = new Schema<ILedgerLine>(
     },
     date: { type: Date, required: true, index: true },
     memo: { type: String, required: true },
+    description: { type: String, trim: true, maxlength: 500 },
+    reference: { type: String, trim: true, maxlength: 120 },
     debitMinor: { type: Number, required: true, min: 0 },
     creditMinor: { type: Number, required: true, min: 0 },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', index: true },

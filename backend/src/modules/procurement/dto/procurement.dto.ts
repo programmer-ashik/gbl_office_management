@@ -4,6 +4,7 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsMongoId,
   IsNumber,
@@ -64,10 +65,11 @@ export class CreateSupplierDto {
 }
 
 export class CreateItemDto {
+  @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(32)
-  sku: string;
+  sku?: string;
 
   @IsString()
   @MinLength(2)
@@ -78,6 +80,184 @@ export class CreateItemDto {
   @MinLength(1)
   @MaxLength(24)
   unit: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  unitPrice?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  quantity?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  brand?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  model?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  countryOfOrigin?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  technicalSpecification?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  warranty?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  serialNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  barcode?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  warehouseId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  dataSheetUrl?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  categoryId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  subCategoryId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  supplierId?: string;
+}
+
+export class UpdateItemDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(32)
+  sku?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(160)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(24)
+  unit?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  unitPrice?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  quantity?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  brand?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  model?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  countryOfOrigin?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  technicalSpecification?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  warranty?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  serialNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  barcode?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  warehouseId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  dataSheetUrl?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  categoryId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  subCategoryId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  supplierId?: string;
+}
+
+export class CreateProductCategoryDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  code?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  parentId?: string;
 }
 
 export class PurchaseOrderLineDto {
@@ -137,6 +317,15 @@ export class ReceiveLineDto {
 export class ReceiveGoodsDto {
   @IsDateString()
   date: string;
+
+  @IsOptional()
+  @IsIn(['due', 'cash', 'bank'])
+  paymentMethod?: 'due' | 'cash' | 'bank';
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsMongoId()
+  treasuryId?: string;
 
   @IsArray()
   @ArrayMinSize(1)

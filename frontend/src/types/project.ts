@@ -27,6 +27,9 @@ export type CostBreakdownRow = {
   accountName: string
   accountType: string
   amount: number
+  debit: number
+  credit: number
+  date: string | null
   isDirectCost: boolean
 }
 
@@ -48,6 +51,32 @@ export type ProjectFinancials = {
   breakdown: CostBreakdownRow[]
 }
 
+export type ProjectMaterialIssue = {
+  id: string
+  issueNumber: string
+  date: string
+  sku: string
+  name: string
+  unit: string
+  quantity: number
+  unitCost: number
+  amount: number
+  journalNumber: string
+}
+
+export type ProjectMaterialSummary = {
+  itemId: string
+  sku: string
+  name: string
+  unit: string
+  brand: string | null
+  model: string | null
+  countryOfOrigin: string | null
+  quantity: number
+  unitCost: number
+  amount: number
+}
+
 export type Project = {
   id: string
   code: string
@@ -62,6 +91,8 @@ export type Project = {
   description: string | null
   createdAt: string | null
   financials: ProjectFinancials
+  materialIssues?: ProjectMaterialIssue[]
+  materialsSummary?: ProjectMaterialSummary[]
 }
 
 export type CreateProjectBody = {

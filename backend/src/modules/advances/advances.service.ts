@@ -17,18 +17,27 @@ import type { BankingService } from '../banking/banking.service';
 import type { ProjectsService } from '../projects/projects.service';
 import type { UsersService } from '../users/users.service';
 import { AdvanceModel, type AdvanceDocument } from './advance.model';
+import {
+  buildAdvanceVoucherPdf,
+  buildProjectAdvanceReportPdf,
+} from './advance-pdf';
+import {
+  ADVANCE_ASSET_CODE,
+  EMPLOYEE_PAYABLE_CODE,
+  assertExpenseAccount,
+  buildReimbursementJournalLines,
+  buildSettlementJournalLines,
+  classifySettlement,
+} from './settlement';
+import { JournalEntityType } from '../accounting/journal.enums';
+import { LedgerLineModel } from '../accounting/ledger.model';
 import type {
   ConfirmSettlementDto,
   CreateAdvanceDto,
   DisburseAdvanceDto,
+  ReimburseAdvanceDto,
   SubmitSettlementDto,
 } from './dto/advance.dto';
-import {
-  ADVANCE_ASSET_CODE,
-  assertExpenseAccount,
-  buildSettlementJournalLines,
-  classifySettlement,
-} from './settlement';
 
 const FINANCE_ROLES = new Set([Role.ADMIN, Role.ACCOUNTANT]);
 
@@ -59,7 +68,48 @@ export type PublicAdvance = {
   returnAccountCode: string | null;
   settlementJournalNumber: string | null;
   settledAt: string | null;
+  reimbursementDue: number;
+  reimbursedAmount: number;
+  reimbursementJournalNumber: string | null;
+  reimbursedAt: string | null;
   rejectionReason: string | null;
+};
+
+export type EmployeeLedgerStatus =
+  | 'DEBIT_BALANCE'
+  | 'CREDIT_BALANCE'
+  | 'SETTLED';
+
+export type EmployeeLedgerLine = {
+  id: string;
+  date: string;
+  journalEntryNumber: string;
+  accountCode: string;
+  accountName: string;
+  description: string;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+  voucherType: string;
+  status: EmployeeLedgerStatus;
+  advanceId: string | null;
+  canReimburse: boolean;
+};
+
+export type EmployeeLedgerReport = {
+  employeeId: string;
+  employeeName: string;
+  totalAdvancesGiven: number;
+  totalExpenseSettled: number;
+  totalReimbursed: number;
+  runningBalance: number;
+  status: EmployeeLedgerStatus;
+  lines: EmployeeLedgerLine[];
+  openReimbursements: Array<{
+    advanceId: string;
+    advanceNumber: string;
+    amount: number;
+  }>;
 };
 
 export class AdvancesService {
@@ -73,6 +123,15 @@ export class AdvancesService {
   ) {}
 
   toPublic(row: AdvanceDocument): PublicAdvance {
+    const disbursedMinor = row.disbursedMinor ?? 0;
+    const spentMinor = row.spentMinor ?? 0;
+    const reimbursedMinor = row.reimbursedMinor ?? 0;
+    const excessMinor =
+      row.settlementCase === SettlementCase.MORE && spentMinor > disbursedMinor
+        ? spentMinor - disbursedMinor
+        : 0;
+    const reimbursementDue = Math.max(0, excessMinor - reimbursedMinor);
+
     return {
       id: row._id.toString(),
       advanceNumber: row.advanceNumber,
@@ -104,6 +163,10 @@ export class AdvancesService {
       returnAccountCode: row.returnAccountCode ?? null,
       settlementJournalNumber: row.settlementJournalNumber ?? null,
       settledAt: row.settledAt ? row.settledAt.toISOString() : null,
+      reimbursementDue: fromMinorUnits(reimbursementDue),
+      reimbursedAmount: fromMinorUnits(reimbursedMinor),
+      reimbursementJournalNumber: row.reimbursementJournalNumber ?? null,
+      reimbursedAt: row.reimbursedAt ? row.reimbursedAt.toISOString() : null,
       rejectionReason: row.rejectionReason ?? null,
     };
   }
@@ -152,25 +215,190 @@ export class AdvancesService {
     return this.toPublic(created);
   }
 
-  async list(actor: AuthenticatedUser): Promise<PublicAdvance[]> {
-    let filter: Record<string, unknown> = {};
+  async list(
+    actor: AuthenticatedUser,
+    filters?: {
+      projectId?: string
+      employeeId?: string
+      startDate?: string
+      endDate?: string
+      status?: string
+      page?: number
+      pageSize?: number
+    },
+  ): Promise<{
+    items: PublicAdvance[]
+    total: number
+    page: number
+    pageSize: number
+  }> {
+    const and: Record<string, unknown>[] = []
+
     if (this.isFinance(actor)) {
-      filter = {};
+      // no ownership restriction
     } else if (actor.role === Role.PROJECT_MANAGER) {
-      const projectIds = await this.projectsService.managedProjectIds(actor);
-      filter = {
+      const projectIds = await this.projectsService.managedProjectIds(actor)
+      and.push({
         $or: [
           { employeeId: new Types.ObjectId(actor.userId) },
           { projectId: { $in: projectIds } },
         ],
-      };
+      })
     } else {
-      filter = { employeeId: new Types.ObjectId(actor.userId) };
+      and.push({ employeeId: new Types.ObjectId(actor.userId) })
     }
-    const rows = await AdvanceModel.find(filter)
-      .sort({ requestedAt: -1, advanceNumber: -1 })
-      .exec();
-    return rows.map((row) => this.toPublic(row));
+
+    if (filters?.projectId && Types.ObjectId.isValid(filters.projectId)) {
+      and.push({ projectId: new Types.ObjectId(filters.projectId) })
+    }
+    if (filters?.employeeId && Types.ObjectId.isValid(filters.employeeId)) {
+      and.push({ employeeId: new Types.ObjectId(filters.employeeId) })
+    }
+    if (filters?.status) {
+      and.push({ status: filters.status })
+    }
+    if (filters?.startDate || filters?.endDate) {
+      const range: Record<string, Date> = {}
+      if (filters.startDate) {
+        const start = new Date(filters.startDate)
+        if (!Number.isNaN(start.getTime())) range.$gte = start
+      }
+      if (filters.endDate) {
+        const end = new Date(filters.endDate)
+        if (!Number.isNaN(end.getTime())) {
+          end.setUTCHours(23, 59, 59, 999)
+          range.$lte = end
+        }
+      }
+      if (Object.keys(range).length > 0) {
+        and.push({ requestedAt: range })
+      }
+    }
+
+    const query = and.length > 0 ? { $and: and } : {}
+    const page = Math.max(1, filters?.page ?? 1)
+    const pageSize = Math.min(100, Math.max(1, filters?.pageSize ?? 50))
+    const skip = (page - 1) * pageSize
+
+    const [total, rows] = await Promise.all([
+      AdvanceModel.countDocuments(query).exec(),
+      AdvanceModel.find(query)
+        .sort({ requestedAt: -1, advanceNumber: -1 })
+        .skip(skip)
+        .limit(pageSize)
+        .exec(),
+    ])
+
+    return {
+      items: rows.map((row) => this.toPublic(row)),
+      total,
+      page,
+      pageSize,
+    }
+  }
+
+  async listDocumentsForProject(
+    projectId: string,
+    actor: AuthenticatedUser,
+    filters?: { employeeId?: string; startDate?: string; endDate?: string },
+  ): Promise<AdvanceDocument[]> {
+    const listed = await this.list(actor, {
+      projectId,
+      employeeId: filters?.employeeId,
+      startDate: filters?.startDate,
+      endDate: filters?.endDate,
+      page: 1,
+      pageSize: 100,
+    })
+    if (listed.total === 0) return []
+    // Load all matching pages for the PDF (cap 500)
+    const allIds: string[] = [...listed.items.map((row) => row.id)]
+    const pages = Math.min(5, Math.ceil(listed.total / listed.pageSize))
+    for (let page = 2; page <= pages; page += 1) {
+      const next = await this.list(actor, {
+        projectId,
+        employeeId: filters?.employeeId,
+        startDate: filters?.startDate,
+        endDate: filters?.endDate,
+        page,
+        pageSize: listed.pageSize,
+      })
+      allIds.push(...next.items.map((row) => row.id))
+    }
+    return AdvanceModel.find({
+      _id: { $in: allIds.map((id) => new Types.ObjectId(id)) },
+    })
+      .sort({ requestedAt: -1 })
+      .exec()
+  }
+
+  async buildVoucherPdf(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<{ filename: string; buffer: Buffer }> {
+    const row = await this.findVisibleOrFail(id, actor)
+    const buffer = await buildAdvanceVoucherPdf(row)
+    return {
+      filename: `${row.advanceNumber}-voucher.pdf`,
+      buffer,
+    }
+  }
+
+  async buildProjectReportPdf(
+    projectId: string,
+    actor: AuthenticatedUser,
+    filters?: { employeeId?: string; startDate?: string; endDate?: string },
+  ): Promise<{ filename: string; buffer: Buffer }> {
+    if (!Types.ObjectId.isValid(projectId)) {
+      throw notFound('Project not found')
+    }
+    const project = await this.projectsService.findByIdOrFail(projectId)
+    if (actor.role === Role.PROJECT_MANAGER) {
+      this.projectsService.assertCanAccessProject(actor, project)
+    } else if (!this.isFinance(actor) && actor.role !== Role.ADMIN) {
+      // employees can only export projects they have advances on — still require finance for summary
+      this.assertFinance(actor)
+    }
+
+    const rows = await this.listDocumentsForProject(projectId, actor, filters)
+    const buffer = await buildProjectAdvanceReportPdf({
+      projectCode: project.code,
+      projectName: project.name,
+      rows,
+    })
+    return {
+      filename: `${project.code}-advance-report.pdf`,
+      buffer,
+    }
+  }
+
+  async getEmployeeAdvanceBalance(
+    employeeId: string,
+    actor: AuthenticatedUser,
+  ): Promise<{ employeeId: string; unsettledAdvanceBalance: number }> {
+    this.assertCanViewEmployeeLedger(employeeId, actor)
+    if (!Types.ObjectId.isValid(employeeId)) {
+      throw notFound('Employee not found')
+    }
+    const rows = await LedgerLineModel.aggregate<{ balance: number }>([
+      {
+        $match: {
+          entityType: JournalEntityType.EMPLOYEE,
+          entityId: new Types.ObjectId(employeeId),
+          accountCode: ADVANCE_ASSET_CODE,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          balance: { $sum: { $subtract: ['$debitMinor', '$creditMinor'] } },
+        },
+      },
+    ])
+    return {
+      employeeId,
+      unsettledAdvanceBalance: fromMinorUnits(rows[0]?.balance ?? 0),
+    }
   }
 
   async getById(id: string, actor: AuthenticatedUser): Promise<PublicAdvance> {
@@ -246,6 +474,8 @@ export class AdvancesService {
             debit: amount,
             description: `Advance to ${row.employeeName}`,
             projectId: row.projectId.toString(),
+            entityType: JournalEntityType.EMPLOYEE,
+            entityId: row.employeeId.toString(),
           },
           {
             accountCode: treasury.glAccountCode,
@@ -333,6 +563,7 @@ export class AdvancesService {
 
     const { lines } = buildSettlementJournalLines({
       projectId: row.projectId.toString(),
+      employeeId: row.employeeId.toString(),
       advancedMinor,
       vouchers: row.vouchers,
       returnAccountCode:
@@ -350,6 +581,10 @@ export class AdvancesService {
         memo: `Advance ${row.advanceNumber} settlement (${settlementCase})`,
         reference: row.advanceNumber,
         projectId: row.projectId.toString(),
+        journalType:
+          settlementCase === SettlementCase.MORE
+            ? 'employee_settlement'
+            : 'employee_settlement',
         lines,
       },
       actor.userId,
@@ -365,8 +600,213 @@ export class AdvancesService {
     row.settlementJournalNumber = journal.entryNumber;
     row.settledAt = date;
     row.settledBy = new Types.ObjectId(actor.userId);
+    row.reimbursedMinor = 0;
     await row.save();
     return this.toPublic(row);
+  }
+
+  async reimburse(
+    id: string,
+    dto: ReimburseAdvanceDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicAdvance> {
+    this.assertFinance(actor);
+    const row = await this.findByIdOrFail(id);
+    if (row.status !== AdvanceStatus.SETTLED) {
+      throw badRequest('Only a settled advance can be reimbursed');
+    }
+    if (row.settlementCase !== SettlementCase.MORE) {
+      throw badRequest('Reimbursement applies only when spend exceeded the advance');
+    }
+
+    const advancedMinor = row.disbursedMinor ?? row.requestedMinor;
+    const spentMinor = row.spentMinor ?? 0;
+    const excessMinor = Math.max(0, spentMinor - advancedMinor);
+    const already = row.reimbursedMinor ?? 0;
+    const dueMinor = excessMinor - already;
+    if (dueMinor <= 0) {
+      throw badRequest('No reimbursement is due on this advance');
+    }
+
+    const treasury = await this.bankingService.requireActive(dto.treasuryId);
+    const date = dto.date ? new Date(dto.date) : new Date();
+    if (Number.isNaN(date.getTime())) {
+      throw badRequest('Invalid reimbursement date');
+    }
+
+    const journal = await this.journalService.post(
+      {
+        date: date.toISOString(),
+        memo:
+          dto.memo?.trim() ||
+          `Reimburse excess on advance ${row.advanceNumber}`,
+        reference: row.advanceNumber,
+        projectId: row.projectId.toString(),
+        journalType: 'employee_settlement',
+        lines: buildReimbursementJournalLines({
+          employeeId: row.employeeId.toString(),
+          amountMinor: dueMinor,
+          treasuryAccountCode: treasury.glAccountCode,
+          description: `Reimburse ${row.employeeName} · ${row.advanceNumber}`,
+        }),
+      },
+      actor.userId,
+      'system',
+    );
+
+    row.reimbursedMinor = already + dueMinor;
+    row.reimbursedAt = date;
+    row.reimbursedBy = new Types.ObjectId(actor.userId);
+    row.reimbursementTreasuryId = new Types.ObjectId(treasury.id);
+    row.reimbursementAccountCode = treasury.glAccountCode;
+    row.reimbursementJournalId = new Types.ObjectId(journal.id);
+    row.reimbursementJournalNumber = journal.entryNumber;
+    await row.save();
+    return this.toPublic(row);
+  }
+
+  async getEmployeeLedger(
+    employeeId: string,
+    actor: AuthenticatedUser,
+  ): Promise<EmployeeLedgerReport> {
+    this.assertCanViewEmployeeLedger(employeeId, actor);
+    if (!Types.ObjectId.isValid(employeeId)) {
+      throw notFound('Employee not found');
+    }
+    const employee = await this.usersService.findByIdOrFail(employeeId);
+    const employeeOid = new Types.ObjectId(employeeId);
+
+    const advances = await AdvanceModel.find({ employeeId: employeeOid })
+      .sort({ requestedAt: 1 })
+      .exec();
+
+    const ledgerRows = await LedgerLineModel.find({
+      entityType: JournalEntityType.EMPLOYEE,
+      entityId: employeeOid,
+      accountCode: { $in: [ADVANCE_ASSET_CODE, EMPLOYEE_PAYABLE_CODE] },
+    })
+      .sort({ date: 1, journalEntryNumber: 1, createdAt: 1 })
+      .exec();
+
+    const byJournal = new Map(
+      advances.flatMap((adv) => {
+        const pairs: Array<[string, AdvanceDocument]> = [];
+        if (adv.disbursementJournalNumber) {
+          pairs.push([adv.disbursementJournalNumber, adv]);
+        }
+        if (adv.settlementJournalNumber) {
+          pairs.push([adv.settlementJournalNumber, adv]);
+        }
+        if (adv.reimbursementJournalNumber) {
+          pairs.push([adv.reimbursementJournalNumber, adv]);
+        }
+        return pairs;
+      }),
+    );
+
+    let runningMinor = 0;
+    const lines: EmployeeLedgerLine[] = [];
+
+    for (const row of ledgerRows) {
+      runningMinor += row.debitMinor - row.creditMinor;
+      const linked = byJournal.get(row.journalEntryNumber);
+      const status = this.balanceStatus(runningMinor);
+      const openDue =
+        linked &&
+        linked.settlementCase === SettlementCase.MORE &&
+        (linked.spentMinor ?? 0) - (linked.disbursedMinor ?? 0) -
+          (linked.reimbursedMinor ?? 0) >
+          0;
+
+      lines.push({
+        id: row._id.toString(),
+        date: row.date.toISOString(),
+        journalEntryNumber: row.journalEntryNumber,
+        accountCode: row.accountCode,
+        accountName: row.accountName,
+        description: row.memo,
+        debit: fromMinorUnits(row.debitMinor),
+        credit: fromMinorUnits(row.creditMinor),
+        runningBalance: fromMinorUnits(runningMinor),
+        voucherType: this.voucherTypeLabel(row.accountCode, row.debitMinor, row.creditMinor),
+        status,
+        advanceId: linked ? linked._id.toString() : null,
+        canReimburse: Boolean(openDue && runningMinor < 0 && this.isFinance(actor)),
+      });
+    }
+
+    const totalAdvancesGiven = fromMinorUnits(
+      advances.reduce((sum, row) => sum + (row.disbursedMinor ?? 0), 0),
+    );
+    const totalExpenseSettled = fromMinorUnits(
+      advances.reduce((sum, row) => sum + (row.spentMinor ?? 0), 0),
+    );
+    const totalReimbursed = fromMinorUnits(
+      advances.reduce((sum, row) => sum + (row.reimbursedMinor ?? 0), 0),
+    );
+
+    const openReimbursements = advances
+      .filter((row) => row.settlementCase === SettlementCase.MORE)
+      .map((row) => {
+        const due =
+          (row.spentMinor ?? 0) -
+          (row.disbursedMinor ?? 0) -
+          (row.reimbursedMinor ?? 0);
+        return {
+          advanceId: row._id.toString(),
+          advanceNumber: row.advanceNumber,
+          amount: fromMinorUnits(Math.max(0, due)),
+        };
+      })
+      .filter((row) => row.amount > 0);
+
+    return {
+      employeeId,
+      employeeName: `${employee.firstName} ${employee.lastName}`.trim(),
+      totalAdvancesGiven,
+      totalExpenseSettled,
+      totalReimbursed,
+      runningBalance: fromMinorUnits(runningMinor),
+      status: this.balanceStatus(runningMinor),
+      lines,
+      openReimbursements,
+    };
+  }
+
+  private balanceStatus(runningMinor: number): EmployeeLedgerStatus {
+    if (runningMinor > 0) return 'DEBIT_BALANCE';
+    if (runningMinor < 0) return 'CREDIT_BALANCE';
+    return 'SETTLED';
+  }
+
+  private voucherTypeLabel(
+    accountCode: string,
+    debitMinor: number,
+    creditMinor: number,
+  ): string {
+    if (accountCode === ADVANCE_ASSET_CODE && debitMinor > 0) {
+      return 'Advance disbursement';
+    }
+    if (accountCode === ADVANCE_ASSET_CODE && creditMinor > 0) {
+      return 'Advance settlement';
+    }
+    if (accountCode === EMPLOYEE_PAYABLE_CODE && creditMinor > 0) {
+      return 'Reimbursement due';
+    }
+    if (accountCode === EMPLOYEE_PAYABLE_CODE && debitMinor > 0) {
+      return 'Reimbursement payout';
+    }
+    return 'Employee ledger';
+  }
+
+  private assertCanViewEmployeeLedger(
+    employeeId: string,
+    actor: AuthenticatedUser,
+  ): void {
+    if (this.isFinance(actor) || actor.userId === employeeId) {
+      return;
+    }
+    throw forbidden('You do not have access to this employee ledger');
   }
 
   private async prepareVouchers(lines: SubmitSettlementDto['lines']) {

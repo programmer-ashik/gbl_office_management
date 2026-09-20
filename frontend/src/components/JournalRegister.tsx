@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { ExpandableText } from './ExpandableText'
 import { ActionMenu, Select } from './ui'
 import {
   JOURNAL_STATUS_LABEL,
@@ -13,8 +14,15 @@ import {
 import type { Project } from '../types/project'
 import {
   downloadJournalVoucher,
+  loadJournalVoucherTemplate,
   previewJournalVoucher,
 } from '../utils/journalVoucherPdf'
+
+async function getJvTemplate() {
+  return loadJournalVoucherTemplate(() => api.journalVoucherTemplate(), {
+    force: true,
+  })
+}
 
 export function journalEditDisabledReason(entry: JournalEntry): string | undefined {
   if (entry.source === 'system') {
@@ -78,6 +86,8 @@ type JournalRegisterProps = {
   refreshKey?: number | string
 }
 
+const PAGE_SIZE = 15
+
 export function JournalRegister({
   title = 'Journal register',
   description,
@@ -99,6 +109,7 @@ export function JournalRegister({
   const [searchDebounced, setSearchDebounced] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearchDebounced(search.trim()), 350)
@@ -128,6 +139,7 @@ export function JournalRegister({
     ])
     setEntries(journals)
     setProjects(projectRows)
+    setPage(1)
   }
 
   useEffect(() => {
@@ -204,8 +216,8 @@ export function JournalRegister({
     try {
       const voucher =
         entry.lines && entry.lines.length > 0 ? entry : await api.journal(entry.id)
-      if (action === 'preview') previewJournalVoucher(voucher)
-      else downloadJournalVoucher(voucher)
+      if (action === 'preview') await previewJournalVoucher(voucher, await getJvTemplate())
+      else await downloadJournalVoucher(voucher, await getJvTemplate())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to open voucher PDF')
     } finally {
@@ -243,6 +255,15 @@ export function JournalRegister({
     })),
   ]
 
+  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pageEntries = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE
+    return entries.slice(start, start + PAGE_SIZE)
+  }, [entries, currentPage])
+  const rangeStart = entries.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1
+  const rangeEnd = Math.min(currentPage * PAGE_SIZE, entries.length)
+
   return (
     <section className="table-card report-section" id="report">
       <div className="table-head">
@@ -256,7 +277,7 @@ export function JournalRegister({
       </div>
 
       {showRangeFilter ? (
-        <form className="filter-bar" onSubmit={(event) => void onFilter(event)}>
+        <form className="filter-bar filter-bar-compact" onSubmit={(event) => void onFilter(event)}>
           <label>
             Search
             <input
@@ -339,7 +360,7 @@ export function JournalRegister({
       {error ? <p className="form-error">{error}</p> : null}
 
       <div className="journal-lines-scroll">
-        <table className="journal-lines-table">
+        <table className="journal-lines-table journal-register-table">
           <thead>
             <tr>
               <th>Number</th>
@@ -354,7 +375,7 @@ export function JournalRegister({
             </tr>
           </thead>
           <tbody>
-            {entries.map((entry) => {
+            {pageEntries.map((entry) => {
               const editReason = journalEditDisabledReason(entry)
               const deleteReason = journalDeleteDisabledReason(entry)
               const reverseReason = journalReverseDisabledReason(entry)
@@ -374,11 +395,13 @@ export function JournalRegister({
                       {JOURNAL_STATUS_LABEL[entry.status] ?? entry.status}
                     </span>
                   </td>
-                  <td>{entry.memo}</td>
+                  <td>
+                    <ExpandableText text={entry.memo} maxChars={48} />
+                  </td>
                   <td>
                     {entry.projectId
                       ? (projects.find((project) => project.id === entry.projectId)
-                          ?.code ?? 'Tagged')
+                          ?.name ?? 'Tagged')
                       : '—'}
                   </td>
                   <td className="num">{money(entry.totalDebit)}</td>
@@ -445,6 +468,35 @@ export function JournalRegister({
           </tbody>
         </table>
       </div>
+
+      {entries.length > 0 ? (
+        <div className="table-pagination">
+          <p className="muted">
+            Showing {rangeStart}–{rangeEnd} of {entries.length}
+          </p>
+          <div className="form-actions">
+            <button
+              type="button"
+              className="ghost"
+              disabled={currentPage <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </button>
+            <span className="pagination-page">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              type="button"
+              className="ghost"
+              disabled={currentPage >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

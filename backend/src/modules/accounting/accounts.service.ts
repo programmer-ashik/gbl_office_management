@@ -4,8 +4,13 @@ import {
   normalBalanceOf,
 } from '../../common/enums/account-type.enum';
 import { badRequest, conflict, notFound } from '../../common/errors/app-error';
+import { TreasuryAccountModel } from '../banking/treasury-account.model';
 import { AccountModel, type AccountDocument } from './account.model';
-import { DEFAULT_CHART_OF_ACCOUNTS } from './coa.seed';
+import {
+  loadChartOfAccountsJson,
+  normalizeChartOfAccounts,
+  resolveChartOfAccountsPath,
+} from './coa-from-json';
 import type { CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
 import { LedgerLineModel } from './ledger.model';
 
@@ -20,6 +25,14 @@ export type PublicAccount = {
   isSystem: boolean;
   isPostable: boolean;
   isActive: boolean;
+};
+
+export type CoaSeedResult = {
+  created: number;
+  updated: number;
+  skipped: number;
+  total: number;
+  path: string;
 };
 
 export class AccountsService {
@@ -38,24 +51,119 @@ export class AccountsService {
     };
   }
 
+  /**
+   * App bootstrap: ensure CoA from chart_of_accounts.json is present.
+   * Create-only for missing codes — never overwrites existing accounts
+   * (preserves historical GL / treasury links).
+   */
   async seedDefaults(): Promise<void> {
-    const count = await AccountModel.countDocuments().exec();
-    if (count > 0) {
-      return;
+    try {
+      const result = await this.seedFromChartOfAccountsJson({ forceUpdate: false });
+      console.log(
+        `Chart of Accounts: created=${result.created}, updated=${result.updated}, skipped=${result.skipped} (${result.path})`,
+      );
+    } catch (err) {
+      console.warn(
+        'Chart of Accounts JSON seed skipped:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  /**
+   * Idempotent seed from chart_of_accounts.json (parents before children).
+   * - Missing codes are inserted.
+   * - forceUpdate=false: existing codes are left untouched (no duplicates).
+   * - forceUpdate=true: sync name/parent/type/postable when safe
+   *   (no ledger activity and not a treasury GL code).
+   */
+  async seedFromChartOfAccountsJson(
+    options: { filePath?: string; forceUpdate?: boolean } = {},
+  ): Promise<CoaSeedResult> {
+    const path = options.filePath ?? resolveChartOfAccountsPath();
+    const forceUpdate = options.forceUpdate === true;
+    const normalized = normalizeChartOfAccounts(loadChartOfAccountsJson(path));
+
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const row of normalized) {
+      const existing = await AccountModel.findOne({ code: row.code }).exec();
+      if (!existing) {
+        await AccountModel.create(row);
+        created += 1;
+        continue;
+      }
+
+      if (!forceUpdate) {
+        // Keep labels in sync with chart JSON (safe rename only).
+        if (existing.name !== row.name) {
+          existing.name = row.name;
+          await existing.save();
+          updated += 1;
+        } else {
+          skipped += 1;
+        }
+        continue;
+      }
+
+      const [hasLedger, treasuryLinked] = await Promise.all([
+        LedgerLineModel.exists({ accountId: existing._id }),
+        TreasuryAccountModel.exists({ glAccountCode: existing.code }),
+      ]);
+
+      if (hasLedger || treasuryLinked) {
+        skipped += 1;
+        continue;
+      }
+
+      let dirty = false;
+      if (existing.name !== row.name) {
+        existing.name = row.name;
+        dirty = true;
+      }
+      if (existing.type !== row.type) {
+        existing.type = row.type;
+        dirty = true;
+      }
+      if (existing.normalBalance !== row.normalBalance) {
+        existing.normalBalance = row.normalBalance;
+        dirty = true;
+      }
+      const nextParent = row.parentCode ?? undefined;
+      if ((existing.parentCode ?? undefined) !== nextParent) {
+        existing.parentCode = nextParent;
+        dirty = true;
+      }
+      if (existing.isPostable !== row.isPostable) {
+        existing.isPostable = row.isPostable;
+        dirty = true;
+      }
+      if (!existing.isSystem) {
+        existing.isSystem = true;
+        dirty = true;
+      }
+      if (row.description && existing.description !== row.description) {
+        existing.description = row.description;
+        dirty = true;
+      }
+
+      if (dirty) {
+        await existing.save();
+        updated += 1;
+      } else {
+        skipped += 1;
+      }
     }
 
-    await AccountModel.insertMany(
-      DEFAULT_CHART_OF_ACCOUNTS.map((account) => ({
-        ...account,
-        normalBalance: normalBalanceOf(account.type),
-        isSystem: true,
-        isPostable: true,
-        isActive: true,
-      })),
-    );
-    console.log(
-      `Seeded ${DEFAULT_CHART_OF_ACCOUNTS.length} chart of accounts records`,
-    );
+    return {
+      created,
+      updated,
+      skipped,
+      total: normalized.length,
+      path,
+    };
   }
 
   async create(dto: CreateAccountDto): Promise<PublicAccount> {
@@ -84,6 +192,77 @@ export class AccountsService {
     });
 
     return this.toPublic(account);
+  }
+
+  /**
+   * Suggest next free account code under a parent (or within the type series).
+   * Does not create an account — safe for UI preview.
+   */
+  async suggestNextCode(
+    type: AccountType,
+    parentCode?: string,
+  ): Promise<{ code: string }> {
+    const parent = parentCode?.trim().toUpperCase() || undefined;
+    if (parent) {
+      const parentAccount = await this.findByCodeOrFail(parent);
+      if (parentAccount.type !== type) {
+        throw badRequest('Parent account must be the same type');
+      }
+      if (parentAccount.isPostable) {
+        throw badRequest('Parent must be a header (non-postable) account');
+      }
+    }
+
+    const siblings = await AccountModel.find(
+      parent
+        ? { parentCode: parent }
+        : {
+            type,
+            $or: [{ parentCode: null }, { parentCode: { $exists: false } }, { parentCode: '' }],
+          },
+    )
+      .select('code')
+      .exec();
+
+    const used = new Set(
+      (await AccountModel.find().select('code').exec()).map((row) => row.code),
+    );
+
+    const siblingNums = siblings
+      .map((row) => Number.parseInt(row.code, 10))
+      .filter((n) => Number.isFinite(n));
+
+    let candidate: number;
+    if (parent) {
+      const parentNum = Number.parseInt(parent, 10);
+      candidate = siblingNums.length
+        ? Math.max(...siblingNums) + 1
+        : Number.isFinite(parentNum)
+          ? parentNum + 1
+          : 1000;
+    } else {
+      const seriesStart =
+        type === AccountType.ASSET
+          ? 1000
+          : type === AccountType.LIABILITY
+            ? 2000
+            : type === AccountType.EQUITY
+              ? 3000
+              : type === AccountType.REVENUE
+                ? 4000
+                : 5000;
+      candidate = siblingNums.length
+        ? Math.max(...siblingNums) + 1
+        : seriesStart;
+    }
+
+    for (let i = 0; i < 500; i += 1) {
+      const code = String(candidate + i);
+      if (!used.has(code) && /^[A-Z0-9-]{3,12}$/i.test(code)) {
+        return { code };
+      }
+    }
+    throw badRequest('Unable to suggest a free account code');
   }
 
   async list(type?: AccountType): Promise<PublicAccount[]> {
@@ -152,5 +331,22 @@ export class AccountsService {
     if (dto.isPostable !== undefined) account.isPostable = dto.isPostable;
     await account.save();
     return this.toPublic(account);
+  }
+
+  async remove(id: string): Promise<{ id: string; code: string }> {
+    const account = await this.findByIdOrFail(id);
+    if (account.isSystem) {
+      throw badRequest('Cannot delete a system account');
+    }
+    const children = await AccountModel.exists({ parentCode: account.code });
+    if (children) {
+      throw badRequest('Cannot delete an account that has child accounts');
+    }
+    const posted = await LedgerLineModel.exists({ accountId: account._id });
+    if (posted) {
+      throw badRequest('Cannot delete an account with ledger activity');
+    }
+    await account.deleteOne();
+    return { id: account._id.toString(), code: account.code };
   }
 }

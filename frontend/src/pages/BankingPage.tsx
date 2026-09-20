@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { MetricCard } from '../components/MetricCard'
 import { Modal, Select } from '../components/ui'
 import { money } from '../types/accounting'
 import {
@@ -82,22 +83,25 @@ export function BankingPage() {
         </div>
       </header>
 
-      <section className="grid">
-        <article className="stat-card">
-          <h3>Cash & petty cash</h3>
-          <p className="stat-value">{money(cashTotal)}</p>
-          <p className="muted">Hand cash and petty floats</p>
-        </article>
-        <article className="stat-card">
-          <h3>Banks & wallets</h3>
-          <p className="stat-value">{money(bankTotal)}</p>
-          <p className="muted">Commercial banks, bKash, Nagad</p>
-        </article>
-        <article className="stat-card">
-          <h3>Channels</h3>
-          <p className="stat-value">{accounts.length}</p>
-          <p className="muted">Each channel posts through the Chart of Accounts</p>
-        </article>
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="teal"
+          title="Cash & petty cash"
+          value={money(cashTotal)}
+          meta="Hand cash and petty floats"
+        />
+        <MetricCard
+          variant="blue"
+          title="Banks & wallets"
+          value={money(bankTotal)}
+          meta="Commercial banks, bKash, Nagad"
+        />
+        <MetricCard
+          variant="purple"
+          title="Channels"
+          value={accounts.length}
+          meta="Each channel posts through the Chart of Accounts"
+        />
       </section>
 
       <Modal open={modalOpen} title="Add channel" onClose={() => setModalOpen(false)}>

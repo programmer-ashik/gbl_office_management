@@ -1,9 +1,34 @@
+import { Types } from 'mongoose';
 import { HydratedDocument, Model, Schema, model, models } from 'mongoose';
 
 export interface IItem {
   sku: string;
   name: string;
   unit: string;
+  description?: string;
+  /** List / quote price in minor units */
+  unitPriceMinor?: number;
+  /** Default catalog quantity hint */
+  quantity?: number;
+  brand?: string;
+  model?: string;
+  /** Country of manufacture */
+  countryOfOrigin?: string;
+  technicalSpecification?: string;
+  warranty?: string;
+  /** Unique product serial */
+  serialNumber?: string;
+  /**
+   * Barcode payload: {warehouseCode}-{categoryCode}-{serialNumber}
+   */
+  barcode?: string;
+  warehouseId?: Types.ObjectId;
+  warehouseCode?: string;
+  dataSheetUrl?: string;
+  categoryId?: Types.ObjectId;
+  subCategoryId?: Types.ObjectId;
+  supplierId?: Types.ObjectId;
+  supplierName?: string;
   isActive: boolean;
   createdAt?: Date;
   updatedAt?: Date;
@@ -16,6 +41,46 @@ const itemSchema = new Schema<IItem>(
     sku: { type: String, required: true, unique: true, uppercase: true, trim: true },
     name: { type: String, required: true, trim: true, maxlength: 160 },
     unit: { type: String, required: true, trim: true, maxlength: 24 },
+    description: { type: String, trim: true, maxlength: 2000 },
+    unitPriceMinor: { type: Number, min: 0 },
+    quantity: { type: Number, min: 0 },
+    brand: { type: String, trim: true, maxlength: 120 },
+    model: { type: String, trim: true, maxlength: 120 },
+    countryOfOrigin: { type: String, trim: true, maxlength: 120 },
+    technicalSpecification: { type: String, trim: true, maxlength: 2000 },
+    warranty: { type: String, trim: true, maxlength: 120 },
+    serialNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      maxlength: 64,
+      sparse: true,
+      unique: true,
+    },
+    barcode: { type: String, trim: true, maxlength: 120, index: true },
+    warehouseId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Warehouse',
+      index: true,
+    },
+    warehouseCode: { type: String, trim: true, uppercase: true, maxlength: 32 },
+    dataSheetUrl: { type: String, trim: true, maxlength: 500 },
+    categoryId: {
+      type: Schema.Types.ObjectId,
+      ref: 'ProductCategory',
+      index: true,
+    },
+    subCategoryId: {
+      type: Schema.Types.ObjectId,
+      ref: 'ProductCategory',
+      index: true,
+    },
+    supplierId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Supplier',
+      index: true,
+    },
+    supplierName: { type: String, trim: true, maxlength: 160 },
     isActive: { type: Boolean, required: true, default: true, index: true },
   },
   { timestamps: true, collection: 'items' },

@@ -15,22 +15,33 @@ import {
 } from '../../common/utils/quantity';
 import { CounterModel } from '../accounting/counter.model';
 import type { JournalService } from '../accounting/journal.service';
+import { SystemAccountCode } from '../accounting/system-account-codes';
+import type { BankingService } from '../banking/banking.service';
+import { isBankLike, isCashLike } from '../../common/enums/treasury-kind.enum';
 import type { ProjectsService } from '../projects/projects.service';
 import {
   buildIssueJournalLines,
   buildReceiptJournalLines,
   buildReturnJournalLines,
+  type ReceiptSettlement,
 } from './allocation';
 import type {
   CreateItemDto,
+  CreateProductCategoryDto,
   CreatePurchaseOrderDto,
   CreateSupplierDto,
   IssueStockDto,
   ReceiveGoodsDto,
   ReturnGoodsDto,
+  UpdateItemDto,
 } from './dto/procurement.dto';
 import { GoodsMovementModel } from './goods-movement.model';
 import { ItemModel, type ItemDocument } from './item.model';
+import {
+  ProductCategoryModel,
+  toPublicProductCategory,
+  type PublicProductCategory,
+} from './product-category.model';
 import {
   PurchaseOrderModel,
   type PurchaseOrderDocument,
@@ -66,6 +77,23 @@ export type PublicItem = {
   sku: string;
   name: string;
   unit: string;
+  description: string | null;
+  unitPrice: number | null;
+  quantity: number | null;
+  brand: string | null;
+  model: string | null;
+  countryOfOrigin: string | null;
+  technicalSpecification: string | null;
+  warranty: string | null;
+  serialNumber: string | null;
+  barcode: string | null;
+  warehouseId: string | null;
+  warehouseCode: string | null;
+  dataSheetUrl: string | null;
+  categoryId: string | null;
+  subCategoryId: string | null;
+  supplierId: string | null;
+  supplierName: string | null;
   isActive: boolean;
 };
 
@@ -146,6 +174,7 @@ export class ProcurementService {
   constructor(
     private readonly journalService: JournalService,
     private readonly projectsService: ProjectsService,
+    private readonly bankingService: BankingService,
   ) {}
 
   async seedDefaults(): Promise<void> {
@@ -184,6 +213,26 @@ export class ProcurementService {
       sku: row.sku,
       name: row.name,
       unit: row.unit,
+      description: row.description ?? null,
+      unitPrice:
+        row.unitPriceMinor != null
+          ? fromMinorUnits(row.unitPriceMinor)
+          : null,
+      quantity: row.quantity ?? null,
+      brand: row.brand ?? null,
+      model: row.model ?? null,
+      countryOfOrigin: row.countryOfOrigin ?? null,
+      technicalSpecification: row.technicalSpecification ?? null,
+      warranty: row.warranty ?? null,
+      serialNumber: row.serialNumber ?? null,
+      barcode: row.barcode ?? null,
+      warehouseId: row.warehouseId ? row.warehouseId.toString() : null,
+      warehouseCode: row.warehouseCode ?? null,
+      dataSheetUrl: row.dataSheetUrl ?? null,
+      categoryId: row.categoryId ? row.categoryId.toString() : null,
+      subCategoryId: row.subCategoryId ? row.subCategoryId.toString() : null,
+      supplierId: row.supplierId ? row.supplierId.toString() : null,
+      supplierName: row.supplierName ?? null,
       isActive: row.isActive,
     };
   }
@@ -316,24 +365,344 @@ export class ProcurementService {
 
   async createItem(dto: CreateItemDto, actor: AuthenticatedUser): Promise<PublicItem> {
     this.assertFinance(actor);
-    const sku = dto.sku.trim().toUpperCase();
+    const { categoryId, subCategoryId } = await this.resolveCategoryIds(
+      dto.categoryId,
+      dto.subCategoryId,
+    );
+
+    let categoryCode = 'GEN';
+    if (subCategoryId) {
+      const sub = await ProductCategoryModel.findById(subCategoryId).exec();
+      if (sub?.code) categoryCode = sub.code.toUpperCase();
+      else if (categoryId) {
+        const cat = await ProductCategoryModel.findById(categoryId).exec();
+        if (cat?.code) categoryCode = cat.code.toUpperCase();
+      }
+    } else if (categoryId) {
+      const cat = await ProductCategoryModel.findById(categoryId).exec();
+      if (cat?.code) categoryCode = cat.code.toUpperCase();
+    }
+
+    let warehouseId: Types.ObjectId | undefined;
+    let warehouseCode = 'WH01';
+    if (dto.warehouseId) {
+      const warehouse = await this.findWarehouseOrFail(dto.warehouseId);
+      warehouseId = warehouse._id;
+      warehouseCode = warehouse.code.toUpperCase();
+    } else {
+      const def = await WarehouseModel.findOne({
+        isDefault: true,
+        isActive: true,
+      }).exec();
+      if (def) {
+        warehouseId = def._id;
+        warehouseCode = def.code.toUpperCase();
+      }
+    }
+
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    let sku = dto.sku?.trim().toUpperCase() || '';
+    if (!sku) {
+      const counter = await CounterModel.findOneAndUpdate(
+        { key: `item-sku:${categoryCode}:${day}` },
+        { $inc: { seq: 1 } },
+        { upsert: true, new: true },
+      );
+      const seq = String(counter?.seq ?? 1).padStart(4, '0');
+      sku = `${categoryCode}-${day.slice(2)}-${seq}`;
+    }
     const existing = await ItemModel.findOne({ sku }).exec();
     if (existing) {
       throw badRequest(`SKU ${sku} already exists`);
+    }
+
+    let serialNumber = dto.serialNumber?.trim().toUpperCase() || '';
+    if (!serialNumber) {
+      const counter = await CounterModel.findOneAndUpdate(
+        { key: `item-serial:${day}` },
+        { $inc: { seq: 1 } },
+        { upsert: true, new: true },
+      );
+      const seq = String(counter?.seq ?? 1).padStart(5, '0');
+      serialNumber = `SN${day.slice(2)}${seq}`;
+    }
+    const serialClash = await ItemModel.findOne({ serialNumber }).exec();
+    if (serialClash) {
+      throw badRequest(`Serial ${serialNumber} already exists`);
+    }
+
+    const barcode =
+      dto.barcode?.trim().toUpperCase() ||
+      `${warehouseCode}-${categoryCode}-${serialNumber}`;
+
+    let supplierId: Types.ObjectId | undefined;
+    let supplierName: string | undefined;
+    if (dto.supplierId) {
+      const supplier = await this.findSupplierOrFail(dto.supplierId);
+      supplierId = supplier._id;
+      supplierName = supplier.name;
     }
     const created = await ItemModel.create({
       sku,
       name: dto.name.trim(),
       unit: dto.unit.trim(),
+      description: dto.description?.trim() || undefined,
+      unitPriceMinor:
+        dto.unitPrice != null ? toMinorUnits(dto.unitPrice) : undefined,
+      quantity: dto.quantity,
+      brand: dto.brand?.trim() || undefined,
+      model: dto.model?.trim() || undefined,
+      countryOfOrigin: dto.countryOfOrigin?.trim() || undefined,
+      technicalSpecification: dto.technicalSpecification?.trim() || undefined,
+      warranty: dto.warranty?.trim() || undefined,
+      serialNumber,
+      barcode,
+      warehouseId,
+      warehouseCode,
+      dataSheetUrl: dto.dataSheetUrl?.trim() || undefined,
+      categoryId,
+      subCategoryId,
+      supplierId,
+      supplierName,
       isActive: true,
     });
     return this.toPublicItem(created);
   }
 
-  async listItems(actor: AuthenticatedUser): Promise<PublicItem[]> {
-    this.assertProcurement(actor);
-    const rows = await ItemModel.find({ isActive: true }).sort({ sku: 1 }).exec();
+  async getItem(id: string, actor: AuthenticatedUser): Promise<PublicItem> {
+    this.assertProcurementOrQuote(actor);
+    const row = await this.findItemOrFail(id);
+    if (!row.isActive) {
+      throw notFound('Item not found');
+    }
+    return this.toPublicItem(row);
+  }
+
+  async updateItem(
+    id: string,
+    dto: UpdateItemDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicItem> {
+    this.assertFinance(actor);
+    const row = await this.findItemOrFail(id);
+    if (!row.isActive) {
+      throw notFound('Item not found');
+    }
+
+    const { categoryId, subCategoryId } = await this.resolveCategoryIds(
+      dto.categoryId !== undefined
+        ? dto.categoryId
+        : row.categoryId?.toString(),
+      dto.subCategoryId !== undefined
+        ? dto.subCategoryId
+        : row.subCategoryId?.toString(),
+    );
+
+    let categoryCode = 'GEN';
+    if (subCategoryId) {
+      const sub = await ProductCategoryModel.findById(subCategoryId).exec();
+      if (sub?.code) categoryCode = sub.code.toUpperCase();
+      else if (categoryId) {
+        const cat = await ProductCategoryModel.findById(categoryId).exec();
+        if (cat?.code) categoryCode = cat.code.toUpperCase();
+      }
+    } else if (categoryId) {
+      const cat = await ProductCategoryModel.findById(categoryId).exec();
+      if (cat?.code) categoryCode = cat.code.toUpperCase();
+    }
+
+    let warehouseId = row.warehouseId;
+    let warehouseCode = row.warehouseCode || 'WH01';
+    if (dto.warehouseId) {
+      const warehouse = await this.findWarehouseOrFail(dto.warehouseId);
+      warehouseId = warehouse._id;
+      warehouseCode = warehouse.code.toUpperCase();
+    }
+
+    if (dto.sku !== undefined) {
+      const sku = dto.sku.trim().toUpperCase();
+      if (!sku) throw badRequest('SKU is required');
+      if (sku !== row.sku) {
+        const existing = await ItemModel.findOne({ sku }).exec();
+        if (existing) throw badRequest(`SKU ${sku} already exists`);
+        row.sku = sku;
+      }
+    }
+
+    if (dto.serialNumber !== undefined) {
+      const serialNumber = dto.serialNumber.trim().toUpperCase();
+      if (serialNumber && serialNumber !== row.serialNumber) {
+        const clash = await ItemModel.findOne({ serialNumber }).exec();
+        if (clash) throw badRequest(`Serial ${serialNumber} already exists`);
+      }
+      row.serialNumber = serialNumber || undefined;
+    }
+
+    if (dto.name !== undefined) row.name = dto.name.trim();
+    if (dto.unit !== undefined) row.unit = dto.unit.trim();
+    if (dto.description !== undefined) {
+      row.description = dto.description.trim() || undefined;
+    }
+    if (dto.unitPrice !== undefined) {
+      row.unitPriceMinor = toMinorUnits(dto.unitPrice);
+    }
+    if (dto.quantity !== undefined) row.quantity = dto.quantity;
+    if (dto.brand !== undefined) row.brand = dto.brand.trim() || undefined;
+    if (dto.model !== undefined) row.model = dto.model.trim() || undefined;
+    if (dto.countryOfOrigin !== undefined) {
+      row.countryOfOrigin = dto.countryOfOrigin.trim() || undefined;
+    }
+    if (dto.technicalSpecification !== undefined) {
+      row.technicalSpecification =
+        dto.technicalSpecification.trim() || undefined;
+    }
+    if (dto.warranty !== undefined) {
+      row.warranty = dto.warranty.trim() || undefined;
+    }
+    if (dto.dataSheetUrl !== undefined) {
+      row.dataSheetUrl = dto.dataSheetUrl.trim() || undefined;
+    }
+
+    row.categoryId = categoryId;
+    row.subCategoryId = subCategoryId;
+    row.warehouseId = warehouseId;
+    row.warehouseCode = warehouseCode;
+
+    const serialForBarcode = row.serialNumber || 'SN00000';
+    row.barcode =
+      dto.barcode?.trim().toUpperCase() ||
+      `${warehouseCode}-${categoryCode}-${serialForBarcode}`;
+
+    if (dto.supplierId !== undefined) {
+      if (!dto.supplierId) {
+        row.supplierId = undefined;
+        row.supplierName = undefined;
+      } else {
+        const supplier = await this.findSupplierOrFail(dto.supplierId);
+        row.supplierId = supplier._id;
+        row.supplierName = supplier.name;
+      }
+    }
+
+    await row.save();
+    return this.toPublicItem(row);
+  }
+
+  async deleteItem(id: string, actor: AuthenticatedUser): Promise<void> {
+    this.assertFinance(actor);
+    const row = await this.findItemOrFail(id);
+    if (!row.isActive) {
+      throw notFound('Item not found');
+    }
+    row.isActive = false;
+    await row.save();
+  }
+
+  async listItems(
+    actor: AuthenticatedUser,
+    filters: {
+      categoryId?: string;
+      subCategoryId?: string;
+      search?: string;
+    } = {},
+  ): Promise<PublicItem[]> {
+    this.assertProcurementOrQuote(actor);
+    const query: Record<string, unknown> = { isActive: true };
+    if (filters.categoryId && Types.ObjectId.isValid(filters.categoryId)) {
+      query.categoryId = new Types.ObjectId(filters.categoryId);
+    }
+    if (filters.subCategoryId && Types.ObjectId.isValid(filters.subCategoryId)) {
+      query.subCategoryId = new Types.ObjectId(filters.subCategoryId);
+    }
+    if (filters.search?.trim()) {
+      const q = filters.search.trim();
+      query.$or = [
+        { sku: new RegExp(q, 'i') },
+        { name: new RegExp(q, 'i') },
+        { brand: new RegExp(q, 'i') },
+      ];
+    }
+    const rows = await ItemModel.find(query).sort({ sku: 1 }).exec();
     return rows.map((row) => this.toPublicItem(row));
+  }
+
+  async listCategories(actor: AuthenticatedUser): Promise<PublicProductCategory[]> {
+    this.assertProcurementOrQuote(actor);
+    const rows = await ProductCategoryModel.find({ isActive: true })
+      .sort({ name: 1 })
+      .exec();
+    return rows.map(toPublicProductCategory);
+  }
+
+  async createCategory(
+    dto: CreateProductCategoryDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicProductCategory> {
+    this.assertFinance(actor);
+    let parentId: Types.ObjectId | undefined;
+    if (dto.parentId) {
+      if (!Types.ObjectId.isValid(dto.parentId)) {
+        throw badRequest('Invalid parent category');
+      }
+      const parent = await ProductCategoryModel.findById(dto.parentId).exec();
+      if (!parent || !parent.isActive) {
+        throw notFound('Parent category not found');
+      }
+      if (parent.parentId) {
+        throw badRequest('Sub-categories cannot have children (max 2 levels)');
+      }
+      parentId = parent._id;
+    }
+    const created = await ProductCategoryModel.create({
+      name: dto.name.trim(),
+      code: dto.code?.trim().toUpperCase() || undefined,
+      parentId: parentId ?? null,
+      isActive: true,
+    });
+    return toPublicProductCategory(created);
+  }
+
+  private async resolveCategoryIds(
+    categoryId?: string,
+    subCategoryId?: string,
+  ): Promise<{
+    categoryId?: Types.ObjectId;
+    subCategoryId?: Types.ObjectId;
+  }> {
+    if (!categoryId && !subCategoryId) return {};
+    if (subCategoryId) {
+      if (!Types.ObjectId.isValid(subCategoryId)) {
+        throw badRequest('Invalid sub-category');
+      }
+      const sub = await ProductCategoryModel.findById(subCategoryId).exec();
+      if (!sub || !sub.isActive || !sub.parentId) {
+        throw badRequest('Sub-category not found');
+      }
+      return {
+        categoryId: sub.parentId,
+        subCategoryId: sub._id,
+      };
+    }
+    if (!Types.ObjectId.isValid(categoryId!)) {
+      throw badRequest('Invalid category');
+    }
+    const cat = await ProductCategoryModel.findById(categoryId).exec();
+    if (!cat || !cat.isActive || cat.parentId) {
+      throw badRequest('Category not found');
+    }
+    return { categoryId: cat._id };
+  }
+
+  private assertProcurementOrQuote(actor: AuthenticatedUser) {
+    if (
+      actor.role === Role.ADMIN ||
+      actor.role === Role.ACCOUNTANT ||
+      actor.role === Role.PROJECT_MANAGER ||
+      actor.role === Role.EMPLOYEE
+    ) {
+      return;
+    }
+    throw forbidden('Procurement access required');
   }
 
   async listWarehouses(actor: AuthenticatedUser): Promise<PublicWarehouse[]> {
@@ -519,25 +888,60 @@ export class ProcurementService {
       });
 
       if (po.destination === PurchaseDestination.WAREHOUSE) {
-        await StockLotModel.create({
+        // Same SKU + same unit cost → top up the open FIFO lot so on-hand
+        // shows one combined quantity instead of many zero/partial lots.
+        const openLot = await StockLotModel.findOne({
           warehouseId: po.warehouseId,
           itemId: line.itemId,
-          sku: line.sku,
-          itemName: line.name,
-          unit: line.unit,
-          purchaseOrderId: po._id,
-          poNumber: po.poNumber,
-          poLineId: line._id,
           unitCostMinor: line.unitCostMinor,
-          receivedMilli: quantityMilli,
-          remainingMilli: quantityMilli,
-          receivedAt: date,
-        });
+          remainingMilli: { $gt: 0 },
+        })
+          .sort({ receivedAt: 1 })
+          .exec();
+        if (openLot) {
+          openLot.receivedMilli += quantityMilli;
+          openLot.remainingMilli += quantityMilli;
+          await openLot.save();
+        } else {
+          await StockLotModel.create({
+            warehouseId: po.warehouseId,
+            itemId: line.itemId,
+            sku: line.sku,
+            itemName: line.name,
+            unit: line.unit,
+            purchaseOrderId: po._id,
+            poNumber: po.poNumber,
+            poLineId: line._id,
+            unitCostMinor: line.unitCostMinor,
+            receivedMilli: quantityMilli,
+            remainingMilli: quantityMilli,
+            receivedAt: date,
+          });
+        }
       }
     }
 
     po.receivedMinor += amountMinor;
     this.refreshPoStatus(po);
+
+    const settlement = (dto.paymentMethod ?? 'due') as ReceiptSettlement;
+    let creditAccountCode: string | undefined;
+    if (settlement === 'cash' || settlement === 'bank') {
+      if (dto.treasuryId) {
+        const treasury = await this.bankingService.requireActive(dto.treasuryId);
+        if (settlement === 'cash' && !isCashLike(treasury.kind)) {
+          throw badRequest('Select a cash or petty-cash treasury channel');
+        }
+        if (settlement === 'bank' && !isBankLike(treasury.kind)) {
+          throw badRequest('Select a bank or mobile-banking treasury channel');
+        }
+        creditAccountCode = treasury.glAccountCode;
+      } else if (settlement === 'cash') {
+        creditAccountCode = SystemAccountCode.CASH;
+      } else {
+        throw badRequest('Select a bank account for bank settlement');
+      }
+    }
 
     const journal = await this.journalService.post(
       {
@@ -550,6 +954,9 @@ export class ProcurementService {
           amountMinor,
           projectId: po.projectId?.toString(),
           description: `Goods received ${po.poNumber}`,
+          settlement,
+          creditAccountCode,
+          supplierId: po.supplierId.toString(),
         }),
       },
       actor.userId,
@@ -665,7 +1072,7 @@ export class ProcurementService {
   }
 
   async inventory(actor: AuthenticatedUser): Promise<PublicStockRow[]> {
-    this.assertProcurement(actor);
+    this.assertProcurementOrQuote(actor);
     const lots = await StockLotModel.find({ remainingMilli: { $gt: 0 } }).exec();
     const warehouses = await WarehouseModel.find().exec();
     const warehouseById = new Map(
@@ -700,20 +1107,26 @@ export class ProcurementService {
       grouped.set(key, current);
     }
 
-    return [...grouped.values()].map((row) => {
-      const warehouse = warehouseById.get(row.warehouseId);
-      return {
-        warehouseId: row.warehouseId,
-        warehouseCode: warehouse?.code ?? '',
-        warehouseName: warehouse?.name ?? '',
-        itemId: row.itemId,
-        sku: row.sku,
-        name: row.name,
-        unit: row.unit,
-        quantity: fromMilliQty(row.quantityMilli),
-        value: fromMinorUnits(row.valueMinor),
-      };
-    });
+    return [...grouped.values()]
+      .map((row) => {
+        const warehouse = warehouseById.get(row.warehouseId);
+        return {
+          warehouseId: row.warehouseId,
+          warehouseCode: warehouse?.code ?? '',
+          warehouseName: warehouse?.name ?? '',
+          itemId: row.itemId,
+          sku: row.sku,
+          name: row.name,
+          unit: row.unit,
+          quantity: fromMilliQty(row.quantityMilli),
+          value: fromMinorUnits(row.valueMinor),
+        };
+      })
+      .sort((a, b) =>
+        a.sku === b.sku
+          ? a.warehouseCode.localeCompare(b.warehouseCode)
+          : a.sku.localeCompare(b.sku),
+      );
   }
 
   async issueStock(
@@ -733,9 +1146,18 @@ export class ProcurementService {
 
     const issueLines = [];
     let amountMinor = 0;
+    // Merge duplicate item lines in one request into a single consume.
+    const mergedLines = new Map<string, number>();
     for (const input of dto.lines) {
-      const item = await this.findItemOrFail(input.itemId);
       const quantityMilli = toMilliQty(input.quantity);
+      mergedLines.set(
+        input.itemId,
+        (mergedLines.get(input.itemId) ?? 0) + quantityMilli,
+      );
+    }
+
+    for (const [itemId, quantityMilli] of mergedLines) {
+      const item = await this.findItemOrFail(itemId);
       const consumed = await this.consumeLotsFifo(
         warehouse._id,
         item._id,
@@ -757,7 +1179,7 @@ export class ProcurementService {
         date: date.toISOString(),
         memo: `Issue stock to ${project.code}`,
         reference: project.code,
-        projectId: project._id.toString(),
+        // Do not set header projectId — only the materials debit is project-tagged.
         lines: buildIssueJournalLines({
           amountMinor,
           projectId: project._id.toString(),
@@ -799,17 +1221,39 @@ export class ProcurementService {
       .sort({ date: -1, issueNumber: -1 })
       .limit(50)
       .exec();
-    return rows.map((row) => ({
-      id: row._id.toString(),
-      issueNumber: row.issueNumber,
-      warehouseCode: row.warehouseCode,
-      warehouseName: row.warehouseName,
-      projectCode: row.projectCode,
-      projectName: row.projectName,
-      date: row.date.toISOString(),
-      amount: fromMinorUnits(row.amountMinor),
-      journalNumber: row.journalNumber,
-    }));
+    return rows.map((row) => {
+      const quantityMilli = row.lines.reduce(
+        (sum, line) => sum + line.quantityMilli,
+        0,
+      );
+      const lines = row.lines.map((line) => {
+        const quantity = fromMilliQty(line.quantityMilli);
+        const amount = fromMinorUnits(line.amountMinor);
+        return {
+          itemId: line.itemId.toString(),
+          sku: line.sku,
+          name: line.name,
+          unit: line.unit,
+          quantity,
+          amount,
+          unitCost: quantity > 0 ? Number((amount / quantity).toFixed(4)) : 0,
+        };
+      });
+      return {
+        id: row._id.toString(),
+        issueNumber: row.issueNumber,
+        warehouseCode: row.warehouseCode,
+        warehouseName: row.warehouseName,
+        projectId: row.projectId.toString(),
+        projectCode: row.projectCode,
+        projectName: row.projectName,
+        date: row.date.toISOString(),
+        quantity: fromMilliQty(quantityMilli),
+        amount: fromMinorUnits(row.amountMinor),
+        journalNumber: row.journalNumber,
+        lines,
+      };
+    });
   }
 
   private async consumeLotsFifo(
