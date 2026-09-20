@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import '../load-env';
 import 'reflect-metadata';
 import fs from 'fs';
 import path from 'path';

@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import dotenv from 'dotenv';
+import { loadEnvFile } from '../load-env';
 import { plainToInstance, Transform } from 'class-transformer';
 import {
   IsBoolean,
@@ -90,7 +90,11 @@ export type AppConfig = {
 let cached: AppConfig | undefined;
 
 export function loadConfig(): AppConfig {
-  dotenv.config();
+  loadEnvFile();
+
+  if (!process.env.MONGODB_URI && process.env.MONGO_URI) {
+    process.env.MONGODB_URI = process.env.MONGO_URI;
+  }
 
   const validated = plainToInstance(EnvironmentVariables, process.env, {
     enableImplicitConversion: true,

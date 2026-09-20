@@ -214,7 +214,7 @@ export function DebitCreditVoucherView({
       <div className='flex flex-col md:flex-row h-full min-h-[540px]'>
         {/* Left sidebar */}
         <div
-          className={`w-full md:w-[32%] ${theme.sidebarClass} ${theme.sidebarTextClass} p-6 flex flex-col justify-between relative overflow-hidden print:w-[32%]`}
+          className={`w-full md:w-[32%]  p-6 flex flex-col justify-between relative overflow-hidden print:w-[32%]`}
         >
           <svg
             className={`absolute -left-12 -bottom-12 w-64 h-64 opacity-15 pointer-events-none ${theme.sidebarTextClass}`}
