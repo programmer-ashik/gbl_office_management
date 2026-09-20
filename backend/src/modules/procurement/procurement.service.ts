@@ -548,7 +548,9 @@ export class ProcurementService {
     }
     if (dto.quantity !== undefined) row.quantity = dto.quantity;
     if (dto.brand !== undefined) row.brand = dto.brand.trim() || undefined;
-    if (dto.model !== undefined) row.model = dto.model.trim() || undefined;
+    if (dto.model !== undefined) {
+      row.set('model', dto.model.trim() || undefined);
+    }
     if (dto.countryOfOrigin !== undefined) {
       row.countryOfOrigin = dto.countryOfOrigin.trim() || undefined;
     }
