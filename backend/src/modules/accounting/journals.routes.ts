@@ -9,6 +9,7 @@ import { validateBody } from '../../common/middleware/validate';
 import type { AuthService } from '../auth/auth.service';
 import type { ApprovalService } from '../governance/approval.service';
 import type { UsersService } from '../users/users.service';
+import type { ArApService } from '../ar-ap/ar-ap.service';
 import { PostJournalDto } from './dto/journal.dto';
 import type { JournalService } from './journal.service';
 
@@ -36,6 +37,7 @@ export function createJournalsRouter(
   authService: AuthService,
   usersService: UsersService,
   approvalService?: ApprovalService,
+  arApService?: Pick<ArApService, 'assertManualJournalSupplierPayments'>,
 ) {
   const router = Router();
   const auth = requireAuth(authService, usersService);
@@ -80,6 +82,10 @@ export function createJournalsRouter(
         return;
       }
 
+      if (arApService) {
+        await arApService.assertManualJournalSupplierPayments(dto, req.user!);
+      }
+
       const amount = dto.lines.reduce((sum, line) => sum + (line.debit ?? 0), 0);
 
       if (approvalService && req.user!.role !== Role.ADMIN) {
@@ -96,6 +102,8 @@ export function createJournalsRouter(
               journalType: dto.journalType,
               projectId: dto.projectId,
               lines: dto.lines,
+              overrideSupplierPayable: dto.overrideSupplierPayable,
+              overrideReason: dto.overrideReason,
             },
           },
           req.user!,
@@ -158,6 +166,39 @@ export function createJournalsRouter(
     auth,
     requireRoles(...FINANCE),
     asyncHandler(async (req, res) => {
+      const existing = await journalService.findByIdOrFail(String(req.params.id));
+      const publicExisting = journalService.toPublic(existing);
+      if (arApService) {
+        await arApService.assertManualJournalSupplierPayments(
+          {
+            date: publicExisting.date,
+            memo: publicExisting.memo,
+            reference: publicExisting.reference ?? undefined,
+            journalType: publicExisting.journalType,
+            projectId: publicExisting.projectId ?? undefined,
+            intent: 'post',
+            overrideSupplierPayable: Boolean(
+              (req.body as { overrideSupplierPayable?: boolean } | undefined)
+                ?.overrideSupplierPayable,
+            ),
+            overrideReason:
+              typeof (req.body as { overrideReason?: string } | undefined)
+                ?.overrideReason === 'string'
+                ? (req.body as { overrideReason?: string }).overrideReason
+                : undefined,
+            lines: publicExisting.lines.map((line) => ({
+              accountCode: line.accountCode,
+              debit: line.debit ?? undefined,
+              credit: line.credit ?? undefined,
+              description: line.description ?? undefined,
+              projectId: line.projectId ?? undefined,
+              entityType: line.entityType ?? undefined,
+              entityId: line.entityId ?? undefined,
+            })),
+          },
+          req.user!,
+        );
+      }
       const entry = await journalService.postExisting(
         String(req.params.id),
         req.user!.userId,

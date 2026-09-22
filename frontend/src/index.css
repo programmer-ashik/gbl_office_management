@@ -1586,9 +1586,16 @@ td:nth-last-child(-n + 2) {
   grid-template-columns: minmax(180px, 220px) 1fr;
 }
 
-.catalog-layout-compact .catalog-cat-btn {
-  padding: 6px 8px;
+.catalog-layout-compact .catalog-cat-btn,
+.catalog-layout-compact .catalog-tree-label {
+  padding: 2px 0;
   font-size: var(--text-sm);
+}
+
+@media (max-width: 860px) {
+  .catalog-reassign-toolbar {
+    grid-template-columns: 1fr;
+  }
 }
 
 .dense-table th,
@@ -4274,7 +4281,8 @@ table thead th,
 }
 
 .catalog-cat-list,
-.catalog-sub-list {
+.catalog-sub-list,
+.catalog-tree {
   list-style: none;
   margin: 6px 0 0;
   padding: 0;
@@ -4282,8 +4290,118 @@ table thead th,
   gap: 2px;
 }
 
-.catalog-sub-list {
-  margin: 2px 0 6px 10px;
+.catalog-sub-list,
+.catalog-tree-nested {
+  margin: 0 0 2px 14px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(15, 39, 68, 0.14);
+}
+
+.catalog-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 26px;
+  background: none;
+}
+
+.catalog-tree-row.is-active > .catalog-tree-label {
+  font-weight: 600;
+  color: inherit;
+}
+
+.catalog-tree-row.is-inactive .catalog-tree-label {
+  color: rgba(15, 39, 68, 0.45);
+}
+
+.catalog-tree-toggle,
+.catalog-tree-spacer {
+  flex: 0 0 1rem;
+  width: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  color: rgba(15, 39, 68, 0.4);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: default;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.catalog-tree-toggle {
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.catalog-tree-toggle.is-open {
+  transform: rotate(90deg);
+}
+
+.catalog-tree-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  cursor: pointer;
+  text-decoration: none;
+  user-select: none;
+}
+
+.catalog-tree-label:hover,
+.catalog-tree-label:focus {
+  text-decoration: none;
+  background: none;
+  outline: none;
+}
+
+.catalog-tree-label.is-sub {
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.catalog-tree-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.catalog-tree-row .ui-action-menu {
+  flex: 0 0 auto;
+}
+
+.catalog-tree-row .ui-action-trigger {
+  padding: 2px 6px;
+  min-height: 24px;
+  font-size: 0.95rem;
+  line-height: 1;
+  background: none;
+}
+
+.catalog-reassign-toolbar {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.catalog-check-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  white-space: nowrap;
 }
 
 .catalog-cat-btn {

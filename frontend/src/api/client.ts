@@ -336,8 +336,14 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
-  postDraftJournal: (id: string) =>
-    request<JournalEntry>(`/journals/${id}/post`, { method: 'POST' }),
+  postDraftJournal: (
+    id: string,
+    body?: { overrideSupplierPayable?: boolean; overrideReason?: string },
+  ) =>
+    request<JournalEntry>(`/journals/${id}/post`, {
+      method: 'POST',
+      body: body ? JSON.stringify(body) : undefined,
+    }),
   reverseJournal: (id: string) =>
     request<JournalEntry>(`/journals/${id}/reverse`, { method: 'POST' }),
   deleteJournal: (id: string) =>
@@ -824,6 +830,30 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateProductCategory: (
+    id: string,
+    body: { name?: string; code?: string; isActive?: boolean },
+  ) =>
+    request<ProductCategory>(`/product-categories/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  reassignCategoryItems: (
+    id: string,
+    body: {
+      itemIds: string[]
+      targetCategoryId: string
+      targetSubCategoryId?: string
+    },
+  ) =>
+    request<{ moved: number }>(`/product-categories/${id}/reassign-items`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteProductCategory: (id: string) =>
+    request<{ id: string }>(`/product-categories/${id}`, {
+      method: 'DELETE',
+    }),
   warehouses: () => request<Warehouse[]>('/warehouses'),
   purchaseOrders: () => request<PurchaseOrder[]>('/purchase-orders'),
   purchaseOrder: (id: string) => request<PurchaseOrder>(`/purchase-orders/${id}`),
@@ -935,12 +965,21 @@ export const api = {
     treasuryId: string
     scheduledDate?: string
     memo?: string
+    overridePayable?: boolean
+    overrideReason?: string
   }) =>
     request<SupplierPayment>('/payables/payments', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  executeSupplierPayment: (id: string, body: { date: string }) =>
+  executeSupplierPayment: (
+    id: string,
+    body: {
+      date: string
+      overridePayable?: boolean
+      overrideReason?: string
+    },
+  ) =>
     request<SupplierPayment>(`/payables/payments/${id}/execute`, {
       method: 'POST',
       body: JSON.stringify(body),

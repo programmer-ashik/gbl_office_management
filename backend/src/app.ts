@@ -121,6 +121,7 @@ export async function createApp(): Promise<Express> {
     projectsService,
     accountsService,
     bankingService,
+    auditService,
   );
   journalService.setArApHooks({
     onManualPosted: (journal, userId) =>
@@ -201,6 +202,7 @@ export async function createApp(): Promise<Express> {
       authService,
       usersService,
       approvalService,
+      arApService,
     ),
   );
   app.use(

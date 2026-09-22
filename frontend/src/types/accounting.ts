@@ -361,6 +361,9 @@ export type JournalWriteBody = {
   journalType?: string
   intent?: 'draft' | 'post'
   projectId?: string
+  approvalId?: string
+  overrideSupplierPayable?: boolean
+  overrideReason?: string
   lines: Array<{
     accountCode: string
     debit?: number

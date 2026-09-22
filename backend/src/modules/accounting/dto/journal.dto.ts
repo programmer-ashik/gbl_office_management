@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsMongoId,
@@ -91,6 +92,17 @@ export class PostJournalDto {
   @Transform(emptyToUndefined)
   @IsMongoId()
   approvalId?: string;
+
+  /** Admin-only: allow AP debit when it exceeds supplier outstanding payable. */
+  @IsOptional()
+  @IsBoolean()
+  overrideSupplierPayable?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  overrideReason?: string;
 
   @IsArray()
   @ArrayMinSize(2, { message: 'A journal entry needs at least two lines' })
