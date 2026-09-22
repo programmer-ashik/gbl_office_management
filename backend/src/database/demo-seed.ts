@@ -32,7 +32,7 @@ const DEMO_USERS: Array<{
   role: Role;
 }> = [
   {
-    email: 'Admin@gblenterprise.com',
+    email: 'admin@gblenterprise.com',
     password: 'Admin@123!',
     firstName: 'Admin',
     lastName: 'Administration',
