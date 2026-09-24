@@ -6,37 +6,53 @@ on:
       - main
       - staging
 
+# One deploy per branch. A second push waits so two builds cannot overwrite each other.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Execute Remote SSH Commands
-        uses: appleboy/ssh-action@master
-        env:
-          BRANCH: ${{ github.ref_name }}
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: BRANCH
+          command_timeout: 30m
           script: |
-            TARGET_DIR="/var/www/${{ github.ref_name }}"
+            set -euo pipefail
+            BRANCH="${{ github.ref_name }}"
+            TARGET_DIR="/var/www/${BRANCH}"
+            APP_NAME="${BRANCH}-backend"
 
-            # 1. Pull latest code
-            cd $TARGET_DIR
-            git fetch origin
-            git reset --hard origin/${{ github.ref_name }}
+            # Non-interactive SSH skips nvm. Load it when the server uses nvm.
+            export NVM_DIR="${HOME}/.nvm"
+            if [ -s "${NVM_DIR}/nvm.sh" ]; then
+              # shellcheck disable=SC1091
+              . "${NVM_DIR}/nvm.sh"
+            fi
 
-            # 2. Build Frontend
-            cd $TARGET_DIR/frontend
-            npm install
+            cd "${TARGET_DIR}"
+            git fetch origin "${BRANCH}"
+            git checkout --force -B "${BRANCH}" "origin/${BRANCH}"
+            echo "Deploying $(git rev-parse --short HEAD)"
+
+            cd "${TARGET_DIR}/frontend"
+            npm ci
             npm run build
 
-            # 3. Build and Restart Backend
-            cd $TARGET_DIR/backend
-            npm install
-            npm run build  # <-- CRITICAL: Compiles your TypeScript
+            cd "${TARGET_DIR}/backend"
+            npm ci
+            rm -rf dist
+            npm run build
 
-            # Safely restart if it exists, otherwise start a new instance
-            pm2 restart ${{ github.ref_name }}-backend --update-env || pm2 start npm --name "${{ github.ref_name }}-backend" -- start
+            if pm2 describe "${APP_NAME}" >/dev/null 2>&1; then
+              pm2 restart "${APP_NAME}" --update-env
+            else
+              pm2 start npm --name "${APP_NAME}" --cwd "${TARGET_DIR}/backend" -- start
+            fi
             pm2 save
+            echo "Deployed ${BRANCH} at $(git -C "${TARGET_DIR}" rev-parse --short HEAD)"
