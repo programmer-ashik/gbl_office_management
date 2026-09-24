@@ -21,17 +21,22 @@ jobs:
           envs: BRANCH
           script: |
             TARGET_DIR="/var/www/${{ github.ref_name }}"
+
+            # 1. Pull latest code
             cd $TARGET_DIR
             git fetch origin
             git reset --hard origin/${{ github.ref_name }}
 
+            # 2. Build Frontend
             cd $TARGET_DIR/frontend
             npm install
             npm run build
 
-            # Setup Backend (Node.js)
+            # 3. Build and Restart Backend
             cd $TARGET_DIR/backend
             npm install
-            pm2 stop ${{ github.ref_name }}-backend || true
-            pm2 start npm --name "${{ github.ref_name }}-backend" -- start
+            npm run build  # <-- CRITICAL: Compiles your TypeScript
+
+            # Safely restart if it exists, otherwise start a new instance
+            pm2 restart ${{ github.ref_name }}-backend --update-env || pm2 start npm --name "${{ github.ref_name }}-backend" -- start
             pm2 save
