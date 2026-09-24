@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { money } from '../types/accounting'
+import { money } from '../types/accounting' // forced sync
 
 export type LedgerPdfInput = {
   companyName: string
