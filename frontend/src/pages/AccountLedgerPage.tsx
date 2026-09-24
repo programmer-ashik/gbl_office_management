@@ -6,6 +6,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { api } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { ExpandableText } from "../components/ExpandableText";
 import { MetricCard } from "../components/MetricCard";
 import { Select } from "../components/ui";
@@ -19,13 +20,15 @@ import {
   type JournalEntityType as EntityType,
 } from "../types/accounting";
 import type { PublicUser } from "../types/auth";
-import type { TreasuryAccount } from "../types/banking";
+import { TreasuryKind, type TreasuryAccount } from "../types/banking";
 import type { Supplier } from "../types/procurement";
 import type { Project } from "../types/project";
+import { downloadLedgerPdf } from "../utils/ledgerPdf";
 
 type EntityOption = { value: string; label: string };
 
 export function AccountLedgerPage() {
+  const { user } = useAuth();
   const { accountCode: routeCode } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -52,6 +55,60 @@ export function AccountLedgerPage() {
   const [ledger, setLedger] = useState<AccountLedger | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [bankCode, setBankCode] = useState("");
+
+  const selectedAccount = useMemo(
+    () => accounts.find((row) => row.code === accountCode),
+    [accounts, accountCode],
+  );
+
+  const bankAccounts = useMemo(() => {
+    const fromTreasury = treasury
+      .filter(
+        (row) =>
+          row.isActive &&
+          (row.kind === TreasuryKind.COMMERCIAL_BANK ||
+            row.glAccountCode.startsWith("1121") ||
+            row.glAccountCode.startsWith("1122") ||
+            row.glAccountCode.startsWith("1123")),
+      )
+      .map((row) => ({
+        code: row.glAccountCode,
+        name: row.name,
+      }));
+    const fromCoa = accounts
+      .filter(
+        (row) =>
+          row.isPostable &&
+          row.isActive &&
+          (row.parentCode === "1120" ||
+            row.code === "1121" ||
+            row.code === "1122" ||
+            row.code === "1123") &&
+          row.code !== "1111",
+      )
+      .map((row) => ({ code: row.code, name: row.name }));
+    const map = new Map<string, { code: string; name: string }>();
+    for (const row of [...fromCoa, ...fromTreasury]) {
+      map.set(row.code, row);
+    }
+    return [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
+  }, [accounts, treasury]);
+
+  const showBankPicker =
+    accountCode === "1120" ||
+    selectedAccount?.parentCode === "1120" ||
+    selectedAccount?.name.toLowerCase().includes("cash at bank") === true;
+
+  useEffect(() => {
+    if (!showBankPicker) return;
+    if (treasury.length > 0) return;
+    api
+      .treasury()
+      .then(setTreasury)
+      .catch(() => setTreasury([]));
+  }, [showBankPicker, treasury.length]);
 
   const dimension = useMemo(
     () => (accountCode ? dimensionRuleForAccount(accountCode) : null),
@@ -302,7 +359,63 @@ export function AccountLedgerPage() {
     setAccountCode(next);
     setEntityId("");
     setProjectId("");
+    setBankCode("");
     navigate(`/ledgers/${encodeURIComponent(next)}`, { replace: true });
+  }
+
+  function onBankChange(next: string) {
+    setBankCode(next);
+    if (!next) return;
+    setAccountCode(next);
+    setEntityId("");
+    setProjectId("");
+    navigate(`/ledgers/${encodeURIComponent(next)}`, { replace: true });
+  }
+
+  async function onExportPdf() {
+    if (!ledger) return;
+    setExporting(true);
+    try {
+      const entityLabel =
+        entityOptions.find((row) => row.value === entityId)?.label ??
+        (entityId ? entityId : "");
+      const projectLabel =
+        projectOptions.find((row) => row.value === projectId)?.label ??
+        (projectId ? projectId : "");
+      downloadLedgerPdf({
+        companyName: "GBL Enterprise",
+        title: "General Ledger",
+        accountCode: ledger.account.accountCode,
+        accountName: ledger.account.accountName,
+        filters: [
+          ...(entityLabel
+            ? [{ label: entityFilterLabel, value: entityLabel }]
+            : []),
+          ...(projectLabel
+            ? [{ label: "Project", value: projectLabel }]
+            : []),
+        ],
+        fromDate: fromDate || ledger.fromDate,
+        toDate: toDate || ledger.toDate,
+        generatedBy: user?.email ?? user?.role ?? "user",
+        generatedAt: new Date().toISOString(),
+        openingBalance: filteredTotals.opening,
+        closingBalance: filteredTotals.closing,
+        periodDebit: filteredTotals.debit,
+        periodCredit: filteredTotals.credit,
+        rows: running.map((row) => ({
+          date: row.date,
+          entryNumber: row.entryNumber,
+          memo: row.memo || row.description || "",
+          entity: row.entityName ?? "—",
+          debit: row.debit,
+          credit: row.credit,
+          runningBalance: row.runningBalance ?? 0,
+        })),
+      });
+    } finally {
+      setExporting(false);
+    }
   }
 
   function onEntityChange(next: string) {
@@ -354,6 +467,14 @@ export function AccountLedgerPage() {
           <Link to='/journals' className='ghost-link'>
             Journals
           </Link>
+          <button
+            type='button'
+            className='ghost'
+            disabled={!ledger || exporting || loading}
+            onClick={() => void onExportPdf()}
+          >
+            {exporting ? "Exporting…" : "Export to PDF"}
+          </button>
         </div>
       </header>
 
@@ -400,6 +521,30 @@ export function AccountLedgerPage() {
                   placeholder={
                     isSupplierPayable ? "All suppliers" : allEntitiesLabel
                   }
+                />
+              </label>
+            ) : null}
+
+            {showBankPicker ? (
+              <label className='ledger-filter-party'>
+                Bank
+                <Select
+                  value={
+                    bankAccounts.some((row) => row.code === accountCode)
+                      ? accountCode
+                      : bankCode
+                  }
+                  onChange={onBankChange}
+                  options={[
+                    { value: "", label: "Select a bank" },
+                    ...bankAccounts.map((row) => ({
+                      value: row.code,
+                      label: `${row.code} · ${row.name}`,
+                    })),
+                  ]}
+                  searchable
+                  portal
+                  placeholder='Select a bank'
                 />
               </label>
             ) : null}

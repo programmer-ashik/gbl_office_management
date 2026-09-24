@@ -166,7 +166,7 @@ export function proposeFacilityDeductions(input: {
 /**
  * Step 1 — Monthly accrual (expense recognized, net owed to staff).
  * Dr 5120 (project labor) or 5230 (HQ) = Gross
- * Cr 1131 advances · Cr 2133 PF · Cr 2131 tax · Cr 2121 net payable
+ * Cr 1161 advances · Cr 2133 PF · Cr 2131 tax · Cr 2121 net payable
  */
 export function buildAccrualJournalLines(input: {
   employeeId: string;
@@ -282,7 +282,7 @@ export function buildAccrualJournalLines(input: {
 
 /**
  * Step 2 — Disbursement (clear salary payable against cash/bank).
- * Dr 2121 · Cr treasury leaf (1111 / 1112 / 1114)
+ * Dr 2121 · Cr treasury leaf (1111 / 1122 / 1131)
  */
 export function buildDisbursementJournalLines(input: {
   employeeId: string;

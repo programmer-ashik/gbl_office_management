@@ -167,7 +167,7 @@ export async function seedDemoData(deps: SeedDeps): Promise<void> {
 
   const treasury = await deps.bankingService.list();
   const cash = treasury.find((row) => row.glAccountCode === '1111');
-  const bank = treasury.find((row) => row.glAccountCode === '1112');
+  const bank = treasury.find((row) => row.glAccountCode === '1122');
   if (
     cash &&
     bank &&
@@ -183,7 +183,7 @@ export async function seedDemoData(deps: SeedDeps): Promise<void> {
         reference: 'SEED-OB-001',
         lines: [
           { accountCode: '1111', debit: 150_000 },
-          { accountCode: '1112', debit: 850_000 },
+          { accountCode: '1122', debit: 850_000 },
           { accountCode: '3100', credit: 1_000_000 },
         ],
       },

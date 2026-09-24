@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canAuditQuotations, canCreateQuotation } from "../auth/permissions";
-import { Select } from "../components/ui";
+import { Select, ActionMenu } from "../components/ui";
 import { money } from "../types/accounting";
 import type { PublicUser } from "../types/auth";
 import type { Project } from "../types/project";
@@ -267,23 +267,18 @@ export function QuotationsPage() {
                   <td className='num'>{money(row.grandTotal)}</td>
 
                   <td>
-                    <div className='form-actions'>
-                      <button
-                        type='button'
-                        className='ghost'
-                        onClick={() => navigate(`/quotations/${row.id}`)}
-                      >
-                        Open
-                      </button>
-
-                      <button
-                        type='button'
-                        className='ghost'
-                        onClick={() => downloadQuotationPdf(row)}
-                      >
-                        PDF
-                      </button>
-                    </div>
+                    <ActionMenu
+                      items={[
+                        {
+                          label: "View",
+                          onSelect: () => navigate(`/quotations/${row.id}`),
+                        },
+                        {
+                          label: "Download PDF",
+                          onSelect: () => downloadQuotationPdf(row),
+                        },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}

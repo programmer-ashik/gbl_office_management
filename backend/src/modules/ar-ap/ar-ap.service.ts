@@ -1155,7 +1155,7 @@ export class ArApService {
   }
 
   /**
-   * After a manual journal is posted: create/update AR invoice (1121 debit)
+   * After a manual journal is posted: create/update AR invoice (1151 debit)
    * and/or AP credit bill (2111 credit). Does not post another journal.
    * Module "Add invoice / Add bill" flows remain separate (system journals).
    */
@@ -1367,7 +1367,7 @@ export class ArApService {
     ];
     if (customerIds.length !== 1) {
       throw badRequest(
-        'Manual Client Receivable (1121) journals need exactly one customer entity to create an AR invoice',
+        'Manual Client Receivable (1151) journals need exactly one customer entity to create an AR invoice',
       );
     }
     const customerId = customerIds[0]!;
@@ -1381,7 +1381,7 @@ export class ArApService {
       arDebits.map((line) => line.projectId).find((id): id is string => Boolean(id));
     if (!projectId) {
       throw badRequest(
-        'Set a header or line project when posting Client Receivable (1121) so an AR invoice can be created',
+        'Set a header or line project when posting Client Receivable (1151) so an AR invoice can be created',
       );
     }
     const project = await this.projectsService.getById(projectId);

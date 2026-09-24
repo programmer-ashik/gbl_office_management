@@ -225,7 +225,7 @@ export function JournalsPage() {
         lines
           .filter(
             (line) =>
-              line.accountCode === "1131" &&
+              line.accountCode === "1161" &&
               line.entityType === "employee" &&
               line.entityId,
           )
@@ -566,7 +566,7 @@ export function JournalsPage() {
             </label>
           </div>
           <p className='muted'>
-            Posting <strong>1121 Client Receivables</strong> with a customer (+
+            Posting <strong>1151 Client Receivables</strong> with a customer (+
             project) also creates a Client Invoice (AR). Posting{' '}
             <strong>2111 Supplier Payables</strong> with a supplier also creates
             a Supplier Bill (AP). Reversing the journal voids that linked
@@ -597,7 +597,7 @@ export function JournalsPage() {
                     Boolean(line.projectId) ||
                     Boolean(projectId);
                   const unsettled =
-                    line.accountCode === "1131" && line.entityId
+                    line.accountCode === "1161" && line.entityId
                       ? advanceBalances[line.entityId]
                       : undefined;
                   return (
@@ -727,11 +727,11 @@ export function JournalsPage() {
                         ) : null}
                       </td>
                     </tr>
-                    {line.accountCode === "1131" ? (
+                    {line.accountCode === "1161" ? (
                       <tr className="journal-dimension-hint">
                         <td colSpan={7}>
                           <div className="callout callout-info">
-                            Account 1131 requires <strong>Employee</strong> and{" "}
+                            Account 1161 requires <strong>Employee</strong> and{" "}
                             <strong>Project</strong>.
                             {unsettled !== undefined
                               ? unsettled > 0

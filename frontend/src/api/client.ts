@@ -476,6 +476,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateCustomer: (
+    id: string,
+    body: {
+      name?: string
+      contactName?: string
+      email?: string
+      phone?: string
+      address?: string
+      isActive?: boolean
+    },
+  ) =>
+    request<Customer>(`/customers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   quotations: (params?: {
     createdBy?: string
     projectId?: string

@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf'
-import { voucherAccentRgb, voucherSidebarTextRgb } from '../components/DebitVoucher'
+import { normalizeVoucherTheme, voucherAccentRgb, voucherBodyTextRgb, voucherSidebarTextRgb } from '../components/DebitVoucher'
 import {
   JOURNAL_TYPE_LABEL,
   JournalType,
@@ -205,6 +205,41 @@ function partyLabel(entry: JournalEntry, kind: 'debit' | 'credit'): string {
   return ''
 }
 
+function isTreasuryLine(line: JournalLine): boolean {
+  return /cash|bank|bkash|nagad|mobile|treasury|petty/i.test(
+    `${line.accountCode} ${line.accountName}`,
+  )
+}
+
+/** Hand Cash, Cash in Bank (named account), or Mobile Banking (bKash / Nagad). */
+function channelLabel(line: JournalLine): string {
+  const name = line.accountName.trim()
+  const code = line.accountCode.trim()
+  if (code === '1111' || /hand cash|cash in hand/i.test(name)) return 'Hand Cash'
+  if (
+    code === '1131' ||
+    code === '1132' ||
+    /bkash|nagad|mobile/i.test(name)
+  ) {
+    return `Mobile Banking (${name})`
+  }
+  if (code.startsWith('112') || /bank/i.test(name)) {
+    return `Cash in Bank (${name})`
+  }
+  return name
+}
+
+function paymentPhrase(entry: JournalEntry, kind: 'debit' | 'credit'): string {
+  const lines = entry.lines.filter((line) => {
+    const amount = kind === 'debit' ? line.credit : line.debit
+    return amount > 0 && isTreasuryLine(line)
+  })
+  if (lines.length === 0) return ''
+  const labels = [...new Set(lines.map(channelLabel))]
+  const verb = kind === 'debit' ? 'paid by' : 'received in'
+  return `${verb} ${labels.join(' and ')}`
+}
+
 function voucherLineItems(
   entry: JournalEntry,
   kind: 'debit' | 'credit',
@@ -213,17 +248,25 @@ function voucherLineItems(
     kind === 'debit'
       ? entry.lines.filter((l) => l.debit > 0)
       : entry.lines.filter((l) => l.credit > 0)
-  const source = lines.length > 0 ? lines : entry.lines
-  return source.map((line) => {
+  const source = (lines.length > 0 ? lines : entry.lines).filter(
+    (line) => !isTreasuryLine(line),
+  )
+  const rows = source.length > 0 ? source : lines.length > 0 ? lines : entry.lines
+  const pay = paymentPhrase(entry, kind)
+  return rows.map((line) => {
     const amt = kind === 'debit' ? line.debit || line.credit : line.credit || line.debit
     const whole = Math.floor(Math.abs(amt))
     const cents = Math.round((Math.abs(amt) - whole) * 100)
-    const desc =
+    const narrative =
       line.description?.trim() ||
-      `${line.accountCode} · ${line.accountName}` ||
-      entry.memo
+      entry.memo?.trim() ||
+      `${line.accountCode} · ${line.accountName}`
+    const detail = narrative.replace(/^being the amount of\s+/i, '').trim()
+    const description = pay
+      ? `Being the amount of ${detail} ${pay}`
+      : `Being the amount of ${detail}`
     return {
-      description: desc,
+      description,
       major: whole.toLocaleString('en-US'),
       minor: String(cents).padStart(2, '0'),
     }
@@ -264,6 +307,7 @@ async function buildDebitCreditVoucherPdf(
   const vc = resolveVoucherConfig(template)
   const accent = voucherAccentRgb(vc.theme)
   const sidebarText = voucherSidebarTextRgb(vc.theme)
+  const bodyText = voucherBodyTextRgb(vc.theme)
   const company = header.companyName || 'GBL Enterprise'
   const { day, month, year } = parseVoucherDate(entry.date)
   const amount = entry.totalDebit
@@ -275,8 +319,14 @@ async function buildDebitCreditVoucherPdf(
   const partyField = kind === 'debit' ? 'Paid to:' : 'Received from:'
 
   // —— Accent left sidebar ——
+  const monochrome = normalizeVoucherTheme(vc.theme) === 'bw'
   doc.setFillColor(...accent)
   doc.rect(0, 0, SIDEBAR_W, pageH, 'F')
+  if (monochrome) {
+    doc.setDrawColor(...bodyText)
+    doc.setLineWidth(0.6)
+    doc.line(SIDEBAR_W, 0, SIDEBAR_W, pageH)
+  }
 
   // Logo only — no background box (matches DebitVoucher.tsx preview)
   // h-12 w-12 ≈ 12.7mm square
@@ -360,10 +410,10 @@ async function buildDebitCreditVoucherPdf(
   // Title + accent underline
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(20)
-  doc.setTextColor(...INK)
+  doc.setTextColor(...bodyText)
   doc.text(title, contentRight, 22, { align: 'right' })
   const titleW = doc.getTextWidth(title)
-  doc.setDrawColor(...accent)
+  doc.setDrawColor(...(monochrome ? bodyText : accent))
   doc.setLineWidth(1.6)
   doc.line(contentRight - Math.min(titleW, 42), 24.5, contentRight, 24.5)
 
@@ -436,11 +486,6 @@ async function buildDebitCreditVoucherPdf(
   })
 
   // Body rows
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8)
-  doc.setTextColor(...MUTED)
-  doc.text('Being the amount', contentX + 2, tableTop + headerH + 5)
-
   doc.setDrawColor(...LIGHT_GRAY)
   doc.setLineWidth(0.2)
   for (let i = 0; i < 5; i++) {
@@ -457,10 +502,9 @@ async function buildDebitCreditVoucherPdf(
   items.forEach((item, idx) => {
     const ly = tableTop + headerH + 10 + idx * 6.5
     if (ly >= tableTop + headerH + bodyH - 2) return
-    doc.setFillColor(255, 255, 255)
-    const tw = Math.min(doc.getTextWidth(item.description) + 2, descW - 4)
-    doc.rect(contentX + 1.5, ly - 3.5, tw, 4.5, 'F')
-    doc.text(item.description, contentX + 2, ly, { maxWidth: descW - 6 })
+    const wrapped = doc.splitTextToSize(item.description, descW - 6) as string[]
+    const shown = wrapped.slice(0, 2)
+    doc.text(shown, contentX + 2, ly)
     doc.setFont('helvetica', 'bold')
     doc.text(item.major, amtX + half - 2, ly, { align: 'right' })
     doc.setFont('helvetica', 'normal')
@@ -555,7 +599,8 @@ export async function loadJournalVoucherTemplate(
       await fetcher(),
       defaultJournalVoucherTemplate(),
     )
-  } catch {
+  } catch (error) {
+    if (options?.force) throw error
     cachedJournalTemplate = defaultJournalVoucherTemplate()
   }
   return cachedJournalTemplate
@@ -574,13 +619,14 @@ export async function downloadJournalVoucher(
   doc.save(`${entry.entryNumber}-${kind}-voucher.pdf`)
 }
 
-export async function previewJournalVoucher(
+export async function journalVoucherPreviewUrl(
   entry: JournalEntry,
   template?: BalanceSheetTemplate | null,
-): Promise<void> {
+): Promise<string> {
   const doc = await buildJournalVoucherPdf(entry, template)
   const blob = doc.output('blob')
-  const url = URL.createObjectURL(blob)
-  window.open(url, '_blank', 'noopener,noreferrer')
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  if (!(blob instanceof Blob) || blob.size < 500) {
+    throw new Error('The voucher PDF was empty. Save the template and try again.')
+  }
+  return URL.createObjectURL(blob)
 }

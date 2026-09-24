@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api } from '../api/client'
-import { ExpandableText } from '../components/ExpandableText'
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { api } from "../api/client";
+import { ExpandableText } from "../components/ExpandableText";
 import {
   journalDeleteDisabledReason,
   journalEditDisabledReason,
   journalReverseDisabledReason,
-} from '../components/JournalRegister'
-import { MetricCard } from '../components/MetricCard'
+} from "../components/JournalRegister";
+import { MetricCard } from "../components/MetricCard";
 import {
   JOURNAL_STATUS_LABEL,
   JOURNAL_TYPE_LABEL,
@@ -15,151 +15,202 @@ import {
   JournalType,
   money,
   type JournalEntry,
-} from '../types/accounting'
-import type { Project } from '../types/project'
+} from "../types/accounting";
+import type { Project } from "../types/project";
 import {
   downloadJournalVoucher,
+  journalVoucherPreviewUrl,
   loadJournalVoucherTemplate,
-  previewJournalVoucher,
   resolveVoucherKind,
   voucherKindTitle,
-} from '../utils/journalVoucherPdf'
+} from "../utils/journalVoucherPdf";
+import { VoucherPdfPreview } from "../components/VoucherPdfPreview";
 
 async function getJvTemplate() {
   return loadJournalVoucherTemplate(() => api.journalVoucherTemplate(), {
     force: true,
-  })
+  });
 }
 
 export function JournalDetailPage() {
-  const { id } = useParams()
-  const navigate = useNavigate()
-  const [entry, setEntry] = useState<JournalEntry | null>(null)
-  const [projects, setProjects] = useState<Project[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [entry, setEntry] = useState<JournalEntry | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!id) return
+    if (!id) return;
     Promise.all([api.journal(id), api.projects()])
       .then(([journal, projectRows]) => {
-        setEntry(journal)
-        setProjects(projectRows)
+        setEntry(journal);
+        setProjects(projectRows);
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : 'Unable to load journal')
-      })
-  }, [id])
+        setError(err instanceof Error ? err.message : "Unable to load journal");
+      });
+  }, [id]);
 
   async function onDelete() {
-    if (!entry) return
-    if (!window.confirm(`Delete ${entry.entryNumber}?`)) return
-    setBusy(true)
-    setError(null)
+    if (!entry) return;
+    if (!window.confirm(`Delete ${entry.entryNumber}?`)) return;
+    setBusy(true);
+    setError(null);
     try {
-      await api.deleteJournal(entry.id)
-      navigate('/journals')
+      await api.deleteJournal(entry.id);
+      navigate("/journals");
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to delete journal')
+      setError(err instanceof Error ? err.message : "Unable to delete journal");
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
   async function onReverse() {
-    if (!entry) return
+    if (!entry) return;
     if (
       !window.confirm(
         `Reverse ${entry.entryNumber}? A balancing reversing entry will be posted.`,
       )
     ) {
-      return
+      return;
     }
-    setBusy(true)
-    setError(null)
+    setBusy(true);
+    setError(null);
     try {
-      const reversing = await api.reverseJournal(entry.id)
-      navigate(`/journals/${reversing.id}`)
+      const reversing = await api.reverseJournal(entry.id);
+      navigate(`/journals/${reversing.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to reverse journal')
+      setError(
+        err instanceof Error ? err.message : "Unable to reverse journal",
+      );
     } finally {
-      setBusy(false)
+      setBusy(false);
+    }
+  }
+
+  function closePreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+  }
+
+  async function onPreviewPdf() {
+    if (!entry) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const template = await getJvTemplate();
+      const url = await journalVoucherPreviewUrl(entry, template);
+      setPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return url;
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to preview voucher PDF",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDownloadPdf() {
+    if (!entry) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const template = await getJvTemplate();
+      await downloadJournalVoucher(entry, template);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to download voucher PDF",
+      );
+    } finally {
+      setBusy(false);
     }
   }
 
   async function onPostDraft() {
-    if (!entry) return
-    setBusy(true)
-    setError(null)
+    if (!entry) return;
+    setBusy(true);
+    setError(null);
     try {
-      const posted = await api.postDraftJournal(entry.id)
-      setEntry(posted)
+      const posted = await api.postDraftJournal(entry.id);
+      setEntry(posted);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to post draft')
+      setError(err instanceof Error ? err.message : "Unable to post draft");
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
   if (!entry && !error) {
-    return <p className="muted">Loading voucher…</p>
+    return <p className='muted'>Loading voucher…</p>;
   }
 
   if (!entry) {
-    return <p className="form-error">{error}</p>
+    return <p className='form-error'>{error}</p>;
   }
 
-  const editReason = journalEditDisabledReason(entry)
-  const deleteReason = journalDeleteDisabledReason(entry)
-  const reverseReason = journalReverseDisabledReason(entry)
+  const editReason = journalEditDisabledReason(entry);
+  const deleteReason = journalDeleteDisabledReason(entry);
+  const reverseReason = journalReverseDisabledReason(entry);
   const projectLabel = entry.projectId
     ? (projects.find((project) => project.id === entry.projectId)?.code ??
-      'Tagged')
-    : '—'
+      "Tagged")
+    : "—";
   const typeLabel =
     JOURNAL_TYPE_LABEL[entry.journalType as JournalType] ??
     entry.journalType ??
-    'General'
-  const voucherKind = resolveVoucherKind(entry)
-  const voucherTitle = voucherKindTitle(voucherKind)
+    "General";
+  const voucherKind = resolveVoucherKind(entry);
+  const voucherTitle = voucherKindTitle(voucherKind);
 
   return (
     <>
-      <header className="workspace-header">
+      <header className='workspace-header'>
         <div>
           <h1>{voucherTitle}</h1>
-          <p className="muted">
+          <p className='muted'>
             {entry.entryNumber} · {typeLabel}
           </p>
         </div>
-        <div className="table-actions">
+        <div className='table-actions'>
           <button
-            type="button"
-            className="ghost"
-            onClick={() => void getJvTemplate().then((t) => previewJournalVoucher(entry, t))}
+            type='button'
+            className='ghost'
+            disabled={busy}
+            onClick={() => void onPreviewPdf()}
           >
             Preview PDF
           </button>
           <button
-            type="button"
-            onClick={() => void getJvTemplate().then((t) => downloadJournalVoucher(entry, t))}
+            type='button'
+            disabled={busy}
+            onClick={() => void onDownloadPdf()}
           >
             Download PDF
           </button>
           {!editReason ? (
-            <Link to={`/journals?edit=${entry.id}`} className="action-link">
+            <Link to={`/journals?edit=${entry.id}`} className='action-link'>
               Edit
             </Link>
           ) : null}
           {entry.status === JournalStatus.DRAFT ? (
-            <button type="button" disabled={busy} onClick={() => void onPostDraft()}>
+            <button
+              type='button'
+              disabled={busy}
+              onClick={() => void onPostDraft()}
+            >
               Post
             </button>
           ) : null}
           {!reverseReason ? (
             <button
-              type="button"
-              className="ghost"
+              type='button'
+              className='ghost'
               disabled={busy}
               onClick={() => void onReverse()}
             >
@@ -168,59 +219,71 @@ export function JournalDetailPage() {
           ) : null}
           {!deleteReason ? (
             <button
-              type="button"
-              className="ghost"
+              type='button'
+              className='ghost'
               disabled={busy}
               onClick={() => void onDelete()}
             >
               Delete
             </button>
           ) : null}
-          <Link to="/journals" className="ghost-link">
+          <Link
+            to='/journals'
+            className='outline ghost no-underline flex items-center gap-1'
+          >
             Back
           </Link>
         </div>
       </header>
 
-      {error ? <p className="form-error">{error}</p> : null}
+      {error ? <p className='form-error'>{error}</p> : null}
+      <VoucherPdfPreview
+        url={previewUrl}
+        title={`${entry.entryNumber} PDF`}
+        onClose={closePreview}
+      />
 
-      <section className="grid metric-card-grid">
-        <MetricCard variant="blue" title="Date" value={entry.date.slice(0, 10)} />
+      <section className='grid metric-card-grid'>
         <MetricCard
-          variant="amber"
-          title="Status"
+          variant='blue'
+          title='Date'
+          value={entry.date.slice(0, 10)}
+        />
+        <MetricCard
+          variant='amber'
+          title='Status'
           value={JOURNAL_STATUS_LABEL[entry.status] ?? entry.status}
         />
-        <MetricCard variant="purple" title="Type" value={typeLabel} />
-        <MetricCard variant="teal" title="Project" value={projectLabel} />
+        <MetricCard variant='purple' title='Type' value={typeLabel} />
+        <MetricCard variant='teal' title='Project' value={projectLabel} />
       </section>
 
-      <section className="table-card">
-        <div className="table-head">
+      <section className='table-card'>
+        <div className='table-head'>
           <h2>Header</h2>
-          <p className="muted">
+          <p className='muted'>
             Source {entry.source}
-            {entry.reference ? ` · Ref ${entry.reference}` : ''}
-            {entry.postedAt ? ` · Posted ${entry.postedAt.slice(0, 10)}` : ''}
+            {entry.reference ? ` · Ref ${entry.reference}` : ""}
+            {entry.postedAt ? ` · Posted ${entry.postedAt.slice(0, 10)}` : ""}
           </p>
         </div>
         <p>{entry.memo}</p>
       </section>
 
-      <section className="table-card">
-        <div className="table-head">
+      <section className='table-card'>
+        <div className='table-head'>
           <h2>Accounting entries</h2>
         </div>
-        <div className="journal-lines-scroll">
-          <table className="journal-lines-table">
+        <div className='journal-lines-scroll'>
+          <table className='journal-lines-table'>
             <thead>
               <tr>
                 <th>Account</th>
                 <th>Entity</th>
                 <th>Project</th>
                 <th>Description</th>
-                <th className="num">Debit</th>
-                <th className="num">Credit</th>
+                <th className='num'>Debit</th>
+                <th className='num'>Credit</th>
               </tr>
             </thead>
             <tbody>
@@ -233,23 +296,24 @@ export function JournalDetailPage() {
                   </td>
                   <td>
                     {line.entityName
-                      ? `${line.entityType ?? ''} · ${line.entityName}`
-                      : '—'}
+                      ? `${line.entityType ?? ""} · ${line.entityName}`
+                      : "—"}
                   </td>
                   <td>
                     {line.projectId
-                      ? (projects.find((project) => project.id === line.projectId)
-                          ?.name ?? 'Tagged')
-                      : '—'}
+                      ? (projects.find(
+                          (project) => project.id === line.projectId,
+                        )?.name ?? "Tagged")
+                      : "—"}
                   </td>
                   <td>
                     <ExpandableText text={line.description} maxChars={48} />
                   </td>
-                  <td className="num amount-debit-cell">
-                    {line.debit > 0 ? money(line.debit) : '—'}
+                  <td className='num amount-debit-cell'>
+                    {line.debit > 0 ? money(line.debit) : "—"}
                   </td>
-                  <td className="num amount-credit-cell">
-                    {line.credit > 0 ? money(line.credit) : '—'}
+                  <td className='num amount-credit-cell'>
+                    {line.credit > 0 ? money(line.credit) : "—"}
                   </td>
                 </tr>
               ))}
@@ -257,13 +321,13 @@ export function JournalDetailPage() {
             <tfoot>
               <tr>
                 <th colSpan={4}>Totals</th>
-                <th className="num">{money(entry.totalDebit)}</th>
-                <th className="num">{money(entry.totalCredit)}</th>
+                <th className='num'>{money(entry.totalDebit)}</th>
+                <th className='num'>{money(entry.totalCredit)}</th>
               </tr>
             </tfoot>
           </table>
         </div>
       </section>
     </>
-  )
+  );
 }

@@ -54,7 +54,7 @@ export type FooterConfig = {
 };
 
 export type VoucherConfig = {
-  theme: 'yellow' | 'blue' | 'emerald' | 'crimson' | 'charcoal';
+  theme: 'bw' | 'color';
   companySubtitle: string;
   currencyLabel: string;
   majorUnitLabel: string;
@@ -102,7 +102,7 @@ const defaultFooter = (): FooterConfig => ({
 
 export function defaultVoucherConfig(): VoucherConfig {
   return {
-    theme: 'yellow',
+    theme: 'color',
     companySubtitle: '',
     currencyLabel: 'Amount in BDT',
     majorUnitLabel: 'TAKA',
@@ -342,6 +342,11 @@ export function hydrateTemplate(
       ...defaultVoucherConfig(),
       ...(base.voucherConfig ?? {}),
       ...(partial.voucherConfig ?? {}),
+      theme: ['bw', 'charcoal'].includes(
+        String(partial.voucherConfig?.theme ?? base.voucherConfig?.theme ?? ''),
+      )
+        ? 'bw'
+        : 'color',
       signatoryTitles:
         partial.voucherConfig?.signatoryTitles?.length
           ? partial.voucherConfig.signatoryTitles

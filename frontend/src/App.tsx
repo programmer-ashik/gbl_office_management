@@ -41,6 +41,10 @@ import { ProcurementCatalogPage } from './pages/ProcurementCatalogPage'
 import { QuotationProductSelectPage } from './pages/QuotationProductSelectPage'
 import { ReceivablesPage } from './pages/ReceivablesPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { PurchaseInvoiceReportPage } from './pages/reports/PurchaseInvoiceReportPage'
+import { SalesInvoiceReportPage } from './pages/reports/SalesInvoiceReportPage'
+import { TreasuryTransactionReportPage } from './pages/reports/TreasuryTransactionReportPage'
+import { DayReportPage } from './pages/reports/DayReportPage'
 import { SignupPage } from './pages/SignupPage'
 import { SupplierDetailPage } from './pages/SupplierDetailPage'
 import { TreasuryDetailPage } from './pages/TreasuryDetailPage'
@@ -103,6 +107,23 @@ export default function App() {
             <Route path="/ledgers/:accountCode" element={<AccountLedgerPage />} />
             <Route path="/customers" element={<CustomersPage />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route
+              path="/reports/purchase/invoices"
+              element={<PurchaseInvoiceReportPage />}
+            />
+            <Route
+              path="/reports/sales/invoices"
+              element={<SalesInvoiceReportPage />}
+            />
+            <Route
+              path="/reports/accounts/cash"
+              element={<TreasuryTransactionReportPage mode="cash" />}
+            />
+            <Route
+              path="/reports/accounts/bank"
+              element={<TreasuryTransactionReportPage mode="bank" />}
+            />
+            <Route path="/reports/day" element={<DayReportPage />} />
             <Route path="/trial-balance" element={<TrialBalancePage />} />
             <Route path="/balance-sheet" element={<BalanceSheetPage />} />
 

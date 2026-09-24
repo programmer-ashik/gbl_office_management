@@ -12,6 +12,14 @@ import {
 } from '../nav/navigation'
 import { ROLE_LABEL } from '../types/auth'
 
+function groupKey(sectionId: string, label: string): string {
+  return `${sectionId}::${label}`
+}
+
+function pathMatches(to: string, end: boolean | undefined, pathname: string): boolean {
+  return end ? pathname === to : pathname === to || pathname.startsWith(`${to}/`)
+}
+
 function sectionIdForPath(
   sections: ReturnType<typeof sectionsForRole>,
   pathname: string,
@@ -40,6 +48,7 @@ export function AppSidebar() {
   const [openSectionId, setOpenSectionId] = useState<string | null>(() =>
     user ? readOpenSectionId(user.role) : null,
   )
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set())
 
   const sections = useMemo(
     () => (user ? sectionsForRole(user.role) : []),
@@ -56,6 +65,28 @@ export function AppSidebar() {
       return matched
     })
   }, [user, sections, location.pathname])
+
+  useEffect(() => {
+    setOpenGroups((current) => {
+      const next = new Set(current)
+      let changed = false
+      for (const section of sections) {
+        for (const item of section.items) {
+          if (!item.children?.length) continue
+          const active = item.children.some((child) =>
+            pathMatches(child.to, child.end, location.pathname),
+          )
+          if (!active) continue
+          const key = groupKey(section.id, item.label)
+          if (!next.has(key)) {
+            next.add(key)
+            changed = true
+          }
+        }
+      }
+      return changed ? next : current
+    })
+  }, [sections, location.pathname])
 
   const collapsedSections = useMemo(() => {
     const seen = new Set<string>()
@@ -82,6 +113,15 @@ export function AppSidebar() {
     setOpenSectionId((current) => {
       const next = current === id ? null : id
       writeOpenSectionId(next)
+      return next
+    })
+  }
+
+  function toggleGroup(key: string) {
+    setOpenGroups((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
@@ -161,37 +201,79 @@ export function AppSidebar() {
                             key={`${section.id}-${item.label}-group`}
                             className="nav-subgroup"
                           >
-                            <div className="nav-subgroup-label">
-                              <NavIcon name={item.icon} size={14} />
-                              <span>{item.label}</span>
-                            </div>
-                            {item.children.map((child) => (
-                              <NavLink
-                                key={`${section.id}-${child.label}-${child.to}`}
-                                to={child.to}
-                                end={child.end}
-                                title={child.hint}
-                                className={({ isActive }) =>
-                                  isActive
-                                    ? 'nav-link nav-link-nested is-active'
-                                    : 'nav-link nav-link-nested'
-                                }
-                              >
-                                <span className="nav-link-main">
-                                  <NavIcon name={child.icon} size={14} />
-                                  <span className="nav-link-copy">
-                                    <span className="nav-link-label">
-                                      {child.label}
-                                    </span>
-                                    {child.hint ? (
-                                      <span className="nav-link-hint">
-                                        {child.hint}
-                                      </span>
-                                    ) : null}
+                            <button
+                              type="button"
+                              className="nav-subgroup-toggle"
+                              aria-expanded={openGroups.has(
+                                groupKey(section.id, item.label),
+                              )}
+                              onClick={() =>
+                                toggleGroup(groupKey(section.id, item.label))
+                              }
+                            >
+                              <span className="nav-link-main">
+                                <NavIcon name={item.icon} size={15} />
+                                <span className="nav-link-copy">
+                                  <span className="nav-link-label">
+                                    {item.label}
                                   </span>
+                                  {item.hint ? (
+                                    <span className="nav-link-hint">
+                                      {item.hint}
+                                    </span>
+                                  ) : null}
                                 </span>
-                              </NavLink>
-                            ))}
+                              </span>
+                              <span
+                                className={
+                                  openGroups.has(
+                                    groupKey(section.id, item.label),
+                                  )
+                                    ? 'nav-chevron is-open'
+                                    : 'nav-chevron'
+                                }
+                                aria-hidden
+                              >
+                                <NavIcon name="chevron" size={12} />
+                              </span>
+                            </button>
+                            <div
+                              className={
+                                openGroups.has(groupKey(section.id, item.label))
+                                  ? 'nav-subgroup-panel is-open'
+                                  : 'nav-subgroup-panel'
+                              }
+                            >
+                              <div className="nav-subgroup-items">
+                                {item.children.map((child) => (
+                                  <NavLink
+                                    key={`${section.id}-${child.label}-${child.to}`}
+                                    to={child.to}
+                                    end={child.end}
+                                    title={child.hint}
+                                    className={({ isActive }) =>
+                                      isActive
+                                        ? 'nav-link nav-link-nested is-active'
+                                        : 'nav-link nav-link-nested'
+                                    }
+                                  >
+                                    <span className="nav-link-main">
+                                      <NavIcon name={child.icon} size={14} />
+                                      <span className="nav-link-copy">
+                                        <span className="nav-link-label">
+                                          {child.label}
+                                        </span>
+                                        {child.hint ? (
+                                          <span className="nav-link-hint">
+                                            {child.hint}
+                                          </span>
+                                        ) : null}
+                                      </span>
+                                    </span>
+                                  </NavLink>
+                                ))}
+                              </div>
+                            </div>
                           </div>
                         ) : (
                           <NavLink

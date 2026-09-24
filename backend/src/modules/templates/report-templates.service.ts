@@ -119,7 +119,16 @@ export class ReportTemplatesService {
       headerConfig: hydrated.headerConfig,
       footerConfig: hydrated.footerConfig,
       layoutStructure: hydrated.layoutStructure,
-      voucherConfig: hydrated.voucherConfig ?? undefined,
+      voucherConfig: hydrated.voucherConfig
+        ? {
+            ...hydrated.voucherConfig,
+            theme: ['bw', 'charcoal'].includes(
+              String(hydrated.voucherConfig.theme ?? ''),
+            )
+              ? 'bw'
+              : 'color',
+          }
+        : undefined,
       isDefault: true,
       updatedBy: new Types.ObjectId(userId),
     };
@@ -134,7 +143,9 @@ export class ReportTemplatesService {
       existing.headerConfig = payload.headerConfig;
       existing.footerConfig = payload.footerConfig;
       existing.layoutStructure = payload.layoutStructure;
-      existing.voucherConfig = payload.voucherConfig;
+      existing.voucherConfig = payload.voucherConfig
+        ? { ...payload.voucherConfig }
+        : undefined;
       existing.isDefault = true;
       existing.updatedBy = payload.updatedBy;
       if (payload.companyLogoUrl) {

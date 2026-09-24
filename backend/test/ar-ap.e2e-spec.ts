@@ -137,7 +137,7 @@ describe('Phase 7 accounts payable and receivable (e2e)', () => {
     expect(invoice.body.data.openAmount).toBe(200_000);
 
     const arLedger = await request(app)
-      .get('/api/v1/ledgers/1121')
+      .get('/api/v1/ledgers/1151')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
     expect(arLedger.body.data.account.balance).toBe(200_000);
@@ -159,7 +159,7 @@ describe('Phase 7 accounts payable and receivable (e2e)', () => {
     expect(collected.body.data.openAmount).toBe(120_000);
 
     const arLedger = await request(app)
-      .get('/api/v1/ledgers/1121')
+      .get('/api/v1/ledgers/1151')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
     expect(arLedger.body.data.account.balance).toBe(120_000);

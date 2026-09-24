@@ -72,7 +72,7 @@ const RULES_BY_CODE: Record<string, DimensionRule> = {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
-    label: 'Hand Cash',
+    label: 'Cash in Hand',
   },
   [SystemAccountCode.BANK]: {
     entityType: JournalEntityType.TREASURY,
@@ -86,11 +86,23 @@ const RULES_BY_CODE: Record<string, DimensionRule> = {
     projectRequired: false,
     label: 'DBBL Bank',
   },
+  [SystemAccountCode.CITY_BANK]: {
+    entityType: JournalEntityType.TREASURY,
+    entityRequired: false,
+    projectRequired: false,
+    label: 'City Bank',
+  },
   [SystemAccountCode.MOBILE_BANKING]: {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
-    label: 'Mobile Banking',
+    label: 'bKash',
+  },
+  [SystemAccountCode.NAGAD]: {
+    entityType: JournalEntityType.TREASURY,
+    entityRequired: false,
+    projectRequired: false,
+    label: 'Nagad',
   },
 };
 

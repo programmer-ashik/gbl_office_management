@@ -132,7 +132,7 @@ const DEFAULT_TREASURY: Array<{
   institution?: string;
 }> = [
   {
-    name: 'Hand Cash',
+    name: 'Cash in Hand',
     kind: TreasuryKind.CASH,
     glAccountCode: SystemAccountCode.CASH,
   },
@@ -143,10 +143,16 @@ const DEFAULT_TREASURY: Array<{
     institution: 'BRAC Bank',
   },
   {
-    name: 'Mobile Banking (bKash / Nagad)',
+    name: 'bKash',
     kind: TreasuryKind.MOBILE_BANKING,
-    glAccountCode: SystemAccountCode.MOBILE_BANKING,
-    institution: 'bKash / Nagad',
+    glAccountCode: SystemAccountCode.BKASH,
+    institution: 'bKash',
+  },
+  {
+    name: 'Nagad',
+    kind: TreasuryKind.MOBILE_BANKING,
+    glAccountCode: SystemAccountCode.NAGAD,
+    institution: 'Nagad',
   },
 ];
 
@@ -207,34 +213,23 @@ export class BankingService {
       created += 1;
     }
 
-    // Align Hand Cash GL display name with CoA / treasury label.
-    const cashGl = await AccountModel.findOne({
-      code: SystemAccountCode.CASH,
-    }).exec();
-    if (cashGl && cashGl.name !== 'Hand Cash') {
-      cashGl.name = 'Hand Cash';
-      await cashGl.save();
-    }
-
-    // Retire duplicate "Cash in Hand" (1115) — same concept as Hand Cash (1111).
+    // 1115 was a duplicate cash account. Remove it; Cash in Hand is 1111.
     const legacyCash = await TreasuryAccountModel.findOne({
       glAccountCode: LEGACY_CASH_IN_HAND_CODE,
     }).exec();
-    if (legacyCash && legacyCash.isActive) {
-      legacyCash.isActive = false;
-      legacyCash.isSystem = false;
-      await legacyCash.save();
-      console.log(
-        'Deactivated legacy treasury "Cash in Hand" (1115); use Hand Cash (1111)',
-      );
+    if (legacyCash) {
+      await legacyCash.deleteOne();
     }
 
     const legacyGl = await AccountModel.findOne({
       code: LEGACY_CASH_IN_HAND_CODE,
     }).exec();
-    if (legacyGl && legacyGl.isActive) {
-      legacyGl.isActive = false;
-      await legacyGl.save();
+    if (legacyGl) {
+      await AccountModel.updateMany(
+        { parentCode: LEGACY_CASH_IN_HAND_CODE },
+        { $set: { parentCode: SystemAccountCode.CASH } },
+      ).exec();
+      await legacyGl.deleteOne();
     }
 
     if (created > 0) {
@@ -277,7 +272,11 @@ export class BankingService {
     }
 
     const parentCode = TREASURY_PARENT_CODE[dto.kind];
-    glCode = await this.nextChildCode(parentCode);
+    const suggested = await this.accountsService.suggestNextCode(
+      AccountType.ASSET,
+      parentCode,
+    );
+    glCode = suggested.code;
     const gl = await this.accountsService.create({
       code: glCode,
       name: dto.name.trim(),
@@ -1035,23 +1034,6 @@ export class BankingService {
     return new Map(
       rows.map((row) => [row._id, row.debitMinor - row.creditMinor]),
     );
-  }
-
-  private async nextChildCode(parentCode: string): Promise<string> {
-    const escaped = parentCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const existing = await AccountModel.find({
-      code: new RegExp(`^${escaped}-\\d+$`),
-    })
-      .select('code')
-      .exec();
-    let max = 0;
-    for (const account of existing) {
-      const seq = Number(account.code.slice(parentCode.length + 1));
-      if (seq > max) {
-        max = seq;
-      }
-    }
-    return `${parentCode}-${String(max + 1).padStart(2, '0')}`;
   }
 
   private async nextNumber(kind: 'transfer' | 'reconciliation', date: Date) {

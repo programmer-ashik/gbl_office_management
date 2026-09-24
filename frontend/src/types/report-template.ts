@@ -47,7 +47,7 @@ export type FooterConfig = {
 
 /** Debit / Credit landscape voucher branding (settings + PDF). */
 export type VoucherConfig = {
-  theme: 'yellow' | 'blue' | 'emerald' | 'crimson' | 'charcoal'
+  theme: 'bw' | 'color'
   companySubtitle: string
   currencyLabel: string
   majorUnitLabel: string
@@ -175,7 +175,7 @@ export function defaultBalanceSheetTemplate(): BalanceSheetTemplate {
 
 export function defaultVoucherConfig(): VoucherConfig {
   return {
-    theme: 'yellow',
+    theme: 'color',
     companySubtitle: '',
     currencyLabel: 'Amount in BDT',
     majorUnitLabel: 'TAKA',
@@ -314,6 +314,13 @@ export function hydrateClientTemplate(
       ...defaultVoucherConfig(),
       ...(fallback.voucherConfig ?? {}),
       ...(partial.voucherConfig ?? {}),
+      theme: ['bw', 'charcoal'].includes(
+        String(
+          partial.voucherConfig?.theme ?? fallback.voucherConfig?.theme ?? '',
+        ),
+      )
+        ? 'bw'
+        : 'color',
       signatoryTitles:
         partial.voucherConfig?.signatoryTitles?.length
           ? partial.voucherConfig.signatoryTitles
