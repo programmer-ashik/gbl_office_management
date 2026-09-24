@@ -91,7 +91,7 @@ export function SignupPage() {
           </button>
 
           <p className='switch-auth'>
-            Already registered? <Link to='/login'>Sign in test</Link>
+            Already registered? <Link to='/login'>Sign in</Link>
           </p>
         </form>
       </section>
