@@ -401,11 +401,11 @@ export const NAV_SECTIONS: NavSection[] = [
         roles: APPROVALS,
       },
       {
-        label: 'User Roles & Staff',
+        label: 'Users & Permissions',
         to: '/settings/users',
         icon: 'users',
-        hint: 'RBAC directory',
-        roles: [Role.ADMIN, Role.ACCOUNTANT],
+        hint: 'Create · Roles · Access',
+        roles: [Role.ADMIN],
       },
       {
         label: 'Audit Trail',

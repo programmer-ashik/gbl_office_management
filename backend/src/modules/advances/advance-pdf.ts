@@ -6,6 +6,7 @@ import type { AdvanceDocument } from './advance.model'
 
 const STATUS_LABEL: Record<AdvanceStatus, string> = {
   [AdvanceStatus.PENDING]: 'Pending',
+  [AdvanceStatus.APPROVED]: 'Approved',
   [AdvanceStatus.REJECTED]: 'Rejected',
   [AdvanceStatus.DISBURSED]: 'Disbursed',
   [AdvanceStatus.SUBMITTED]: 'Submitted',

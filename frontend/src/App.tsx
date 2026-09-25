@@ -15,6 +15,7 @@ import { CashFlowAnalyticsPage } from './pages/CashFlowAnalyticsPage'
 import { ChartOfAccountsPage } from './pages/ChartOfAccountsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { EmployeesPage } from './pages/EmployeesPage'
+import { UsersPermissionsPage } from './pages/UsersPermissionsPage'
 import { InvoiceDetailPage } from './pages/InvoiceDetailPage'
 import { InventoryPage } from './pages/InventoryPage'
 import { JournalsPage } from './pages/JournalsPage'
@@ -45,7 +46,6 @@ import { PurchaseInvoiceReportPage } from './pages/reports/PurchaseInvoiceReport
 import { SalesInvoiceReportPage } from './pages/reports/SalesInvoiceReportPage'
 import { TreasuryTransactionReportPage } from './pages/reports/TreasuryTransactionReportPage'
 import { DayReportPage } from './pages/reports/DayReportPage'
-import { SignupPage } from './pages/SignupPage'
 import { SupplierDetailPage } from './pages/SupplierDetailPage'
 import { TreasuryDetailPage } from './pages/TreasuryDetailPage'
 import { TrialBalancePage } from './pages/TrialBalancePage'
@@ -75,14 +75,7 @@ export default function App() {
               </GuestRoute>
             }
           />
-          <Route
-            path="/signup"
-            element={
-              <GuestRoute>
-                <SignupPage />
-              </GuestRoute>
-            }
-          />
+          <Route path="/signup" element={<Navigate to="/login" replace />} />
           <Route
             element={
               <ProtectedRoute>
@@ -226,7 +219,14 @@ export default function App() {
               element={<Navigate to="/accounts" replace />}
             />
             <Route path="/settings/approvals" element={<ApprovalsPage />} />
-            <Route path="/settings/users" element={<EmployeesPage />} />
+            <Route
+              path="/settings/users"
+              element={
+                <AdminRoute>
+                  <UsersPermissionsPage />
+                </AdminRoute>
+              }
+            />
             <Route path="/settings/audit" element={<AuditPage />} />
             <Route
               path="/settings/templates/balance-sheet"

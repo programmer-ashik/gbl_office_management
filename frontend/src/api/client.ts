@@ -221,10 +221,36 @@ export const api = {
       body: JSON.stringify({}),
     }),
   users: () => request<PublicUser[]>('/users'),
+  updateUserRole: (id: string, role: Role) =>
+    request<PublicUser>(`/users/${id}/role`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    }),
+  updateUserStatus: (id: string, isActive: boolean) =>
+    request<PublicUser>(`/users/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+    }),
+  updateUserPermissions: (id: string, allowedPermissions: string[]) =>
+    request<PublicUser>(`/users/${id}/permissions`, {
+      method: 'PATCH',
+      body: JSON.stringify({ allowedPermissions }),
+    }),
+  resetUserPassword: (id: string, newPassword: string) =>
+    request<PublicUser>(`/users/${id}/reset-password`, {
+      method: 'PUT',
+      body: JSON.stringify({ newPassword }),
+    }),
+  changeOwnPassword: (body: { oldPassword: string; newPassword: string }) =>
+    request<PublicUser>('/users/profile/change-password', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   employees: () => request<PublicUser[]>('/employees'),
   createEmployee: (body: {
     email: string
-    password: string
+    password?: string
+    default_password?: string
     firstName: string
     lastName: string
     role?: Role
@@ -513,6 +539,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateQuotation: (id: string, body: CreateQuotationBody) =>
+    request<Quotation>(`/quotations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteQuotation: (id: string) =>
+    request<{ deleted: boolean }>(`/quotations/${id}`, {
+      method: 'DELETE',
+    }),
   updateQuotationStatus: (
     id: string,
     status: QuotationStatus,
@@ -724,6 +759,11 @@ export const api = {
     request<Advance>(`/advances/${id}/reject`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    }),
+  approveAdvance: (id: string) =>
+    request<Advance>(`/advances/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({}),
     }),
   disburseAdvance: (id: string, body: { treasuryId: string; date: string; memo?: string }) =>
     request<Advance>(`/advances/${id}/disburse`, {

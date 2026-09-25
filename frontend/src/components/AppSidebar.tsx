@@ -5,12 +5,14 @@ import { NavIcon } from '../nav/icons'
 import {
   readOpenSectionId,
   readRailCollapsed,
-  sectionsForRole,
   writeOpenSectionId,
   writeRailCollapsed,
   type NavSection,
 } from '../nav/navigation'
 import { ROLE_LABEL } from '../types/auth'
+import {
+  sectionsForUser,
+} from '../utils/rolePermissions'
 
 function groupKey(sectionId: string, label: string): string {
   return `${sectionId}::${label}`
@@ -21,7 +23,7 @@ function pathMatches(to: string, end: boolean | undefined, pathname: string): bo
 }
 
 function sectionIdForPath(
-  sections: ReturnType<typeof sectionsForRole>,
+  sections: NavSection[],
   pathname: string,
 ): string | null {
   let best: { id: string; score: number } | null = null
@@ -51,7 +53,14 @@ export function AppSidebar() {
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set())
 
   const sections = useMemo(
-    () => (user ? sectionsForRole(user.role) : []),
+    () =>
+      user
+        ? sectionsForUser(
+            user.role,
+            user.allowedPermissions,
+            user.deniedPermissions ?? [],
+          )
+        : [],
     [user],
   )
 

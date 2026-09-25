@@ -1,7 +1,15 @@
 import type { ClientSession } from 'mongoose';
 import { Types } from 'mongoose';
 import { Role } from '../../common/enums/role.enum';
-import { badRequest, notFound } from '../../common/errors/app-error';
+import {
+  badRequest,
+  notFound,
+  unauthorized,
+} from '../../common/errors/app-error';
+import {
+  comparePassword,
+  hashPassword,
+} from '../../common/utils/crypto.util';
 import { UserModel, type UserDocument } from './user.model';
 
 export interface CreateUserInput {
@@ -20,6 +28,8 @@ export interface PublicUser {
   lastName: string;
   role: Role;
   isActive: boolean;
+  allowedPermissions: string[] | null;
+  deniedPermissions: string[];
   lastLoginAt: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
@@ -34,6 +44,10 @@ export class UsersService {
       lastName: user.lastName,
       role: user.role,
       isActive: user.isActive,
+      allowedPermissions: Array.isArray(user.allowedPermissions)
+        ? [...user.allowedPermissions]
+        : null,
+      deniedPermissions: [...(user.deniedPermissions ?? [])],
       lastLoginAt: user.lastLoginAt ?? null,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
@@ -82,6 +96,13 @@ export class UsersService {
     return UserModel.findById(id).exec();
   }
 
+  findByIdWithPassword(id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      return Promise.resolve(null);
+    }
+    return UserModel.findById(id).select('+password').exec();
+  }
+
   async findByIdOrFail(id: string): Promise<UserDocument> {
     const user = await this.findById(id);
     if (!user) {
@@ -120,6 +141,26 @@ export class UsersService {
     }
 
     user.role = role;
+    // Drop denials that no longer apply to the new role catalog.
+    user.deniedPermissions = (user.deniedPermissions ?? []).filter(Boolean);
+    await user.save();
+    return this.toPublicUser(user);
+  }
+
+  async updatePermissions(
+    id: string,
+    allowedPermissions: string[],
+  ): Promise<PublicUser> {
+    const user = await this.findByIdOrFail(id);
+    const cleaned = [
+      ...new Set(
+        (allowedPermissions ?? [])
+          .map((value) => String(value).trim())
+          .filter(Boolean),
+      ),
+    ];
+    user.allowedPermissions = cleaned;
+    user.deniedPermissions = [];
     await user.save();
     return this.toPublicUser(user);
   }
@@ -138,6 +179,44 @@ export class UsersService {
     }
 
     user.isActive = isActive;
+    await user.save();
+    return this.toPublicUser(user);
+  }
+
+  /** Admin sets a new password for another user (hashed with bcrypt). */
+  async resetPassword(id: string, newPassword: string): Promise<PublicUser> {
+    const user = await this.findByIdWithPassword(id);
+    if (!user) {
+      throw notFound('User not found');
+    }
+    user.password = await hashPassword(newPassword);
+    await user.save();
+    return this.toPublicUser(user);
+  }
+
+  /** Authenticated user changes their own password after verifying the old one. */
+  async changeOwnPassword(
+    userId: string,
+    oldPassword: string,
+    newPassword: string,
+  ): Promise<PublicUser> {
+    const user = await this.findByIdWithPassword(userId);
+    if (!user) {
+      throw notFound('User not found');
+    }
+
+    const matches = await comparePassword(oldPassword, user.password);
+    if (!matches) {
+      throw unauthorized('Current password is incorrect');
+    }
+
+    if (oldPassword === newPassword) {
+      throw badRequest(
+        'New password must be different from the current password',
+      );
+    }
+
+    user.password = await hashPassword(newPassword);
     await user.save();
     return this.toPublicUser(user);
   }
