@@ -42,6 +42,17 @@ jobs:
             npm install
             npm run build
 
+            # Production defaults on the VPS .env (do not overwrite existing secrets)
+            touch .env
+            grep -q '^SEED_DEMO=' .env || echo 'SEED_DEMO=false' >> .env
+            if [ "${{ github.ref_name }}" = "main" ]; then
+              if grep -q '^NODE_ENV=' .env; then
+                sed -i 's/^NODE_ENV=.*/NODE_ENV=production/' .env
+              else
+                echo 'NODE_ENV=production' >> .env
+              fi
+            fi
+
             # 4. Safely restart or start PM2
-            pm2 restart ${{ github.ref_name }}-backend --update-env || pm2 start npm --name "${{ github.ref_name }}-backend" -- start
+            pm2 restart ${{ github.ref_name }}-backend --update-env || pm2 start npm --name "${{ github.ref_name }}-backend" -- run start:prod
             pm2 save

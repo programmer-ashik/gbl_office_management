@@ -142,13 +142,18 @@ export async function createApp(): Promise<Express> {
   const templatesService = new ReportTemplatesService();
   const quotationsService = new QuotationsService(usersService);
 
-  if (!config.mongodb.memory) {
+  if (config.seedDemo) {
+    console.warn('SEED_DEMO=true — loading demo users and sample data');
     await seedDemoData({
       usersService,
       bankingService,
       journalService,
       arApService,
     });
+  } else if (config.nodeEnv === 'production') {
+    console.log(
+      'Production boot: CoA + admin bootstrap only (no demo data). Add employees from the admin UI.',
+    );
   }
 
   const app = express();

@@ -142,7 +142,7 @@ async function request<T>(
 
   const json = (await res.json()) as ApiSuccess<T> | ApiError
 
-  if (res.status === 401 && retry && !path.startsWith('/auth/login') && !path.startsWith('/auth/signup')) {
+  if (res.status === 401 && retry && !path.startsWith('/auth/login')) {
     const refreshed = await tryRefresh()
     if (refreshed) {
       return request<T>(path, options, false)
@@ -199,16 +199,6 @@ async function downloadBlob(path: string, fallbackName: string): Promise<void> {
 
 export const api = {
   health: () => request<HealthStatus>('/health'),
-  signup: (body: {
-    email: string
-    password: string
-    firstName: string
-    lastName: string
-  }) =>
-    request<AuthResult>('/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
   login: (body: { email: string; password: string }) =>
     request<AuthResult>('/auth/login', {
       method: 'POST',
