@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -118,11 +119,32 @@ export class CreateSupplierPaymentDto {
   @IsString()
   @MaxLength(500)
   memo?: string;
+
+  /** Admin-only: allow payment when amount exceeds (or outstanding is zero). */
+  @IsOptional()
+  @IsBoolean()
+  overridePayable?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  overrideReason?: string;
 }
 
 export class ExecuteSupplierPaymentDto {
   @IsDateString()
   date: string;
+
+  @IsOptional()
+  @IsBoolean()
+  overridePayable?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  overrideReason?: string;
 }
 
 export class AgingQueryDto {

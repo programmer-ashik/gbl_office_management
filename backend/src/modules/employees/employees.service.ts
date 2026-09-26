@@ -1,5 +1,5 @@
 import { Role } from '../../common/enums/role.enum';
-import { conflict, forbidden } from '../../common/errors/app-error';
+import { badRequest, conflict, forbidden } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { hashPassword } from '../../common/utils/crypto.util';
 import type { PublicUser, UsersService } from '../users/users.service';
@@ -26,7 +26,14 @@ export class EmployeesService {
     this.assertAdmin(actor);
     const role = dto.role ?? Role.EMPLOYEE;
     if (!(STAFF_ROLES as readonly Role[]).includes(role)) {
-      throw forbidden('Only employee, project manager, or accountant roles can be created here');
+      throw forbidden(
+        'Only employee, project manager, or accountant roles can be created here',
+      );
+    }
+
+    const plainPassword = dto.default_password ?? dto.password;
+    if (!plainPassword) {
+      throw badRequest('default_password is required');
     }
 
     const existing = await this.usersService.findByEmail(dto.email);
@@ -34,7 +41,7 @@ export class EmployeesService {
       throw conflict('Email is already registered');
     }
 
-    const password = await hashPassword(dto.password);
+    const password = await hashPassword(plainPassword);
     const user = await this.usersService.create({
       email: dto.email,
       password,

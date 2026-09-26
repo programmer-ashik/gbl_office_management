@@ -17,10 +17,10 @@ const PARTY_CONTROL_ACCOUNTS: Record<
   string,
   { entityType: 'customer' | 'supplier' | 'employee'; label: string }
 > = {
-  '1121': { entityType: 'customer', label: 'Customers' },
+  '1151': { entityType: 'customer', label: 'Customers' },
   '2111': { entityType: 'supplier', label: 'Suppliers' },
   '2113': { entityType: 'supplier', label: 'Subcontractors' },
-  '1131': { entityType: 'employee', label: 'Employees' },
+  '1161': { entityType: 'employee', label: 'Employees' },
   '2121': { entityType: 'employee', label: 'Employees' },
 }
 
@@ -366,7 +366,7 @@ export function ChartOfAccountsPage() {
       if (!Number.isFinite(amount) || amount <= 0) {
         throw new Error('Enter a positive opening amount')
       }
-      if (partyModal.accountCode === '1131' && !partyProjectId) {
+      if (partyModal.accountCode === '1161' && !partyProjectId) {
         throw new Error('Employee advances require a project')
       }
       const journal = await api.postPartyOpeningBalance({
@@ -758,7 +758,7 @@ export function ChartOfAccountsPage() {
               placeholder="0.00"
             />
           </label>
-          {partyModal?.accountCode === '1131' ? (
+          {partyModal?.accountCode === '1161' ? (
             <label>
               Project
               <Select

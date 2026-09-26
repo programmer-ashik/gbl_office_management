@@ -1045,7 +1045,9 @@ export class JournalService {
         accountCode === SystemAccountCode.CASH ||
         accountCode === SystemAccountCode.BANK ||
         accountCode === SystemAccountCode.BANK_ALT ||
-        accountCode === SystemAccountCode.MOBILE_BANKING
+        accountCode === SystemAccountCode.CITY_BANK ||
+        accountCode === SystemAccountCode.MOBILE_BANKING ||
+        accountCode === SystemAccountCode.NAGAD
       ) {
         type = JournalEntityType.TREASURY;
       } else {

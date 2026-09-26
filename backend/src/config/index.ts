@@ -65,6 +65,14 @@ class EnvironmentVariables {
   @IsOptional()
   @IsString()
   BOOTSTRAP_ADMIN_PASSWORD?: string;
+
+  /** When true, inserts demo users/projects/sample vouchers. Keep false in production. */
+  @IsOptional()
+  @Transform(
+    ({ value }: { value: unknown }) => value === true || value === 'true',
+  )
+  @IsBoolean()
+  SEED_DEMO = false;
 }
 
 export type AppConfig = {
@@ -85,6 +93,7 @@ export type AppConfig = {
     email?: string;
     password?: string;
   };
+  seedDemo: boolean;
 };
 
 let cached: AppConfig | undefined;
@@ -133,6 +142,7 @@ export function loadConfig(): AppConfig {
       email: validated.BOOTSTRAP_ADMIN_EMAIL,
       password: validated.BOOTSTRAP_ADMIN_PASSWORD,
     },
+    seedDemo: validated.SEED_DEMO,
   };
 
   return cached;

@@ -228,8 +228,8 @@ function JournalVoucherPreview({
         showWatermark={vc.showWatermark}
       />
       <p className='muted' style={{ marginTop: 12, fontSize: 12 }}>
-        Classic journal layout still applies for general / transfer journals.
-        Debit &amp; credit vouchers use this landscape template.
+        Save the template. Journal preview and download use this color, logo,
+        and sidebar text.
       </p>
     </div>
   );
@@ -634,14 +634,14 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(5, 1fr)",
+                  gridTemplateColumns: "1fr 1fr",
                   gap: 8,
                   marginBottom: 12,
                 }}
               >
                 {VOUCHER_COLOR_THEMES.map((theme) => {
                   const active =
-                    (draft.voucherConfig?.theme ?? "yellow") === theme.id;
+                    (draft.voucherConfig?.theme ?? "color") === theme.id;
                   return (
                     <button
                       key={theme.id}
@@ -652,16 +652,21 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
                           theme: theme.id as VoucherThemeId,
                         })
                       }
-                      className={theme.sidebarClass}
                       style={{
-                        height: 36,
+                        height: 40,
                         borderRadius: 8,
                         border: active
                           ? "2px solid #0f172a"
-                          : "2px solid transparent",
+                          : "2px solid #e2e8f0",
+                        background: theme.id === "bw" ? "#ffffff" : theme.accent,
+                        color: theme.id === "bw" ? "#111111" : theme.sidebarText,
                         cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 700,
                       }}
-                    />
+                    >
+                      {theme.name}
+                    </button>
                   );
                 })}
               </div>

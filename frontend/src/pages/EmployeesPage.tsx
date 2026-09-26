@@ -11,6 +11,7 @@ const ROLE_OPTIONS = [
   { value: Role.ACCOUNTANT, label: ROLE_LABEL[Role.ACCOUNTANT] },
 ]
 
+/** Staff directory for payroll / advances — kept separate from admin permissions UI. */
 export function EmployeesPage() {
   const { user } = useAuth()
   const [rows, setRows] = useState<PublicUser[]>([])
@@ -43,7 +44,7 @@ export function EmployeesPage() {
     try {
       await api.createEmployee({
         email,
-        password,
+        default_password: password,
         firstName,
         lastName,
         role: role as Role,

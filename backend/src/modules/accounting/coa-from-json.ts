@@ -45,7 +45,7 @@ function mapType(raw: string): AccountType {
 }
 
 /** Contra-asset accounts carry a credit normal balance. */
-const CREDIT_NORMAL_CODES = new Set(['1129', '1290']);
+const CREDIT_NORMAL_CODES = new Set(['1159', '1290']);
 
 export function resolveChartOfAccountsPath(): string {
   const candidates = [

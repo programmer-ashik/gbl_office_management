@@ -1,5 +1,6 @@
 export const AdvanceStatus = {
   PENDING: 'pending',
+  APPROVED: 'approved',
   REJECTED: 'rejected',
   DISBURSED: 'disbursed',
   SUBMITTED: 'submitted',
@@ -10,6 +11,7 @@ export type AdvanceStatus = (typeof AdvanceStatus)[keyof typeof AdvanceStatus]
 
 export const ADVANCE_STATUS_LABEL: Record<AdvanceStatus, string> = {
   pending: 'Pending',
+  approved: 'Approved',
   rejected: 'Rejected',
   disbursed: 'Disbursed',
   submitted: 'Submitted',

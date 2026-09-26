@@ -31,9 +31,11 @@ import type {
   CreatePurchaseOrderDto,
   CreateSupplierDto,
   IssueStockDto,
+  ReassignCategoryItemsDto,
   ReceiveGoodsDto,
   ReturnGoodsDto,
   UpdateItemDto,
+  UpdateProductCategoryDto,
 } from './dto/procurement.dto';
 import { GoodsMovementModel } from './goods-movement.model';
 import { ItemModel, type ItemDocument } from './item.model';
@@ -610,6 +612,31 @@ export class ProcurementService {
   ): Promise<PublicItem[]> {
     this.assertProcurementOrQuote(actor);
     const query: Record<string, unknown> = { isActive: true };
+
+    // Non-finance users only see products under active categories.
+    // Finance still receives inactive-category products so they can reassign before delete.
+    if (!FINANCE_ROLES.has(actor.role)) {
+      const activeCategoryIds = (
+        await ProductCategoryModel.find({ isActive: true }).select('_id').exec()
+      ).map((row) => row._id);
+      query.$and = [
+        {
+          $or: [
+            { categoryId: null },
+            { categoryId: { $exists: false } },
+            { categoryId: { $in: activeCategoryIds } },
+          ],
+        },
+        {
+          $or: [
+            { subCategoryId: null },
+            { subCategoryId: { $exists: false } },
+            { subCategoryId: { $in: activeCategoryIds } },
+          ],
+        },
+      ];
+    }
+
     if (filters.categoryId && Types.ObjectId.isValid(filters.categoryId)) {
       query.categoryId = new Types.ObjectId(filters.categoryId);
     }
@@ -630,7 +657,8 @@ export class ProcurementService {
 
   async listCategories(actor: AuthenticatedUser): Promise<PublicProductCategory[]> {
     this.assertProcurementOrQuote(actor);
-    const rows = await ProductCategoryModel.find({ isActive: true })
+    const filter = FINANCE_ROLES.has(actor.role) ? {} : { isActive: true };
+    const rows = await ProductCategoryModel.find(filter)
       .sort({ name: 1 })
       .exec();
     return rows.map(toPublicProductCategory);
@@ -662,6 +690,138 @@ export class ProcurementService {
       isActive: true,
     });
     return toPublicProductCategory(created);
+  }
+
+  async updateCategory(
+    id: string,
+    dto: UpdateProductCategoryDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicProductCategory> {
+    this.assertFinance(actor);
+    if (!Types.ObjectId.isValid(id)) {
+      throw badRequest('Invalid category');
+    }
+    const row = await ProductCategoryModel.findById(id).exec();
+    if (!row) {
+      throw notFound('Category not found');
+    }
+    if (dto.name !== undefined) {
+      row.name = dto.name.trim();
+    }
+    if (dto.code !== undefined) {
+      const trimmed = dto.code.trim();
+      row.code = trimmed ? trimmed.toUpperCase() : undefined;
+    }
+    if (dto.isActive !== undefined) {
+      if (dto.isActive && row.parentId) {
+        const parent = await ProductCategoryModel.findById(row.parentId).exec();
+        if (!parent?.isActive) {
+          throw badRequest('Activate the parent category first');
+        }
+      }
+      row.isActive = dto.isActive;
+      if (!dto.isActive && !row.parentId) {
+        await ProductCategoryModel.updateMany(
+          { parentId: row._id, isActive: true },
+          { $set: { isActive: false } },
+        ).exec();
+      }
+    }
+    await row.save();
+    return toPublicProductCategory(row);
+  }
+
+  async reassignCategoryItems(
+    sourceCategoryId: string,
+    dto: ReassignCategoryItemsDto,
+    actor: AuthenticatedUser,
+  ): Promise<{ moved: number }> {
+    this.assertFinance(actor);
+    if (!Types.ObjectId.isValid(sourceCategoryId)) {
+      throw badRequest('Invalid category');
+    }
+    const source = await ProductCategoryModel.findById(sourceCategoryId).exec();
+    if (!source) {
+      throw notFound('Category not found');
+    }
+
+    const { categoryId, subCategoryId } = await this.resolveCategoryIds(
+      dto.targetCategoryId,
+      dto.targetSubCategoryId,
+    );
+    if (!categoryId) {
+      throw badRequest('Target category is required');
+    }
+    if (categoryId.equals(source._id) || subCategoryId?.equals(source._id)) {
+      throw badRequest('Choose a different target category');
+    }
+
+    const itemObjectIds = dto.itemIds
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+    if (itemObjectIds.length === 0) {
+      throw badRequest('Select at least one product');
+    }
+
+    const sourceFilter = source.parentId
+      ? { subCategoryId: source._id }
+      : {
+          $or: [{ categoryId: source._id }, { subCategoryId: source._id }],
+        };
+
+    const result = await ItemModel.updateMany(
+      {
+        _id: { $in: itemObjectIds },
+        isActive: true,
+        ...sourceFilter,
+      },
+      subCategoryId
+        ? { $set: { categoryId, subCategoryId } }
+        : { $set: { categoryId }, $unset: { subCategoryId: 1 } },
+    ).exec();
+
+    return { moved: result.modifiedCount };
+  }
+
+  async deleteCategory(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<{ id: string }> {
+    this.assertFinance(actor);
+    if (!Types.ObjectId.isValid(id)) {
+      throw badRequest('Invalid category');
+    }
+    const row = await ProductCategoryModel.findById(id).exec();
+    if (!row) {
+      throw notFound('Category not found');
+    }
+
+    const productQuery = row.parentId
+      ? { isActive: true, subCategoryId: row._id }
+      : {
+          isActive: true,
+          $or: [{ categoryId: row._id }, { subCategoryId: row._id }],
+        };
+    const productCount = await ItemModel.countDocuments(productQuery).exec();
+    if (productCount > 0) {
+      throw badRequest(
+        `Move all ${productCount} product(s) to another category before deleting`,
+      );
+    }
+
+    if (!row.parentId) {
+      const childCount = await ProductCategoryModel.countDocuments({
+        parentId: row._id,
+      }).exec();
+      if (childCount > 0) {
+        throw badRequest(
+          'Delete or remove all sub-categories before deleting this category',
+        );
+      }
+    }
+
+    await ProductCategoryModel.deleteOne({ _id: row._id }).exec();
+    return { id };
   }
 
   private async resolveCategoryIds(

@@ -8,6 +8,10 @@ export interface IUser {
   lastName: string;
   role: Role;
   isActive: boolean;
+  /** Explicit allowlist of nav section ids. Empty array = no menu areas. */
+  allowedPermissions?: string[];
+  /** Legacy denylist — used only when allowedPermissions is unset. */
+  deniedPermissions: string[];
   lastLoginAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
@@ -35,6 +39,14 @@ const userSchema = new Schema<IUser>(
       index: true,
     },
     isActive: { type: Boolean, required: true, default: true, index: true },
+    allowedPermissions: {
+      type: [String],
+      default: undefined,
+    },
+    deniedPermissions: {
+      type: [String],
+      default: [],
+    },
     lastLoginAt: { type: Date },
   },
   { timestamps: true, collection: 'users' },

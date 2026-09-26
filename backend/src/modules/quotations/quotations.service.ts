@@ -38,8 +38,7 @@ export class QuotationsService {
     filters: QuotationListFilters = {},
   ): Promise<PublicQuotation[]> {
     const query: Record<string, unknown> = {};
-    const canAudit =
-      actor.role === Role.ADMIN || actor.role === Role.ACCOUNTANT;
+    const canAudit = actor.role === Role.ADMIN;
 
     if (!canAudit) {
       query.createdBy = new Types.ObjectId(actor.userId);
@@ -237,12 +236,98 @@ export class QuotationsService {
     }
     const doc = await QuotationModel.findById(id).exec();
     if (!doc) throw notFound('Quotation not found');
-    const canAudit =
-      actor.role === Role.ADMIN || actor.role === Role.ACCOUNTANT;
+    const canAudit = actor.role === Role.ADMIN || actor.role === Role.ACCOUNTANT;
     if (!canAudit && doc.createdBy.toString() !== actor.userId) {
       throw forbidden('You can only access your own quotations');
     }
     return doc;
+  }
+
+  async update(
+    id: string,
+    dto: CreateQuotationDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicQuotation> {
+    const doc = await this.findOwnedOrAdmin(id, actor);
+    if (doc.status === QuotationStatus.APPROVED && actor.role !== Role.ADMIN) {
+      throw forbidden('Approved quotations cannot be edited');
+    }
+    if (
+      doc.status !== QuotationStatus.DRAFT &&
+      doc.status !== QuotationStatus.SENT &&
+      actor.role !== Role.ADMIN
+    ) {
+      throw badRequest('Only draft or sent quotations can be edited');
+    }
+    if (!dto.items?.length) {
+      throw badRequest('At least one quotation item is required');
+    }
+
+    const items = [];
+    for (const line of dto.items) {
+      let productName = line.productName.trim();
+      let productId: Types.ObjectId | undefined;
+      let dataSheetUrl: string | undefined;
+      if (line.productId) {
+        if (!Types.ObjectId.isValid(line.productId)) {
+          throw badRequest('Invalid product id');
+        }
+        const item = await ItemModel.findById(line.productId).exec();
+        if (!item || !item.isActive) {
+          throw notFound(`Product ${line.productId} not found`);
+        }
+        productId = item._id;
+        if (!productName) productName = `${item.sku} · ${item.name}`;
+        if (item.dataSheetUrl) dataSheetUrl = item.dataSheetUrl;
+      }
+      if (!productName) throw badRequest('Product name is required');
+
+      const discountRate = line.discount ?? 0;
+      const grossMinor = Math.round(
+        toMinorUnits(line.unitPrice) * line.quantity,
+      );
+      const lineTotalMinor = Math.round(grossMinor * (1 - discountRate / 100));
+      items.push({
+        productId,
+        productName,
+        dataSheetUrl,
+        unitPriceMinor: toMinorUnits(line.unitPrice),
+        quantity: line.quantity,
+        discountRate,
+        lineTotalMinor,
+      });
+    }
+
+    const subTotalMinor = items.reduce(
+      (sum, row) => sum + row.lineTotalMinor,
+      0,
+    );
+    const taxRate = dto.taxRate ?? 0;
+    const taxAmountMinor = Math.round((subTotalMinor * taxRate) / 100);
+    const grandTotalMinor = subTotalMinor + taxAmountMinor;
+
+    doc.clientInfo = {
+      name: dto.clientInfo.name.trim(),
+      phone: dto.clientInfo.phone?.trim(),
+      company: dto.clientInfo.company?.trim(),
+    };
+    doc.items = items as QuotationDocument['items'];
+    doc.subTotalMinor = subTotalMinor;
+    doc.taxRate = taxRate;
+    doc.taxAmountMinor = taxAmountMinor;
+    doc.grandTotalMinor = grandTotalMinor;
+    doc.notes = dto.notes?.trim();
+    doc.terms = dto.terms?.trim() || DEFAULT_TERMS;
+    await doc.save();
+    return this.toPublic(doc);
+  }
+
+  async remove(id: string, actor: AuthenticatedUser): Promise<void> {
+    const doc = await this.findOwnedOrAdmin(id, actor);
+    if (doc.status === QuotationStatus.APPROVED && actor.role !== Role.ADMIN) {
+      throw forbidden('Approved quotations cannot be deleted');
+    }
+    await doc.deleteOne();
   }
 
   private toPublic(doc: QuotationDocument): PublicQuotation {

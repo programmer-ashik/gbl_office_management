@@ -88,7 +88,7 @@ describe('payroll allocation', () => {
     expect(lines).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ accountCode: '5120', debit: 500 }),
-        expect.objectContaining({ accountCode: '1131', credit: 100 }),
+        expect.objectContaining({ accountCode: '1161', credit: 100 }),
         expect.objectContaining({ accountCode: '2133', credit: 30 }),
         expect.objectContaining({ accountCode: '2131', credit: 20 }),
         expect.objectContaining({ accountCode: '2121', credit: 350 }),
@@ -101,7 +101,7 @@ describe('payroll allocation', () => {
       employeeId: 'e1',
       employeeName: 'Rahim',
       netPayMinor: 35_000,
-      treasuryAccountCode: '1112',
+      treasuryAccountCode: '1122',
     });
 
     const debit = lines.reduce((sum, row) => sum + (row.debit ?? 0), 0);
@@ -110,7 +110,7 @@ describe('payroll allocation', () => {
     expect(lines).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ accountCode: '2121', debit: 350 }),
-        expect.objectContaining({ accountCode: '1112', credit: 350 }),
+        expect.objectContaining({ accountCode: '1122', credit: 350 }),
       ]),
     );
   });

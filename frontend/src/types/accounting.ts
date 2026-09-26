@@ -263,7 +263,7 @@ export type DimensionRule = {
 }
 
 const DIMENSION_RULES: Record<string, DimensionRule> = {
-  '1121': {
+  '1151': {
     entityType: JournalEntityType.CUSTOMER,
     entityRequired: true,
     projectRequired: false,
@@ -281,7 +281,7 @@ const DIMENSION_RULES: Record<string, DimensionRule> = {
     projectRequired: false,
     label: 'Supplier',
   },
-  '1131': {
+  '1161': {
     entityType: JournalEntityType.EMPLOYEE,
     entityRequired: true,
     projectRequired: true,
@@ -323,19 +323,31 @@ const DIMENSION_RULES: Record<string, DimensionRule> = {
     projectRequired: false,
     label: 'Treasury',
   },
-  '1112': {
+  '1121': {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
     label: 'Treasury',
   },
-  '1113': {
+  '1122': {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
     label: 'Treasury',
   },
-  '1114': {
+  '1123': {
+    entityType: JournalEntityType.TREASURY,
+    entityRequired: false,
+    projectRequired: false,
+    label: 'Treasury',
+  },
+  '1131': {
+    entityType: JournalEntityType.TREASURY,
+    entityRequired: false,
+    projectRequired: false,
+    label: 'Treasury',
+  },
+  '1132': {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
@@ -361,6 +373,9 @@ export type JournalWriteBody = {
   journalType?: string
   intent?: 'draft' | 'post'
   projectId?: string
+  approvalId?: string
+  overrideSupplierPayable?: boolean
+  overrideReason?: string
   lines: Array<{
     accountCode: string
     debit?: number

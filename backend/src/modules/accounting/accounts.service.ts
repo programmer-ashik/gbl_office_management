@@ -12,6 +12,8 @@ import {
   resolveChartOfAccountsPath,
 } from './coa-from-json';
 import type { CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
+import { assertAccountIsPostable } from './account-rollup';
+import { repairCashBankChart } from './cash-bank-repair';
 import { LedgerLineModel } from './ledger.model';
 
 export type PublicAccount = {
@@ -53,11 +55,12 @@ export class AccountsService {
 
   /**
    * App bootstrap: ensure CoA from chart_of_accounts.json is present.
-   * Create-only for missing codes — never overwrites existing accounts
-   * (preserves historical GL / treasury links).
+   * Missing codes are created. Existing codes sync name and parent only
+   * (postable flag stays as stored so live ledger accounts are not flipped).
    */
   async seedDefaults(): Promise<void> {
     try {
+      await repairCashBankChart();
       const result = await this.seedFromChartOfAccountsJson({ forceUpdate: false });
       console.log(
         `Chart of Accounts: created=${result.created}, updated=${result.updated}, skipped=${result.skipped} (${result.path})`,
@@ -97,9 +100,18 @@ export class AccountsService {
       }
 
       if (!forceUpdate) {
-        // Keep labels in sync with chart JSON (safe rename only).
+        // Rename and re-parent are safe. Do not flip postable on live accounts.
+        let dirty = false;
         if (existing.name !== row.name) {
           existing.name = row.name;
+          dirty = true;
+        }
+        const nextParent = row.parentCode ?? undefined;
+        if ((existing.parentCode ?? undefined) !== nextParent) {
+          existing.parentCode = nextParent;
+          dirty = true;
+        }
+        if (dirty) {
           await existing.save();
           updated += 1;
         } else {
@@ -176,6 +188,11 @@ export class AccountsService {
       const parent = await this.findByCodeOrFail(dto.parentCode);
       if (parent.type !== dto.type) {
         throw badRequest('Parent account must be the same type');
+      }
+      if (parent.isPostable) {
+        throw badRequest(
+          'Parent must be a header account. Postable accounts cannot have children.',
+        );
       }
     }
 
@@ -308,7 +325,7 @@ export class AccountsService {
         throw badRequest(`Account ${code} is inactive`);
       }
       if (!account.isPostable) {
-        throw badRequest(`Account ${code} is not postable`);
+        assertAccountIsPostable(account);
       }
     }
 

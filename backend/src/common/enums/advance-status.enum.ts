@@ -1,5 +1,6 @@
 export enum AdvanceStatus {
   PENDING = 'pending',
+  APPROVED = 'approved',
   REJECTED = 'rejected',
   DISBURSED = 'disbursed',
   SUBMITTED = 'submitted',

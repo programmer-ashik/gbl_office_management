@@ -6,6 +6,7 @@ import type { AdvanceDocument } from './advance.model'
 
 const STATUS_LABEL: Record<AdvanceStatus, string> = {
   [AdvanceStatus.PENDING]: 'Pending',
+  [AdvanceStatus.APPROVED]: 'Approved',
   [AdvanceStatus.REJECTED]: 'Rejected',
   [AdvanceStatus.DISBURSED]: 'Disbursed',
   [AdvanceStatus.SUBMITTED]: 'Submitted',
@@ -96,7 +97,7 @@ export async function buildAdvanceVoucherPdf(
     doc.moveDown(1.2)
     doc.fontSize(9).fillColor('#5a6578')
     doc.text(
-      'Accounting: Dr 1131 Employee Advances (employee + project) / Cr Cash or Bank.',
+      'Accounting: Dr 1161 Employee Advances (employee + project) / Cr Cash or Bank.',
     )
     doc.text('This voucher is system-generated from posted advance records.')
 

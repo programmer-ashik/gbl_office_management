@@ -3,16 +3,24 @@
  * Must match chart_of_accounts.json leaf codes.
  */
 export const SystemAccountCode = {
-  /** Physical cash / hand cash (single channel). */
+  /** Physical cash (1111 Cash in Hand). */
   CASH: '1111',
-  /** @deprecated Alias of CASH — Cash in Hand was a duplicate of Hand Cash. */
   CASH_IN_HAND: '1111',
-  BANK: '1112',
-  BANK_ALT: '1113',
-  MOBILE_BANKING: '1114',
-  ACCOUNTS_RECEIVABLE: '1121',
-  ALLOWANCE_DOUBTFUL: '1129',
-  EMPLOYEE_ADVANCES: '1131',
+  /** Cash in Bank header. New bank accounts are siblings under this code. */
+  CASH_IN_BANK: '1120',
+  /** DBBL Bank A/C */
+  BANK_ALT: '1121',
+  /** BRAC Bank A/C — default commercial bank treasury. */
+  BANK: '1122',
+  /** City Bank A/C */
+  CITY_BANK: '1123',
+  /** bKash. MOBILE_BANKING stays as the default mobile leaf. */
+  BKASH: '1131',
+  MOBILE_BANKING: '1131',
+  NAGAD: '1132',
+  ACCOUNTS_RECEIVABLE: '1151',
+  ALLOWANCE_DOUBTFUL: '1159',
+  EMPLOYEE_ADVANCES: '1161',
   INVENTORY: '1141',
   SITE_STOCK: '1142',
   ACCOUNTS_PAYABLE: '2111',

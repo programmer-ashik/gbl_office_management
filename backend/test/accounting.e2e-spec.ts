@@ -99,7 +99,7 @@ describe('Phase 2 double-entry engine (e2e)', () => {
     expect(res.body.data.entryNumber).toMatch(/^JE-/);
 
     const ledger = await request(app)
-      .get('/api/v1/ledgers/1000')
+      .get('/api/v1/ledgers/1111')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
 
@@ -203,5 +203,100 @@ describe('Phase 2 double-entry engine (e2e)', () => {
       .get(`/api/v1/journals/${journalId}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(404);
+  });
+
+  it('posts to a bank sub-account and rolls the total up to Cash in Bank', async () => {
+    const accounts = await request(app)
+      .get('/api/v1/accounts')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    const byCode = new Map(
+      (accounts.body.data as Array<{
+        code: string;
+        name: string;
+        parentCode: string | null;
+        isPostable: boolean;
+      }>).map((row) => [row.code, row]),
+    );
+    expect(byCode.get('1120')).toMatchObject({
+      name: 'Cash in Bank',
+      parentCode: '1110',
+      isPostable: false,
+    });
+    expect(byCode.get('1121')).toMatchObject({
+      name: 'DBBL Bank A/C',
+      parentCode: '1120',
+      isPostable: true,
+    });
+    expect(byCode.get('1122')).toMatchObject({
+      name: 'BRAC Bank A/C',
+      parentCode: '1120',
+      isPostable: true,
+    });
+    expect(byCode.get('1123')).toMatchObject({
+      parentCode: '1120',
+      isPostable: true,
+    });
+    expect(byCode.get('1151')?.name).toBe('Client Receivables');
+
+    await request(app)
+      .post('/api/v1/journals')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        date: '2026-09-03',
+        memo: 'DBBL receipt',
+        lines: [
+          { accountCode: '1121', debit: 400 },
+          { accountCode: '3100', credit: 400 },
+        ],
+      })
+      .expect(201);
+
+    await request(app)
+      .post('/api/v1/journals')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        date: '2026-09-03',
+        memo: 'BRAC receipt',
+        lines: [
+          { accountCode: '1122', debit: 250 },
+          { accountCode: '3100', credit: 250 },
+        ],
+      })
+      .expect(201);
+
+    const blocked = await request(app)
+      .post('/api/v1/journals')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        date: '2026-09-03',
+        memo: 'Posted to header',
+        lines: [
+          { accountCode: '1120', debit: 10 },
+          { accountCode: '3100', credit: 10 },
+        ],
+      })
+      .expect(400);
+    expect(blocked.body.message).toBe(
+      'Transactions cannot be posted directly to a Header account. Please select a specific Postable sub-account.',
+    );
+
+    const dbbl = await request(app)
+      .get('/api/v1/ledgers/1121')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    const brac = await request(app)
+      .get('/api/v1/ledgers/1122')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    const header = await request(app)
+      .get('/api/v1/ledgers/1120')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(dbbl.body.data.account.balance).toBe(400);
+    expect(brac.body.data.account.balance).toBe(250);
+    expect(header.body.data.account.balance).toBe(650);
+    expect(header.body.data.closingBalance).toBe(650);
   });
 });

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
   canApproveQuotation,
   canCreateQuotation,
+  canDeleteQuotation,
+  canEditQuotation,
 } from "../auth/permissions";
 import { Modal, Select } from "../components/ui";
 import { money } from "../types/accounting";
@@ -16,7 +18,11 @@ import {
   lineTotalPreview,
   type Quotation,
 } from "../types/quotation";
-import { downloadQuotationPdf } from "../utils/quotationPdf";
+import {
+  downloadQuotationPdf,
+  quotationPdfPreviewUrl,
+} from "../utils/quotationPdf";
+import { VoucherPdfPreview } from "../components/VoucherPdfPreview";
 import {
   clearQuotationCreateDraft,
   clearQuotationProductSelection,
@@ -58,7 +64,9 @@ function clientMatchesProject(project: Project, quote: Quotation): boolean {
 
 export function QuotationCreatePage() {
   const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isDetail = Boolean(id);
+  const editing = isDetail && searchParams.get("edit") === "1";
   const { user } = useAuth();
   const navigate = useNavigate();
   const canCreate = canCreateQuotation(user?.role);
@@ -69,6 +77,7 @@ export function QuotationCreatePage() {
   const [saved, setSaved] = useState<Quotation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const [partyType, setPartyType] = useState<"customer" | "new_customer">(
     "customer",
@@ -132,6 +141,26 @@ export function QuotationCreatePage() {
       .then((row) => {
         setSaved(row);
         setApproveProjectId(row.projectId ?? "");
+        setClientName(row.clientInfo.name);
+        setClientPhone(row.clientInfo.phone ?? "");
+        setClientCompany(row.clientInfo.company ?? "");
+        setTaxRate(String(row.taxRate ?? 0));
+        setNotes(row.notes ?? "");
+        setTerms(
+          row.terms ??
+            "Prices are valid for 30 days. Payment terms as agreed.",
+        );
+        setLines(
+          row.items.map((item) => ({
+            key: item.id,
+            productId: item.productId ?? "",
+            productName: item.productName,
+            dataSheetUrl: item.dataSheetUrl ?? "",
+            unitPrice: String(item.unitPrice),
+            quantity: String(item.quantity),
+            discount: String(item.discount),
+          })),
+        );
       })
       .catch((err: unknown) => {
         setError(
@@ -140,6 +169,15 @@ export function QuotationCreatePage() {
       });
   }, [id, canCreate]);
 
+  function closePreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+  }
+
+  function openPreview(row: Quotation) {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(quotationPdfPreviewUrl(row));
+  }
   function mergeSelectedProducts(
     products: QuotationSelectedProduct[],
     currentLines: DraftLine[],
@@ -256,7 +294,8 @@ export function QuotationCreatePage() {
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!canCreate || isDetail) return;
+    if (!canCreate) return;
+    if (isDetail && !editing) return;
     const payloadLines = lines
       .filter(
         (line) =>
@@ -281,14 +320,14 @@ export function QuotationCreatePage() {
       );
       return;
     }
-    if (partyType === "customer" && !partyId) {
+    if (!isDetail && partyType === "customer" && !partyId) {
       setError("Select a customer");
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      const created = await api.createQuotation({
+      const body = {
         clientInfo: {
           name: clientName.trim(),
           phone: clientPhone.trim() || undefined,
@@ -299,14 +338,36 @@ export function QuotationCreatePage() {
         notes: notes.trim() || undefined,
         terms: terms.trim() || undefined,
         status: QuotationStatus.DRAFT,
-      });
-      clearQuotationCreateDraft();
-      clearQuotationProductSelection();
-      navigate(`/quotations/${created.id}`, { replace: true });
+      };
+      if (isDetail && id && editing) {
+        const updated = await api.updateQuotation(id, body);
+        setSaved(updated);
+        setSearchParams({}, { replace: true });
+      } else {
+        const created = await api.createQuotation(body);
+        clearQuotationCreateDraft();
+        clearQuotationProductSelection();
+        navigate(`/quotations/${created.id}`, { replace: true });
+      }
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Unable to create quotation",
+        err instanceof Error ? err.message : "Unable to save quotation",
       );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onDeleteSaved() {
+    if (!saved) return;
+    if (!window.confirm(`Delete ${saved.quotationNumber}?`)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api.deleteQuotation(saved.id);
+      navigate("/quotations", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete");
     } finally {
       setSaving(false);
     }
@@ -377,7 +438,10 @@ export function QuotationCreatePage() {
     );
   }
 
-  if (isDetail && saved) {
+  if (isDetail && saved && !editing) {
+    const isOwner = saved.createdBy === user?.id;
+    const mayEdit = canEditQuotation(user?.role, saved.status, isOwner);
+    const mayDelete = canDeleteQuotation(user?.role, saved.status, isOwner);
     return (
       <>
         <header className='workspace-header'>
@@ -391,6 +455,28 @@ export function QuotationCreatePage() {
             <Link to='/quotations' className='ghost-link'>
               Back to list
             </Link>
+            <button type='button' className='ghost' onClick={() => openPreview(saved)}>
+              Preview
+            </button>
+            {mayEdit ? (
+              <button
+                type='button'
+                className='ghost'
+                onClick={() => setSearchParams({ edit: '1' })}
+              >
+                Edit
+              </button>
+            ) : null}
+            {mayDelete ? (
+              <button
+                type='button'
+                className='ghost'
+                disabled={saving}
+                onClick={() => void onDeleteSaved()}
+              >
+                Delete
+              </button>
+            ) : null}
             <button type='button' onClick={() => downloadQuotationPdf(saved)}>
               Download Quotation PDF
             </button>
@@ -613,23 +699,41 @@ export function QuotationCreatePage() {
             </button>
           </form>
         </Modal>
+
+        <VoucherPdfPreview
+          title={saved.quotationNumber}
+          url={previewUrl}
+          onClose={closePreview}
+        />
       </>
     );
+  }
+
+  if (isDetail && !saved) {
+    return <p className="muted">Loading quotation…</p>;
   }
 
   return (
     <>
       <header className='workspace-header'>
         <div>
-          <h1>New quotation</h1>
+          <h1>{editing ? `Edit ${saved?.quotationNumber ?? ''}` : 'New quotation'}</h1>
           <p className='muted'>
-            Search inventory and add multiple products. Mobile uses card layout.
+            {editing
+              ? 'Update client details and line items, then save.'
+              : 'Search inventory and add multiple products. Mobile uses card layout.'}
           </p>
         </div>
         <button
           type='button'
           className='ghost-link'
-          onClick={clearDraftAndLeave}
+          onClick={() => {
+            if (editing && id) {
+              setSearchParams({}, { replace: true });
+              return;
+            }
+            clearDraftAndLeave();
+          }}
         >
           Cancel
         </button>
@@ -996,7 +1100,11 @@ export function QuotationCreatePage() {
 
           <div className='form-actions'>
             <button type='submit' disabled={saving || !clientName.trim()}>
-              {saving ? "Saving…" : "Create quotation"}
+              {saving
+                ? "Saving…"
+                : editing
+                  ? "Save changes"
+                  : "Create quotation"}
             </button>
           </div>
           {error ? <p className='form-error'>{error}</p> : null}

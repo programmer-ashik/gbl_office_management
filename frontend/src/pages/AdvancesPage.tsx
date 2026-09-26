@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { ActionMenu, Select } from '../components/ui'
 import { money } from '../types/accounting'
 import {
@@ -8,7 +9,7 @@ import {
   type Advance,
   type AdvanceProjectOption,
 } from '../types/advance'
-import type { PublicUser } from '../types/auth'
+import { Role, type PublicUser } from '../types/auth'
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -20,6 +21,8 @@ const STATUS_OPTIONS = [
 
 export function AdvancesPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isFinance = user?.role === Role.ADMIN || user?.role === Role.ACCOUNTANT
   const [rows, setRows] = useState<Advance[]>([])
   const [total, setTotal] = useState(0)
   const [projects, setProjects] = useState<AdvanceProjectOption[]>([])
@@ -40,7 +43,7 @@ export function AdvancesPage() {
     const [advances, options, staff] = await Promise.all([
       api.advances({
         projectId: projectFilter || undefined,
-        employeeId: employeeFilter || undefined,
+        employeeId: isFinance ? employeeFilter || undefined : undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         status: statusFilter || undefined,
@@ -48,7 +51,7 @@ export function AdvancesPage() {
         pageSize: 100,
       }),
       api.advanceProjects(),
-      api.employees().catch(() => [] as PublicUser[]),
+      isFinance ? api.employees().catch(() => [] as PublicUser[]) : Promise.resolve([] as PublicUser[]),
     ])
     setRows(advances.items)
     setTotal(advances.total)
@@ -128,22 +131,26 @@ export function AdvancesPage() {
           <h1>Advance requisitions</h1>
         </div>
         <div className="header-actions">
-          <button
-            type="button"
-            className="ghost"
-            disabled={exporting || !projectFilter}
-            onClick={() => void onExportProjectReport()}
-            title={
-              projectFilter
-                ? 'Export PDF for the selected project filter'
-                : 'Select a project in the filter bar first'
-            }
-          >
-            {exporting ? 'Exporting…' : 'Export Project Advance Report (PDF)'}
-          </button>
-          <Link to="/advances/settlements" className="action-link">
-            Expense settlements
-          </Link>
+          {isFinance ? (
+            <button
+              type="button"
+              className="ghost"
+              disabled={exporting || !projectFilter}
+              onClick={() => void onExportProjectReport()}
+              title={
+                projectFilter
+                  ? 'Export PDF for the selected project filter'
+                  : 'Select a project in the filter bar first'
+              }
+            >
+              {exporting ? 'Exporting…' : 'Export Project Advance Report (PDF)'}
+            </button>
+          ) : null}
+          {isFinance ? (
+            <Link to="/advances/settlements" className="action-link">
+              Expense settlements
+            </Link>
+          ) : null}
         </div>
       </header>
 
@@ -200,7 +207,9 @@ export function AdvancesPage() {
         <div className="table-head">
           <h2>Requisition register</h2>
           <p className="muted">
-            {rows.length} shown · {total} total matching filters
+            {isFinance
+              ? `${rows.length} shown · ${total} total matching filters`
+              : `${rows.length} of your requisitions · status stays Pending until accountant/admin approves`}
           </p>
         </div>
         <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
@@ -216,18 +225,20 @@ export function AdvancesPage() {
               searchable
             />
           </label>
-          <label>
-            Employee
-            <Select
-              value={employeeFilter}
-              onChange={setEmployeeFilter}
-              options={[
-                { value: '', label: 'All employees' },
-                ...employeeOptions,
-              ]}
-              searchable
-            />
-          </label>
+          {isFinance ? (
+            <label>
+              Employee
+              <Select
+                value={employeeFilter}
+                onChange={setEmployeeFilter}
+                options={[
+                  { value: '', label: 'All employees' },
+                  ...employeeOptions,
+                ]}
+                searchable
+              />
+            </label>
+          ) : null}
           <label>
             From
             <input

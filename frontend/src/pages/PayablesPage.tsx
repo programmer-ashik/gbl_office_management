@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { MetricCard } from '../components/MetricCard'
 import { Modal, Select } from '../components/ui'
 import { money } from '../types/accounting'
+import { Role } from '../types/auth'
 import {
   BILL_PAYMENT_LABEL,
   PAYMENT_STATUS_LABEL,
@@ -29,7 +31,21 @@ function treasuryOptionLabel(row: TreasuryAccount): string {
   return `${row.name} · ${kind} · ${row.glAccountCode} · ${money(row.bookBalance ?? 0)}`
 }
 
+type PayableConfirm = {
+  kind: 'schedule' | 'execute'
+  paymentId?: string
+  supplierId: string
+  supplierName: string
+  outstanding: number
+  amount: number
+  warning: string | null
+  needsOverride: boolean
+}
+
 export function PayablesPage() {
+  const { user } = useAuth()
+  const canOverridePayable = user?.role === Role.ADMIN
+
   const [bills, setBills] = useState<SupplierBill[]>([])
   const [payments, setPayments] = useState<SupplierPayment[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -53,6 +69,9 @@ export function PayablesPage() {
   const [billModalOpen, setBillModalOpen] = useState(false)
   const [payModalOpen, setPayModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [payableConfirm, setPayableConfirm] = useState<PayableConfirm | null>(null)
+  const [overrideReason, setOverrideReason] = useState('')
+  const [confirmError, setConfirmError] = useState<string | null>(null)
 
   async function load() {
     const [billRows, paymentRows, supplierRows, channels] = await Promise.all([
@@ -128,35 +147,132 @@ export function PayablesPage() {
   async function onSchedulePayment(event: FormEvent) {
     event.preventDefault()
     if (!supplierId || !payTreasuryId) return
+    const amount = Number(payAmount)
+    if (!(amount > 0)) {
+      setError('Enter a valid payment amount')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
-      await api.scheduleSupplierPayment({
+      const ledger = await api.vendorLedger(supplierId)
+      const outstanding = ledger.outstanding ?? 0
+      const supplierName =
+        ledger.supplier?.name ||
+        suppliers.find((row) => row.id === supplierId)?.name ||
+        'Supplier'
+      let warning: string | null = null
+      let needsOverride = false
+      if (outstanding <= 0) {
+        warning =
+          'This supplier has no outstanding payable to us. Payment/journal entry cannot be made without an outstanding payable.'
+        needsOverride = true
+      } else if (amount > outstanding) {
+        warning = `Supplier's outstanding payable is ${money(outstanding)}, but you are entering ${money(amount)}. You cannot pay more than the outstanding payable.`
+        needsOverride = true
+      }
+      setOverrideReason('')
+      setConfirmError(null)
+      setPayableConfirm({
+        kind: 'schedule',
         supplierId,
-        amount: Number(payAmount),
-        treasuryId: payTreasuryId,
-        scheduledDate: payScheduledDate,
-        memo: payMemo || undefined,
+        supplierName,
+        outstanding,
+        amount,
+        warning,
+        needsOverride,
       })
-      setPayAmount('')
-      setPayMemo('')
-      setPayModalOpen(false)
-      await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to schedule payment')
+      setError(err instanceof Error ? err.message : 'Unable to load supplier payable')
     } finally {
       setSaving(false)
     }
   }
 
   async function onExecute(paymentId: string) {
+    const payment = payments.find((row) => row.id === paymentId)
+    if (!payment) return
     setSaving(true)
     setError(null)
     try {
-      await api.executeSupplierPayment(paymentId, { date: executeDate })
+      const ledger = await api.vendorLedger(payment.supplierId)
+      const outstanding = ledger.outstanding ?? 0
+      const amount = payment.amount
+      let warning: string | null = null
+      let needsOverride = false
+      if (outstanding <= 0) {
+        warning =
+          'This supplier has no outstanding payable to us. Payment/journal entry cannot be made without an outstanding payable.'
+        needsOverride = true
+      } else if (amount > outstanding) {
+        warning = `Supplier's outstanding payable is ${money(outstanding)}, but you are entering ${money(amount)}. You cannot pay more than the outstanding payable.`
+        needsOverride = true
+      }
+      setOverrideReason('')
+      setConfirmError(null)
+      setPayableConfirm({
+        kind: 'execute',
+        paymentId,
+        supplierId: payment.supplierId,
+        supplierName: payment.supplierName,
+        outstanding,
+        amount,
+        warning,
+        needsOverride,
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load supplier payable')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function confirmPayableAction() {
+    if (!payableConfirm) return
+    if (payableConfirm.needsOverride && !canOverridePayable) {
+      setConfirmError(payableConfirm.warning)
+      return
+    }
+    if (payableConfirm.needsOverride && overrideReason.trim().length < 5) {
+      setConfirmError('Override reason is required (at least 5 characters).')
+      return
+    }
+    setSaving(true)
+    setConfirmError(null)
+    setError(null)
+    try {
+      const override =
+        payableConfirm.needsOverride && canOverridePayable
+          ? {
+              overridePayable: true,
+              overrideReason: overrideReason.trim(),
+            }
+          : {}
+      if (payableConfirm.kind === 'schedule') {
+        await api.scheduleSupplierPayment({
+          supplierId: payableConfirm.supplierId,
+          amount: payableConfirm.amount,
+          treasuryId: payTreasuryId,
+          scheduledDate: payScheduledDate,
+          memo: payMemo || undefined,
+          ...override,
+        })
+        setPayAmount('')
+        setPayMemo('')
+        setPayModalOpen(false)
+      } else if (payableConfirm.paymentId) {
+        await api.executeSupplierPayment(payableConfirm.paymentId, {
+          date: executeDate,
+          ...override,
+        })
+      }
+      setPayableConfirm(null)
+      setOverrideReason('')
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to execute payment')
+      setConfirmError(
+        err instanceof Error ? err.message : 'Unable to complete payment action',
+      )
     } finally {
       setSaving(false)
     }
@@ -383,11 +499,102 @@ export function PayablesPage() {
           </div>
           <div className="form-actions">
             <button type="submit" disabled={saving || !supplierId || !payTreasuryId}>
-              {saving ? 'Scheduling…' : 'Schedule payment'}
+              {saving ? 'Checking…' : 'Review & schedule'}
             </button>
           </div>
           {error ? <p className="form-error">{error}</p> : null}
         </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(payableConfirm)}
+        title={
+          payableConfirm?.kind === 'execute'
+            ? 'Confirm supplier payment'
+            : 'Confirm schedule payment'
+        }
+        description="Review outstanding payable before saving."
+        onClose={() => {
+          if (saving) return
+          setPayableConfirm(null)
+          setOverrideReason('')
+          setConfirmError(null)
+        }}
+      >
+        {payableConfirm ? (
+          <div className="stack-form">
+            <p>
+              <strong>Supplier:</strong> {payableConfirm.supplierName}
+            </p>
+            <p>
+              <strong>Current outstanding payable:</strong>{' '}
+              {money(payableConfirm.outstanding)}
+            </p>
+            <p>
+              <strong>Entry amount:</strong> {money(payableConfirm.amount)}
+            </p>
+            <p>
+              <strong>Remaining payable after entry:</strong>{' '}
+              {money(
+                Math.max(0, payableConfirm.outstanding - payableConfirm.amount),
+              )}
+            </p>
+            {payableConfirm.warning ? (
+              <p className="form-error">{payableConfirm.warning}</p>
+            ) : (
+              <p className="muted">Amount is within outstanding payable.</p>
+            )}
+            {payableConfirm.needsOverride && canOverridePayable ? (
+              <label>
+                Admin override reason
+                <textarea
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  rows={3}
+                  required
+                  minLength={5}
+                  placeholder="Why is this payment allowed?"
+                />
+              </label>
+            ) : null}
+            {payableConfirm.needsOverride && !canOverridePayable ? (
+              <p className="form-error">
+                Only an Admin can override this block.
+              </p>
+            ) : null}
+            {confirmError ? <p className="form-error">{confirmError}</p> : null}
+            <div className="form-actions">
+              <button
+                type="button"
+                className="ghost"
+                disabled={saving}
+                onClick={() => {
+                  setPayableConfirm(null)
+                  setOverrideReason('')
+                  setConfirmError(null)
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  saving ||
+                  (payableConfirm.needsOverride && !canOverridePayable)
+                }
+                onClick={() => void confirmPayableAction()}
+              >
+                {saving
+                  ? 'Saving…'
+                  : payableConfirm.needsOverride
+                    ? 'Override & continue'
+                    : payableConfirm.kind === 'execute'
+                      ? 'Confirm execute'
+                      : 'Confirm schedule'}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </Modal>
 
       {scheduled.length > 0 ? (

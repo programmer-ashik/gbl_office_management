@@ -15,6 +15,7 @@ import { CashFlowAnalyticsPage } from './pages/CashFlowAnalyticsPage'
 import { ChartOfAccountsPage } from './pages/ChartOfAccountsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { EmployeesPage } from './pages/EmployeesPage'
+import { UsersPermissionsPage } from './pages/UsersPermissionsPage'
 import { InvoiceDetailPage } from './pages/InvoiceDetailPage'
 import { InventoryPage } from './pages/InventoryPage'
 import { JournalsPage } from './pages/JournalsPage'
@@ -41,7 +42,10 @@ import { ProcurementCatalogPage } from './pages/ProcurementCatalogPage'
 import { QuotationProductSelectPage } from './pages/QuotationProductSelectPage'
 import { ReceivablesPage } from './pages/ReceivablesPage'
 import { ReportsPage } from './pages/ReportsPage'
-import { SignupPage } from './pages/SignupPage'
+import { PurchaseInvoiceReportPage } from './pages/reports/PurchaseInvoiceReportPage'
+import { SalesInvoiceReportPage } from './pages/reports/SalesInvoiceReportPage'
+import { TreasuryTransactionReportPage } from './pages/reports/TreasuryTransactionReportPage'
+import { DayReportPage } from './pages/reports/DayReportPage'
 import { SupplierDetailPage } from './pages/SupplierDetailPage'
 import { TreasuryDetailPage } from './pages/TreasuryDetailPage'
 import { TrialBalancePage } from './pages/TrialBalancePage'
@@ -71,14 +75,7 @@ export default function App() {
               </GuestRoute>
             }
           />
-          <Route
-            path="/signup"
-            element={
-              <GuestRoute>
-                <SignupPage />
-              </GuestRoute>
-            }
-          />
+          <Route path="/signup" element={<Navigate to="/login" replace />} />
           <Route
             element={
               <ProtectedRoute>
@@ -103,6 +100,23 @@ export default function App() {
             <Route path="/ledgers/:accountCode" element={<AccountLedgerPage />} />
             <Route path="/customers" element={<CustomersPage />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route
+              path="/reports/purchase/invoices"
+              element={<PurchaseInvoiceReportPage />}
+            />
+            <Route
+              path="/reports/sales/invoices"
+              element={<SalesInvoiceReportPage />}
+            />
+            <Route
+              path="/reports/accounts/cash"
+              element={<TreasuryTransactionReportPage mode="cash" />}
+            />
+            <Route
+              path="/reports/accounts/bank"
+              element={<TreasuryTransactionReportPage mode="bank" />}
+            />
+            <Route path="/reports/day" element={<DayReportPage />} />
             <Route path="/trial-balance" element={<TrialBalancePage />} />
             <Route path="/balance-sheet" element={<BalanceSheetPage />} />
 
@@ -205,7 +219,14 @@ export default function App() {
               element={<Navigate to="/accounts" replace />}
             />
             <Route path="/settings/approvals" element={<ApprovalsPage />} />
-            <Route path="/settings/users" element={<EmployeesPage />} />
+            <Route
+              path="/settings/users"
+              element={
+                <AdminRoute>
+                  <UsersPermissionsPage />
+                </AdminRoute>
+              }
+            />
             <Route path="/settings/audit" element={<AuditPage />} />
             <Route
               path="/settings/templates/balance-sheet"
