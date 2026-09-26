@@ -142,7 +142,7 @@ async function request<T>(
 
   const json = (await res.json()) as ApiSuccess<T> | ApiError
 
-  if (res.status === 401 && retry && !path.startsWith('/auth/login') && !path.startsWith('/auth/signup')) {
+  if (res.status === 401 && retry && !path.startsWith('/auth/login')) {
     const refreshed = await tryRefresh()
     if (refreshed) {
       return request<T>(path, options, false)
@@ -199,16 +199,6 @@ async function downloadBlob(path: string, fallbackName: string): Promise<void> {
 
 export const api = {
   health: () => request<HealthStatus>('/health'),
-  signup: (body: {
-    email: string
-    password: string
-    firstName: string
-    lastName: string
-  }) =>
-    request<AuthResult>('/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
   login: (body: { email: string; password: string }) =>
     request<AuthResult>('/auth/login', {
       method: 'POST',
@@ -221,10 +211,36 @@ export const api = {
       body: JSON.stringify({}),
     }),
   users: () => request<PublicUser[]>('/users'),
+  updateUserRole: (id: string, role: Role) =>
+    request<PublicUser>(`/users/${id}/role`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    }),
+  updateUserStatus: (id: string, isActive: boolean) =>
+    request<PublicUser>(`/users/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+    }),
+  updateUserPermissions: (id: string, allowedPermissions: string[]) =>
+    request<PublicUser>(`/users/${id}/permissions`, {
+      method: 'PATCH',
+      body: JSON.stringify({ allowedPermissions }),
+    }),
+  resetUserPassword: (id: string, newPassword: string) =>
+    request<PublicUser>(`/users/${id}/reset-password`, {
+      method: 'PUT',
+      body: JSON.stringify({ newPassword }),
+    }),
+  changeOwnPassword: (body: { oldPassword: string; newPassword: string }) =>
+    request<PublicUser>('/users/profile/change-password', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   employees: () => request<PublicUser[]>('/employees'),
   createEmployee: (body: {
     email: string
-    password: string
+    password?: string
+    default_password?: string
     firstName: string
     lastName: string
     role?: Role
@@ -336,8 +352,14 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
-  postDraftJournal: (id: string) =>
-    request<JournalEntry>(`/journals/${id}/post`, { method: 'POST' }),
+  postDraftJournal: (
+    id: string,
+    body?: { overrideSupplierPayable?: boolean; overrideReason?: string },
+  ) =>
+    request<JournalEntry>(`/journals/${id}/post`, {
+      method: 'POST',
+      body: body ? JSON.stringify(body) : undefined,
+    }),
   reverseJournal: (id: string) =>
     request<JournalEntry>(`/journals/${id}/reverse`, { method: 'POST' }),
   deleteJournal: (id: string) =>
@@ -470,6 +492,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateCustomer: (
+    id: string,
+    body: {
+      name?: string
+      contactName?: string
+      email?: string
+      phone?: string
+      address?: string
+      isActive?: boolean
+    },
+  ) =>
+    request<Customer>(`/customers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   quotations: (params?: {
     createdBy?: string
     projectId?: string
@@ -491,6 +528,15 @@ export const api = {
     request<Quotation>('/quotations', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  updateQuotation: (id: string, body: CreateQuotationBody) =>
+    request<Quotation>(`/quotations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteQuotation: (id: string) =>
+    request<{ deleted: boolean }>(`/quotations/${id}`, {
+      method: 'DELETE',
     }),
   updateQuotationStatus: (
     id: string,
@@ -704,6 +750,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reason }),
     }),
+  approveAdvance: (id: string) =>
+    request<Advance>(`/advances/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
   disburseAdvance: (id: string, body: { treasuryId: string; date: string; memo?: string }) =>
     request<Advance>(`/advances/${id}/disburse`, {
       method: 'POST',
@@ -824,6 +875,30 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateProductCategory: (
+    id: string,
+    body: { name?: string; code?: string; isActive?: boolean },
+  ) =>
+    request<ProductCategory>(`/product-categories/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  reassignCategoryItems: (
+    id: string,
+    body: {
+      itemIds: string[]
+      targetCategoryId: string
+      targetSubCategoryId?: string
+    },
+  ) =>
+    request<{ moved: number }>(`/product-categories/${id}/reassign-items`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteProductCategory: (id: string) =>
+    request<{ id: string }>(`/product-categories/${id}`, {
+      method: 'DELETE',
+    }),
   warehouses: () => request<Warehouse[]>('/warehouses'),
   purchaseOrders: () => request<PurchaseOrder[]>('/purchase-orders'),
   purchaseOrder: (id: string) => request<PurchaseOrder>(`/purchase-orders/${id}`),
@@ -935,12 +1010,21 @@ export const api = {
     treasuryId: string
     scheduledDate?: string
     memo?: string
+    overridePayable?: boolean
+    overrideReason?: string
   }) =>
     request<SupplierPayment>('/payables/payments', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  executeSupplierPayment: (id: string, body: { date: string }) =>
+  executeSupplierPayment: (
+    id: string,
+    body: {
+      date: string
+      overridePayable?: boolean
+      overrideReason?: string
+    },
+  ) =>
     request<SupplierPayment>(`/payables/payments/${id}/execute`, {
       method: 'POST',
       body: JSON.stringify(body),

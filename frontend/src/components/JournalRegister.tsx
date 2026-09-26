@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { ExpandableText } from './ExpandableText'
 import { ActionMenu, Select } from './ui'
+import { VoucherPdfPreview } from './VoucherPdfPreview'
 import {
   JOURNAL_STATUS_LABEL,
   JOURNAL_TYPE_LABEL,
@@ -14,8 +15,8 @@ import {
 import type { Project } from '../types/project'
 import {
   downloadJournalVoucher,
+  journalVoucherPreviewUrl,
   loadJournalVoucherTemplate,
-  previewJournalVoucher,
 } from '../utils/journalVoucherPdf'
 
 async function getJvTemplate() {
@@ -109,6 +110,8 @@ export function JournalRegister({
   const [searchDebounced, setSearchDebounced] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewTitle, setPreviewTitle] = useState('Voucher PDF')
   const [page, setPage] = useState(1)
 
   useEffect(() => {
@@ -210,14 +213,28 @@ export function JournalRegister({
     }
   }
 
+  function closePreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setPreviewUrl(null)
+  }
+
   async function onPdf(entry: JournalEntry, action: 'preview' | 'download') {
     setBusyId(entry.id)
     setError(null)
     try {
       const voucher =
         entry.lines && entry.lines.length > 0 ? entry : await api.journal(entry.id)
-      if (action === 'preview') await previewJournalVoucher(voucher, await getJvTemplate())
-      else await downloadJournalVoucher(voucher, await getJvTemplate())
+      const template = await getJvTemplate()
+      if (action === 'preview') {
+        const url = await journalVoucherPreviewUrl(voucher, template)
+        setPreviewTitle(`${voucher.entryNumber} PDF`)
+        setPreviewUrl((current) => {
+          if (current) URL.revokeObjectURL(current)
+          return url
+        })
+      } else {
+        await downloadJournalVoucher(voucher, template)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to open voucher PDF')
     } finally {
@@ -266,6 +283,7 @@ export function JournalRegister({
 
   return (
     <section className="table-card report-section" id="report">
+      <VoucherPdfPreview url={previewUrl} title={previewTitle} onClose={closePreview} />
       <div className="table-head">
         <h2>{title}</h2>
         <p className="muted">

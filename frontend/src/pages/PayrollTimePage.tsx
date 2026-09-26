@@ -308,7 +308,7 @@ export function PayrollTimePage() {
         <div className="table-head">
           <h2>Salary advance / loan</h2>
           <p className="muted">
-            Disburses from treasury (Dr 1131 / Cr cash). Monthly payroll recovers
+            Disburses from treasury (Dr 1161 / Cr cash). Monthly payroll recovers
             the installment — slip shows the reason; less cash paid out increases
             retained balance.
           </p>

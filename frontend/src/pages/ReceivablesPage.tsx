@@ -112,7 +112,7 @@ export function ReceivablesPage() {
           variant="teal"
           title="Open AR"
           value={money(openTotal)}
-          meta="Outstanding client balances (1121)"
+          meta="Outstanding client balances (1151)"
         />
         <MetricCard
           variant="red"
@@ -172,7 +172,7 @@ export function ReceivablesPage() {
       <Modal
         open={modalOpen}
         title="New client invoice"
-        description="Posts Dr Accounts Receivable (1121) / Cr Project Revenue (4110) on issue."
+        description="Posts Dr Accounts Receivable (1151) / Cr Project Revenue (4110) on issue."
         onClose={() => setModalOpen(false)}
         wide
       >

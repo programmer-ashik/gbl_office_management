@@ -7,7 +7,7 @@ const INK: [number, number, number] = [26, 26, 26]
 const MUTED: [number, number, number] = [110, 110, 110]
 const ACCENT: [number, number, number] = [15, 76, 129]
 
-export function downloadQuotationPdf(quotation: Quotation): void {
+export function buildQuotationPdf(quotation: Quotation): jsPDF {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
   const margin = 14
@@ -137,5 +137,15 @@ export function downloadQuotationPdf(quotation: Quotation): void {
   doc.setFontSize(9)
   doc.text(`Prepared by: ${quotation.createdByName}`, margin, y)
 
+  return doc
+}
+
+export function downloadQuotationPdf(quotation: Quotation): void {
+  const doc = buildQuotationPdf(quotation)
   doc.save(`${quotation.quotationNumber || 'quotation'}.pdf`)
+}
+
+export function quotationPdfPreviewUrl(quotation: Quotation): string {
+  const blob = buildQuotationPdf(quotation).output('blob')
+  return URL.createObjectURL(blob)
 }

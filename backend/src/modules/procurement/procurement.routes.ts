@@ -14,9 +14,11 @@ import {
   CreatePurchaseOrderDto,
   CreateSupplierDto,
   IssueStockDto,
+  ReassignCategoryItemsDto,
   ReceiveGoodsDto,
   ReturnGoodsDto,
   UpdateItemDto,
+  UpdateProductCategoryDto,
 } from './dto/procurement.dto';
 import type { ProcurementService } from './procurement.service';
 
@@ -198,6 +200,49 @@ export function createProductCategoriesRouter(
     asyncHandler(async (req, res) => {
       const row = await procurementService.createCategory(req.body, req.user!);
       sendSuccess(res, row, 'Product category created successfully', 201);
+    }),
+  );
+
+  router.patch(
+    '/:id',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(UpdateProductCategoryDto),
+    asyncHandler(async (req, res) => {
+      const row = await procurementService.updateCategory(
+        req.params.id as string,
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Product category updated successfully');
+    }),
+  );
+
+  router.post(
+    '/:id/reassign-items',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(ReassignCategoryItemsDto),
+    asyncHandler(async (req, res) => {
+      const result = await procurementService.reassignCategoryItems(
+        req.params.id as string,
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, result, 'Products moved successfully');
+    }),
+  );
+
+  router.delete(
+    '/:id',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const result = await procurementService.deleteCategory(
+        req.params.id as string,
+        req.user!,
+      );
+      sendSuccess(res, result, 'Product category deleted successfully');
     }),
   );
 

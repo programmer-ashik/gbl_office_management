@@ -84,6 +84,20 @@ export function AdvanceDetailPage() {
     }
   }
 
+  async function onApprove() {
+    if (!id) return
+    setSaving(true)
+    setError(null)
+    try {
+      await api.approveAdvance(id)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to approve')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function onReject() {
     if (!id) return
     setSaving(true)
@@ -219,7 +233,25 @@ export function AdvanceDetailPage() {
 
       {isFinance && row.status === 'pending' ? (
         <section className="table-card">
-          <h2>Step 2 · Disburse</h2>
+          <h2>Step 2 · Approve requisition</h2>
+          <p className="muted">
+            Accountant or admin reviews the request. After approval it can be
+            disbursed from treasury.
+          </p>
+          <div className="form-actions">
+            <button type="button" className="ghost" onClick={() => void onReject()}>
+              Reject
+            </button>
+            <button type="button" disabled={saving} onClick={() => void onApprove()}>
+              {saving ? 'Saving…' : 'Approve'}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {isFinance && row.status === 'approved' ? (
+        <section className="table-card">
+          <h2>Step 3 · Disburse</h2>
           <p className="muted">
             Pay from cash, bank, or mobile wallet. This debits Employee Advances
             (1300), not a project expense.
@@ -260,7 +292,7 @@ export function AdvanceDetailPage() {
 
       {(isOwner || isFinance) && row.status === 'disbursed' ? (
         <section className="table-card">
-          <h2>Step 3 · Submit vouchers</h2>
+          <h2>Step 4 · Submit vouchers</h2>
           <p className="muted">
             Equal spend closes the advance. Less spend returns cash. More spend
             credits Employee Payables (2100). Expense hits the project only after

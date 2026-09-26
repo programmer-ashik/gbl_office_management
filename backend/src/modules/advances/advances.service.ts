@@ -412,11 +412,28 @@ export class AdvancesService {
   ): Promise<PublicAdvance> {
     this.assertFinance(actor);
     const row = await this.findByIdOrFail(id);
-    if (row.status !== AdvanceStatus.PENDING) {
-      throw badRequest('Only a pending requisition can be rejected');
+    if (
+      row.status !== AdvanceStatus.PENDING &&
+      row.status !== AdvanceStatus.APPROVED
+    ) {
+      throw badRequest('Only a pending or approved requisition can be rejected');
     }
     row.status = AdvanceStatus.REJECTED;
     row.rejectionReason = reason?.trim();
+    await row.save();
+    return this.toPublic(row);
+  }
+
+  async approve(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<PublicAdvance> {
+    this.assertFinance(actor);
+    const row = await this.findByIdOrFail(id);
+    if (row.status !== AdvanceStatus.PENDING) {
+      throw badRequest('Only a pending requisition can be approved');
+    }
+    row.status = AdvanceStatus.APPROVED;
     await row.save();
     return this.toPublic(row);
   }
@@ -428,8 +445,8 @@ export class AdvancesService {
   ): Promise<PublicAdvance | { requiresApproval: true; approval: unknown }> {
     this.assertFinance(actor);
     const row = await this.findByIdOrFail(id);
-    if (row.status !== AdvanceStatus.PENDING) {
-      throw badRequest('Only a pending requisition can be disbursed');
+    if (row.status !== AdvanceStatus.APPROVED) {
+      throw badRequest('Only an approved requisition can be disbursed');
     }
 
     const amount = fromMinorUnits(row.requestedMinor);

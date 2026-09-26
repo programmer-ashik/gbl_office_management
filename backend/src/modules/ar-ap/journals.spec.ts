@@ -15,7 +15,7 @@ describe('ar-ap journal builders', () => {
     });
     expect(lines).toEqual([
       expect.objectContaining({
-        accountCode: '1121',
+        accountCode: '1151',
         debit: 500,
         projectId: 'proj-1',
       }),
@@ -30,13 +30,13 @@ describe('ar-ap journal builders', () => {
   it('records collection against AR', () => {
     const lines = buildCollectionJournalLines({
       amountMinor: 25_000,
-      treasuryAccountCode: '1112',
+      treasuryAccountCode: '1122',
       projectId: 'proj-1',
       description: 'Partial collection',
     });
     expect(lines).toEqual([
-      expect.objectContaining({ accountCode: '1112', debit: 250 }),
-      expect.objectContaining({ accountCode: '1121', credit: 250 }),
+      expect.objectContaining({ accountCode: '1122', debit: 250 }),
+      expect.objectContaining({ accountCode: '1151', credit: 250 }),
     ]);
   });
 
@@ -62,7 +62,7 @@ describe('ar-ap journal builders', () => {
     const lines = buildCashBillJournalLines({
       amountMinor: 8_000,
       expenseAccountCode: '5240',
-      treasuryAccountCode: '1112',
+      treasuryAccountCode: '1122',
       description: 'Stationery',
       supplierId: 'sup-1',
     });
@@ -80,14 +80,14 @@ describe('ar-ap journal builders', () => {
         entityType: 'supplier',
         entityId: 'sup-1',
       }),
-      expect.objectContaining({ accountCode: '1112', credit: 80 }),
+      expect.objectContaining({ accountCode: '1122', credit: 80 }),
     ]);
   });
 
   it('clears AP on supplier payment', () => {
     const lines = buildSupplierPaymentJournalLines({
       amountMinor: 30_000,
-      treasuryAccountCode: '1112',
+      treasuryAccountCode: '1122',
       description: 'Vendor settlement',
       supplierId: 'sup-1',
     });
@@ -98,7 +98,7 @@ describe('ar-ap journal builders', () => {
         entityType: 'supplier',
         entityId: 'sup-1',
       }),
-      expect.objectContaining({ accountCode: '1112', credit: 300 }),
+      expect.objectContaining({ accountCode: '1122', credit: 300 }),
     ]);
   });
 });

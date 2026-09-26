@@ -5,6 +5,7 @@ import { fromMinorUnits } from '../../common/utils/money';
 import { SupplierBillModel } from '../ar-ap/supplier-bill.model';
 import { SupplierPaymentModel } from '../ar-ap/supplier-payment.model';
 import { GoodsMovementModel } from '../procurement/goods-movement.model';
+import { rollupBalances } from './account-rollup';
 import { AccountModel } from './account.model';
 import { JournalEntityType } from './journal.enums';
 import { JournalEntryModel } from './journal-entry.model';
@@ -341,12 +342,24 @@ export class LedgerService {
     const allDebitMinor = openingDebitMinor + periodDebitMinor;
     const allCreditMinor = openingCreditMinor + periodCreditMinor;
 
-    const openingBalance = fromMinorUnits(
+    let openingBalance = fromMinorUnits(
       netBalanceMinor(account.type, openingDebitMinor, openingCreditMinor),
     );
-    const closingBalance = fromMinorUnits(
+    let closingBalance = fromMinorUnits(
       netBalanceMinor(account.type, allDebitMinor, allCreditMinor),
     );
+
+    if (!account.isPostable) {
+      closingBalance = await rolledHeaderBalance(
+        account.code,
+        toDate ?? undefined,
+      );
+      if (rangeStart) {
+        const dayBefore = new Date(rangeStart);
+        dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
+        openingBalance = await rolledHeaderBalance(account.code, dayBefore);
+      }
+    }
 
     const creditNormal = normalBalanceOf(account.type) === 'credit';
     let running = openingBalance;
@@ -472,6 +485,81 @@ export class LedgerService {
       isBalanced: totalDebit === totalCredit,
     };
   }
+}
+
+/** Header balance is the sum of postable descendant balances, not its own lines. */
+async function rolledHeaderBalance(
+  rootCode: string,
+  asOf?: Date,
+): Promise<number> {
+  const accounts = await AccountModel.find({ isActive: true })
+    .select({ code: 1, parentCode: 1, isPostable: 1, type: 1 })
+    .lean()
+    .exec();
+  const childrenOf = new Map<string, typeof accounts>();
+  for (const row of accounts) {
+    if (!row.parentCode) continue;
+    const list = childrenOf.get(row.parentCode) ?? [];
+    list.push(row);
+    childrenOf.set(row.parentCode, list);
+  }
+
+  const postableCodes: string[] = [];
+  const walk = (code: string, seen: Set<string>) => {
+    if (seen.has(code)) return;
+    seen.add(code);
+    for (const child of childrenOf.get(code) ?? []) {
+      if (child.isPostable) postableCodes.push(child.code);
+      else walk(child.code, seen);
+    }
+  };
+  walk(rootCode, new Set());
+
+  const match: Record<string, unknown> = {
+    accountCode: { $in: postableCodes },
+  };
+  if (asOf) {
+    const end = new Date(asOf);
+    end.setUTCHours(23, 59, 59, 999);
+    match.date = { $lte: end };
+  }
+  const grouped =
+    postableCodes.length === 0
+      ? []
+      : await LedgerLineModel.aggregate<{
+          _id: string;
+          debitMinor: number;
+          creditMinor: number;
+        }>([
+          { $match: match },
+          {
+            $group: {
+              _id: '$accountCode',
+              debitMinor: { $sum: '$debitMinor' },
+              creditMinor: { $sum: '$creditMinor' },
+            },
+          },
+        ]);
+
+  const typeByCode = new Map(accounts.map((row) => [row.code, row.type]));
+  const own = new Map<string, number>();
+  for (const row of grouped) {
+    const type = typeByCode.get(row._id) ?? AccountType.ASSET;
+    own.set(
+      row._id,
+      fromMinorUnits(netBalanceMinor(type, row.debitMinor, row.creditMinor)),
+    );
+  }
+  return (
+    rollupBalances(
+      accounts.map((row) => ({
+        code: row.code,
+        parentCode: row.parentCode,
+        isPostable: row.isPostable,
+      })),
+      own,
+    ).get(rootCode) ?? 0
+  );
 }
 
 function netBalanceMinor(

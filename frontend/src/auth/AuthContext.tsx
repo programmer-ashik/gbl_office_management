@@ -15,13 +15,10 @@ type AuthContextValue = {
   loading: boolean
   error: string | null
   login: (email: string, password: string) => Promise<void>
-  signup: (input: {
-    email: string
-    password: string
-    firstName: string
-    lastName: string
-  }) => Promise<void>
   logout: () => Promise<void>
+  /** Merge latest public user fields into the signed-in session. */
+  applyUser: (next: PublicUser) => void
+  refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -56,21 +53,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(result.user)
   }, [])
 
-  const signup = useCallback(
-    async (input: {
-      email: string
-      password: string
-      firstName: string
-      lastName: string
-    }) => {
-      setError(null)
-      const result = await api.signup(input)
-      setAccessToken(result.tokens.accessToken)
-      setUser(result.user)
-    },
-    [],
-  )
-
   const logout = useCallback(async () => {
     try {
       await api.logout()
@@ -80,9 +62,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const applyUser = useCallback((next: PublicUser) => {
+    setUser((current) => {
+      if (!current || current.id !== next.id) return current
+      return { ...current, ...next }
+    })
+  }, [])
+
+  const refreshUser = useCallback(async () => {
+    const profile = await api.me()
+    setUser(profile)
+  }, [])
+
   const value = useMemo(
-    () => ({ user, loading, error, login, signup, logout }),
-    [user, loading, error, login, signup, logout],
+    () => ({ user, loading, error, login, logout, applyUser, refreshUser }),
+    [user, loading, error, login, logout, applyUser, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -2,8 +2,13 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { canAuditQuotations, canCreateQuotation } from "../auth/permissions";
-import { Select } from "../components/ui";
+import {
+  canAuditQuotations,
+  canCreateQuotation,
+  canDeleteQuotation,
+  canEditQuotation,
+} from "../auth/permissions";
+import { Select, ActionMenu } from "../components/ui";
 import { money } from "../types/accounting";
 import type { PublicUser } from "../types/auth";
 import type { Project } from "../types/project";
@@ -12,7 +17,11 @@ import {
   QuotationStatus,
   type Quotation,
 } from "../types/quotation";
-import { downloadQuotationPdf } from "../utils/quotationPdf";
+import {
+  downloadQuotationPdf,
+  quotationPdfPreviewUrl,
+} from "../utils/quotationPdf";
+import { VoucherPdfPreview } from "../components/VoucherPdfPreview";
 
 export function QuotationsPage() {
   const { user } = useAuth();
@@ -31,6 +40,9 @@ export function QuotationsPage() {
   const [status, setStatus] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewTitle, setPreviewTitle] = useState("");
 
   async function load() {
     setLoading(true);
@@ -66,6 +78,28 @@ export function QuotationsPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canCreate]);
+
+  function closePreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+  }
+
+  function openPreview(row: Quotation) {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewTitle(row.quotationNumber);
+    setPreviewUrl(quotationPdfPreviewUrl(row));
+  }
+
+  async function onDelete(row: Quotation) {
+    if (!window.confirm(`Delete ${row.quotationNumber}?`)) return;
+    setError(null);
+    try {
+      await api.deleteQuotation(row.id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete quotation");
+    }
+  }
 
   const employeeOptions = useMemo(
     () =>
@@ -267,23 +301,48 @@ export function QuotationsPage() {
                   <td className='num'>{money(row.grandTotal)}</td>
 
                   <td>
-                    <div className='form-actions'>
-                      <button
-                        type='button'
-                        className='ghost'
-                        onClick={() => navigate(`/quotations/${row.id}`)}
-                      >
-                        Open
-                      </button>
-
-                      <button
-                        type='button'
-                        className='ghost'
-                        onClick={() => downloadQuotationPdf(row)}
-                      >
-                        PDF
-                      </button>
-                    </div>
+                    <ActionMenu
+                      items={[
+                        {
+                          label: "View",
+                          onSelect: () => navigate(`/quotations/${row.id}`),
+                        },
+                        {
+                          label: "Preview",
+                          onSelect: () => openPreview(row),
+                        },
+                        ...(canEditQuotation(
+                          user?.role,
+                          row.status,
+                          row.createdBy === user?.id,
+                        )
+                          ? [
+                              {
+                                label: "Edit",
+                                onSelect: () =>
+                                  navigate(`/quotations/${row.id}?edit=1`),
+                              },
+                            ]
+                          : []),
+                        {
+                          label: "Download PDF",
+                          onSelect: () => downloadQuotationPdf(row),
+                        },
+                        ...(canDeleteQuotation(
+                          user?.role,
+                          row.status,
+                          row.createdBy === user?.id,
+                        )
+                          ? [
+                              {
+                                label: "Delete",
+                                danger: true as const,
+                                onSelect: () => void onDelete(row),
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}
@@ -299,6 +358,12 @@ export function QuotationsPage() {
           </table>
         </div>
       </section>
+
+      <VoucherPdfPreview
+        title={previewTitle || "Quotation preview"}
+        url={previewUrl}
+        onClose={closePreview}
+      />
     </>
   );
 }

@@ -124,6 +124,6 @@ describe('buildSettlementJournalLines', () => {
   });
 
   it('rejects a non-expense voucher account', () => {
-    expect(() => assertExpenseAccount(AccountType.ASSET, '1131')).toThrow(AppError);
+    expect(() => assertExpenseAccount(AccountType.ASSET, '1161')).toThrow(AppError);
   });
 });

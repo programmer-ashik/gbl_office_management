@@ -1,12 +1,7 @@
 import type { CSSProperties } from "react";
 import { resolveAssetUrl } from "../types/report-template";
 
-export type VoucherThemeId =
-  | "yellow"
-  | "blue"
-  | "emerald"
-  | "crimson"
-  | "charcoal";
+export type VoucherThemeId = "bw" | "color";
 
 export type VoucherTheme = {
   id: VoucherThemeId;
@@ -15,6 +10,8 @@ export type VoucherTheme = {
   accent: string;
   /** Readable text/line color on the sidebar */
   sidebarText: string;
+  /** Title and accent text on the white page */
+  bodyText: string;
   sidebarClass: string;
   sidebarTextClass: string;
   sidebarMutedClass: string;
@@ -23,72 +20,45 @@ export type VoucherTheme = {
   accentBarClass: string;
 };
 
+export function normalizeVoucherTheme(id?: string | null): VoucherThemeId {
+  if (id === "bw" || id === "charcoal" || id === "black") return "bw";
+  return "color";
+}
+
 export const VOUCHER_COLOR_THEMES: VoucherTheme[] = [
   {
-    id: "yellow",
-    name: "Classic Yellow",
-    accent: "#f1b80d",
-    sidebarText: "#0f172a",
-    sidebarClass: "bg-[#f1b80d]",
-    sidebarTextClass: "text-slate-900",
-    sidebarMutedClass: "text-slate-900/60",
-    sidebarLineClass: "border-slate-950/40",
-    textClass: "text-[#f1b80d]",
-    accentBarClass: "bg-[#f1b80d]",
+    id: "bw",
+    name: "Black & White",
+    accent: "#ffffff",
+    sidebarText: "#111111",
+    bodyText: "#111111",
+    sidebarClass: "bg-white",
+    sidebarTextClass: "text-neutral-900",
+    sidebarMutedClass: "text-neutral-600",
+    sidebarLineClass: "border-neutral-900",
+    textClass: "text-neutral-900",
+    accentBarClass: "bg-neutral-900",
   },
   {
-    id: "blue",
-    name: "Royal Blue",
-    accent: "#2563eb",
+    id: "color",
+    name: "Color",
+    accent: "#1d4ed8",
     sidebarText: "#ffffff",
-    sidebarClass: "bg-blue-600",
+    bodyText: "#1d4ed8",
+    sidebarClass: "bg-blue-700",
     sidebarTextClass: "text-white",
-    sidebarMutedClass: "text-white/70",
-    sidebarLineClass: "border-white/50",
-    textClass: "text-blue-600",
-    accentBarClass: "bg-blue-600",
-  },
-  {
-    id: "emerald",
-    name: "Emerald Green",
-    accent: "#059669",
-    sidebarText: "#ffffff",
-    sidebarClass: "bg-emerald-600",
-    sidebarTextClass: "text-white",
-    sidebarMutedClass: "text-white/70",
-    sidebarLineClass: "border-white/50",
-    textClass: "text-emerald-600",
-    accentBarClass: "bg-emerald-600",
-  },
-  {
-    id: "crimson",
-    name: "Crimson Red",
-    accent: "#e11d48",
-    sidebarText: "#ffffff",
-    sidebarClass: "bg-rose-600",
-    sidebarTextClass: "text-white",
-    sidebarMutedClass: "text-white/70",
-    sidebarLineClass: "border-white/50",
-    textClass: "text-rose-600",
-    accentBarClass: "bg-rose-600",
-  },
-  {
-    id: "charcoal",
-    name: "Charcoal Dark",
-    accent: "#1e293b",
-    sidebarText: "#f8fafc",
-    sidebarClass: "bg-slate-800",
-    sidebarTextClass: "text-slate-50",
-    sidebarMutedClass: "text-slate-300/80",
-    sidebarLineClass: "border-slate-200/40",
-    textClass: "text-slate-800",
-    accentBarClass: "bg-slate-800",
+    sidebarMutedClass: "text-white/80",
+    sidebarLineClass: "border-white/70",
+    textClass: "text-blue-700",
+    accentBarClass: "bg-blue-700",
   },
 ];
 
 export function getVoucherTheme(id?: string | null): VoucherTheme {
+  const normalized = normalizeVoucherTheme(id);
   return (
-    VOUCHER_COLOR_THEMES.find((t) => t.id === id) ?? VOUCHER_COLOR_THEMES[0]!
+    VOUCHER_COLOR_THEMES.find((t) => t.id === normalized) ??
+    VOUCHER_COLOR_THEMES[1]!
   );
 }
 
@@ -156,6 +126,12 @@ export function voucherSidebarTextRgb(
   return hexToRgb(getVoucherTheme(themeId).sidebarText);
 }
 
+export function voucherBodyTextRgb(
+  themeId?: string | null,
+): [number, number, number] {
+  return hexToRgb(getVoucherTheme(themeId).bodyText);
+}
+
 /**
  * Print-ready Debit / Credit voucher layout (landscape paper template).
  * Used by Settings preview and mirrors the PDF output.
@@ -179,7 +155,7 @@ export function DebitCreditVoucherView({
   amountInWords = "",
   items,
   signatories,
-  themeId = "yellow",
+  themeId = "color",
   showWatermark = true,
   className = "",
   style,
@@ -214,7 +190,13 @@ export function DebitCreditVoucherView({
       <div className='flex flex-col md:flex-row h-full min-h-[540px]'>
         {/* Left sidebar */}
         <div
-          className={`w-full md:w-[32%]  p-6 flex flex-col justify-between relative overflow-hidden print:w-[32%]`}
+          className='w-full md:w-[32%] p-6 flex flex-col justify-between relative overflow-hidden print:w-[32%]'
+          style={{
+            backgroundColor: theme.accent,
+            color: theme.sidebarText,
+            borderRight:
+              theme.id === "bw" ? "1px solid #111111" : "none",
+          }}
         >
           <svg
             className={`absolute -left-12 -bottom-12 w-64 h-64 opacity-15 pointer-events-none ${theme.sidebarTextClass}`}
@@ -332,11 +314,15 @@ export function DebitCreditVoucherView({
               </div>
 
               <div className='text-right'>
-                <h1 className='text-2xl sm:text-3xl font-black tracking-tight text-slate-900 uppercase leading-none'>
+                <h1
+                  className='text-2xl sm:text-3xl font-black tracking-tight uppercase leading-none'
+                  style={{ color: theme.bodyText }}
+                >
                   {title}
                 </h1>
                 <div
-                  className={`h-1.5 w-16 ml-auto mt-2 rounded-full ${theme.accentBarClass}`}
+                  className='h-1.5 w-16 ml-auto mt-2 rounded-full'
+                  style={{ backgroundColor: theme.id === "bw" ? "#111111" : theme.accent }}
                 />
               </div>
             </div>

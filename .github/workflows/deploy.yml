@@ -1,0 +1,58 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+
+# One deploy per branch. A second push waits so two builds cannot overwrite each other.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Execute Remote SSH Commands
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 30m
+          script: |
+            TARGET_DIR="/var/www/${{ github.ref_name }}"
+
+            # 1. Pull latest code
+            cd $TARGET_DIR
+            git fetch origin
+            git reset --hard origin/${{ github.ref_name }}
+
+            # 2. Frontend - Force clean install & bypass strict TS checker
+            cd $TARGET_DIR/frontend
+            rm -rf node_modules package-lock.json
+            npm install
+            npx vite build
+
+            # 3. Backend - Force clean install & compile TS
+            cd $TARGET_DIR/backend
+            rm -rf node_modules package-lock.json
+            npm install
+            npm run build
+
+            # Production defaults on the VPS .env (do not overwrite existing secrets)
+            touch .env
+            grep -q '^SEED_DEMO=' .env || echo 'SEED_DEMO=false' >> .env
+            if [ "${{ github.ref_name }}" = "main" ]; then
+              if grep -q '^NODE_ENV=' .env; then
+                sed -i 's/^NODE_ENV=.*/NODE_ENV=production/' .env
+              else
+                echo 'NODE_ENV=production' >> .env
+              fi
+            fi
+
+            # 4. Safely restart or start PM2
+            pm2 restart ${{ github.ref_name }}-backend --update-env || pm2 start npm --name "${{ github.ref_name }}-backend" -- run start:prod
+            pm2 save

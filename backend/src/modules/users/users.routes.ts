@@ -6,6 +6,11 @@ import { requireAuth } from '../../common/middleware/auth';
 import { requireRoles } from '../../common/middleware/roles';
 import { validateBody } from '../../common/middleware/validate';
 import type { AuthService } from '../auth/auth.service';
+import {
+  ChangeOwnPasswordDto,
+  ResetUserPasswordDto,
+} from './dto/password.dto';
+import { UpdateUserPermissionsDto } from './dto/update-user-permissions.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import type { UsersService } from './users.service';
@@ -37,6 +42,21 @@ export function createUsersRouter(
         usersService.toPublicUser(user),
         'Current user retrieved successfully',
       );
+    }),
+  );
+
+  // Must be registered before /:id routes so "profile" is not treated as an id.
+  router.put(
+    '/profile/change-password',
+    auth,
+    validateBody(ChangeOwnPasswordDto),
+    asyncHandler(async (req, res) => {
+      const user = await usersService.changeOwnPassword(
+        req.user!.userId,
+        req.body.oldPassword,
+        req.body.newPassword,
+      );
+      sendSuccess(res, user, 'Password updated successfully');
     }),
   );
 
@@ -79,6 +99,34 @@ export function createUsersRouter(
         req.body.isActive,
       );
       sendSuccess(res, user, 'User status updated successfully');
+    }),
+  );
+
+  router.patch(
+    '/:id/permissions',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(UpdateUserPermissionsDto),
+    asyncHandler(async (req, res) => {
+      const user = await usersService.updatePermissions(
+        String(req.params.id),
+        req.body.allowedPermissions,
+      );
+      sendSuccess(res, user, 'User permissions updated successfully');
+    }),
+  );
+
+  router.put(
+    '/:id/reset-password',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(ResetUserPasswordDto),
+    asyncHandler(async (req, res) => {
+      const user = await usersService.resetPassword(
+        String(req.params.id),
+        req.body.newPassword,
+      );
+      sendSuccess(res, user, 'Password reset successfully');
     }),
   );
 

@@ -13,7 +13,9 @@
     "test": "jest",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand --forceExit",
     "seed:coa": "tsx src/scripts/seed-chart-of-accounts.ts",
-    "seed:recon-pdf": "tsx src/scripts/seed-recon-from-statement-pdf.ts"
+    "repair:cash-bank": "tsx src/scripts/repair-cash-bank-chart.ts",
+    "seed:recon-pdf": "tsx src/scripts/seed-recon-from-statement-pdf.ts",
+    "wipe:production": "tsx src/scripts/wipe-for-production.ts"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

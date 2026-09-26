@@ -62,7 +62,7 @@ describe('computeProjectFinancials', () => {
   it('ignores asset lines such as employee advances', () => {
     const result = computeProjectFinancials(100_000, 50_000, [
       {
-        accountCode: '1131',
+        accountCode: '1161',
         accountName: 'Employee Advances',
         accountType: AccountType.ASSET,
         debitMinor: 20_000,
