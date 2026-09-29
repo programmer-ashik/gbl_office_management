@@ -495,7 +495,7 @@ button:hover:not(:disabled):not(.ghost):not(.ui-select-trigger):not(
     .sidebar-toggle
   ):not(.theme-picker-card):not(.recon-clip):not(.file-upload-browse):not(
     .journal-line-note
-  ) {
+  ):not(.expandable-text) {
   background: linear-gradient(
     90deg,
     var(--theme-btn-hover-from, var(--theme-btn-from, var(--navy))) 0%,
@@ -1228,23 +1228,100 @@ button.ghost {
 }
 
 .expandable-text {
-  display: inline;
+  display: block;
+  width: 100%;
+  min-height: 0;
   margin: 0;
   padding: 0;
   border: none;
+  border-radius: 0;
   background: none;
+  box-shadow: none;
   color: inherit;
   font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  line-height: 1.4;
   text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
   cursor: pointer;
-  text-decoration: underline dotted;
-  text-underline-offset: 2px;
-  max-width: 100%;
-  word-break: break-word;
 }
 
-.expandable-text:hover {
-  color: var(--accent, #2563eb);
+.expandable-text.is-open {
+  white-space: pre-wrap;
+}
+
+.expandable-text:hover,
+.expandable-text:focus-visible {
+  background: none;
+  color: inherit;
+  filter: none;
+  outline: none;
+}
+
+.expandable-text-toggle {
+  margin-left: 6px;
+  color: #1d4ed8;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.expandable-text:hover .expandable-text-toggle,
+.expandable-text:focus-visible .expandable-text-toggle {
+  text-decoration: underline;
+}
+
+.expandable-text-static {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Fixed-width description column: text wraps and grows downward. */
+table th.description-cell,
+table td.description-cell,
+.ledger-inquiry-table td.description-cell {
+  width: 300px;
+  min-width: 300px;
+  max-width: 300px;
+  white-space: normal;
+  vertical-align: top;
+}
+
+/* Grouped modal for posted-journal corrections. */
+.posted-edit-lines {
+  display: grid;
+  gap: 12px;
+}
+
+.posted-edit-line {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: rgba(15, 39, 68, 0.02);
+}
+
+.posted-edit-line-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  font-size: var(--text-sm);
+}
+
+.posted-edit-line-amount {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.posted-edit-line textarea {
+  padding: 8px 12px;
+  line-height: 1.45;
+  resize: vertical;
 }
 
 @media (max-width: 1100px) {
@@ -2834,6 +2911,10 @@ td .ui-action-menu {
   white-space: nowrap;
 }
 
+.journal-register-table td {
+  vertical-align: top;
+}
+
 .journal-register-table td:nth-child(5) {
   white-space: normal;
   min-width: 180px;
@@ -3703,7 +3784,9 @@ table thead th,
     .ui-action-item
   ):not(.nav-section-toggle):not(.nav-subgroup-toggle):not(.sidebar-toggle):not(
     .theme-picker-card
-  ):not(.recon-clip):not(.file-upload-browse):not(.journal-line-note) {
+  ):not(.recon-clip):not(.file-upload-browse):not(.journal-line-note):not(
+    .expandable-text
+  ) {
   border-radius: 999px;
   background: linear-gradient(
     90deg,
@@ -3720,7 +3803,9 @@ table thead th,
     .ui-action-item
   ):not(.nav-section-toggle):not(.nav-subgroup-toggle):not(.sidebar-toggle):not(
     .theme-picker-card
-  ):not(.recon-clip):not(.file-upload-browse):not(.journal-line-note):hover {
+  ):not(.recon-clip):not(.file-upload-browse):not(.journal-line-note):not(
+    .expandable-text
+  ):hover {
   background: linear-gradient(
     90deg,
     var(--theme-btn-hover-from, var(--theme-btn-from, #0f2744)) 0%,

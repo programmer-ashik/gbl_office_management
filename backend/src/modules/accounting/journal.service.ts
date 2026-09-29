@@ -18,10 +18,18 @@ import { SupplierModel } from '../procurement/supplier.model';
 import type { ProjectsService } from '../projects/projects.service';
 import { findEmployee } from '../employees/employee-records';
 import type { UsersService } from '../users/users.service';
-import { assertManualLineDimensions } from './account-dimensions';
+import {
+  assertManualLineDimensions,
+  codesUnderProjectCost,
+} from './account-dimensions';
 import { AccountsService } from './accounts.service';
 import { CounterModel } from './counter.model';
-import type { JournalLineDto, PostJournalDto } from './dto/journal.dto';
+import type {
+  JournalLineDto,
+  PostJournalDto,
+  UpdatePostedJournalDto,
+} from './dto/journal.dto';
+import { journalDateLockReason } from './journal-date-lock';
 import {
   JournalEntityType,
   JournalStatus,
@@ -573,6 +581,129 @@ export class JournalService {
       writeLedger: false,
       postNow: dto.intent === 'post',
     });
+  }
+
+  async postedEditability(
+    id: string,
+  ): Promise<{ id: string; editable: boolean; dateLockedReason: string | null }> {
+    const entry = await this.findByIdOrFail(id);
+    const editable = entry.status === JournalStatus.POSTED;
+    return {
+      id: entry._id.toString(),
+      editable,
+      dateLockedReason: editable ? await journalDateLockReason(entry) : null,
+    };
+  }
+
+  /**
+   * Corrects the date and line descriptions of a posted journal and its
+   * ledger lines in place. Accounts, amounts, parties and projects are never
+   * touched here — those still require a reversal.
+   */
+  async updatePostedDetails(
+    id: string,
+    dto: UpdatePostedJournalDto,
+    userId: string,
+  ): Promise<PublicJournal> {
+    const existing = await this.findByIdOrFail(id);
+    if (existing.status !== JournalStatus.POSTED) {
+      throw badRequest(
+        existing.status === JournalStatus.REVERSED
+          ? 'Reversed journals cannot be edited'
+          : 'Only posted journals use this edit — open the draft editor instead',
+      );
+    }
+    const before = this.toPublic(existing);
+
+    let nextDate: Date | null = null;
+    if (dto.date) {
+      const requested = new Date(`${dto.date.slice(0, 10)}T00:00:00.000Z`);
+      if (Number.isNaN(requested.getTime())) throw badRequest('Invalid date');
+      if (requested.toISOString().slice(0, 10) !== before.date.slice(0, 10)) {
+        const locked = await journalDateLockReason(existing);
+        if (locked) throw badRequest(`Date cannot change: ${locked}`);
+        nextDate = requested;
+      }
+    }
+
+    const notes = new Map<number, string | undefined>();
+    for (const note of dto.lines ?? []) {
+      if (note.index >= existing.lines.length) {
+        throw badRequest(`Journal has no line ${note.index + 1}`);
+      }
+      notes.set(note.index, note.description?.trim() || undefined);
+    }
+    const changedNotes = [...notes].filter(
+      ([index, text]) => (existing.lines[index].description ?? undefined) !== text,
+    );
+    if (!nextDate && changedNotes.length === 0) {
+      return before;
+    }
+
+    if (nextDate) {
+      const oldDay = before.date.slice(2, 10).replace(/-/g, '');
+      const newDay = nextDate.toISOString().slice(2, 10).replace(/-/g, '');
+      const autoPrefix = `gbl-${oldDay}-`;
+      if (existing.memo.startsWith(autoPrefix)) {
+        existing.memo = `gbl-${newDay}-${existing.memo.slice(autoPrefix.length)}`;
+      }
+      existing.date = nextDate;
+    }
+    for (const [index, text] of changedNotes) {
+      existing.lines[index].description = text;
+    }
+
+    await withTransaction(async (session) => {
+      await existing.save({ session });
+      const ledger = await LedgerLineModel.find({ journalEntryId: existing._id })
+        .sort({ _id: 1 })
+        .session(session)
+        .exec();
+      const pool = [...ledger];
+      const ops = existing.lines.flatMap((line) => {
+        const at = pool.findIndex(
+          (row) =>
+            row.accountCode === line.accountCode &&
+            row.debitMinor === line.debitMinor &&
+            row.creditMinor === line.creditMinor,
+        );
+        if (at < 0) return [];
+        const [row] = pool.splice(at, 1);
+        return [
+          {
+            updateOne: {
+              filter: { _id: row._id },
+              update: {
+                $set: {
+                  date: existing.date,
+                  memo: existing.memo,
+                  description: line.description?.trim() || existing.memo,
+                },
+              },
+            },
+          },
+        ];
+      });
+      if (ops.length > 0) {
+        await LedgerLineModel.bulkWrite(ops, { session });
+      }
+    });
+
+    const after = this.toPublic(existing);
+    const changes = [
+      nextDate ? `date ${before.date.slice(0, 10)} → ${after.date.slice(0, 10)}` : null,
+      changedNotes.length > 0
+        ? `${changedNotes.length} line description${changedNotes.length === 1 ? '' : 's'}`
+        : null,
+    ].filter(Boolean);
+    await this.auditLedgerWrite(
+      userId,
+      AuditAction.UPDATE,
+      after,
+      `Posted journal corrected: ${after.entryNumber} (${changes.join(', ')})`,
+      before as unknown as Record<string, unknown>,
+    );
+    return after;
   }
 
   async postExisting(id: string, userId: string): Promise<PublicJournal> {
@@ -1236,6 +1367,11 @@ export class JournalService {
       ]),
     );
 
+    const projectCostCodes =
+      source === 'manual' && !isOpeningBalance
+        ? await codesUnderProjectCost([...byCode.keys()])
+        : new Set<string>();
+
     const lines: IJournalLine[] = [];
     for (const line of prepared) {
       const account = byCode.get(line.accountCode);
@@ -1252,6 +1388,8 @@ export class JournalService {
           projectId: line.projectId,
           headerProjectId,
           skipProjectRequirement: isOpeningBalance,
+          isProjectCost: projectCostCodes.has(account.code),
+          accountName: account.name,
         });
       }
 

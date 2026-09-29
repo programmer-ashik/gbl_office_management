@@ -6,6 +6,7 @@ import { JournalRegister } from "../components/JournalRegister";
 import { MetricCard } from "../components/MetricCard";
 import { Modal, Select } from "../components/ui";
 import {
+  JOURNAL_LINE_DESCRIPTION_MAX,
   JOURNAL_TYPE_LABEL,
   JournalType,
   dimensionRuleForAccount,
@@ -212,7 +213,10 @@ export function JournalsPage() {
         if (i !== index) return line;
         const next = { ...line, ...patch };
         if (patch.accountCode !== undefined) {
-          const rule = dimensionRuleForAccount(patch.accountCode);
+          const rule = dimensionRuleForAccount(
+            patch.accountCode,
+            accountByCode,
+          );
           next.entityType = rule.entityType ?? "";
           next.entityId = "";
           if (rule.projectRequired && !next.projectId && projectId) {
@@ -284,7 +288,7 @@ export function JournalsPage() {
       intent,
       projectId: projectId || undefined,
       lines: lines.map((line) => {
-        const rule = dimensionRuleForAccount(line.accountCode);
+        const rule = dimensionRuleForAccount(line.accountCode, accountByCode);
         return {
           accountCode: line.accountCode,
           debit: line.debit ? Number(line.debit) : undefined,
@@ -306,6 +310,22 @@ export function JournalsPage() {
     if (intent === "post" && !isBalanced) {
       setFormError("Total debit must equal total credit before posting");
       return;
+    }
+    if (journalType !== JournalType.OPENING_BALANCE) {
+      const missingProject = lines.find(
+        (line) =>
+          !line.projectId &&
+          !projectId &&
+          dimensionRuleForAccount(line.accountCode, accountByCode)
+            .projectRequired,
+      );
+      if (missingProject) {
+        const account = accountByCode.get(missingProject.accountCode);
+        setFormError(
+          `${account?.name ?? "This account"} (${missingProject.accountCode}) is a project cost head — select a project`,
+        );
+        return;
+      }
     }
 
     if (intent === "post" && journalType !== JournalType.OPENING_BALANCE) {
@@ -626,7 +646,10 @@ export function JournalsPage() {
               </thead>
               <tbody>
                 {lines.map((line, index) => {
-                  const rule = dimensionRuleForAccount(line.accountCode);
+                  const rule = dimensionRuleForAccount(
+                    line.accountCode,
+                    accountByCode,
+                  );
                   const showEntity = Boolean(rule.entityType);
                   const showProject =
                     rule.projectRequired ||
@@ -870,7 +893,7 @@ export function JournalsPage() {
             ? `Line ${noteEditor.index + 1} description`
             : 'Line description'
         }
-        description='Full note for this journal line. No length limit.'
+        description={`Full note for this journal line (up to ${JOURNAL_LINE_DESCRIPTION_MAX} characters).`}
         onClose={() => setNoteEditor(null)}
         wide
       >
@@ -892,12 +915,13 @@ export function JournalsPage() {
                   setNoteEditor({ ...noteEditor, text: e.target.value })
                 }
                 rows={10}
+                maxLength={JOURNAL_LINE_DESCRIPTION_MAX}
                 autoFocus
                 placeholder='Line note'
               />
             </label>
             <p className='field-hint'>
-              {noteEditor.text.length.toLocaleString()} characters
+              {noteEditor.text.length} / {JOURNAL_LINE_DESCRIPTION_MAX}
             </p>
             <div className='form-actions'>
               <button

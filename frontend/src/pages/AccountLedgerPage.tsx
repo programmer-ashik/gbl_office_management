@@ -117,8 +117,9 @@ export function AccountLedgerPage() {
   }, [showBankPicker, treasury.length]);
 
   const dimension = useMemo(
-    () => (accountCode ? dimensionRuleForAccount(accountCode) : null),
-    [accountCode],
+    () =>
+      accountCode ? dimensionRuleForAccount(accountCode, accounts) : null,
+    [accountCode, accounts],
   );
 
   const entityType: EntityType | null = dimension?.entityType ?? null;

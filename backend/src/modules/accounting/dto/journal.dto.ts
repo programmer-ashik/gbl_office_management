@@ -25,6 +25,8 @@ import {
 const emptyToUndefined = ({ value }: { value: unknown }) =>
   value === '' || value === null ? undefined : value;
 
+export const JOURNAL_LINE_DESCRIPTION_MAX = 400;
+
 export class JournalLineDto {
   @IsString()
   @MinLength(3)
@@ -43,6 +45,7 @@ export class JournalLineDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(JOURNAL_LINE_DESCRIPTION_MAX)
   description?: string;
 
   @IsOptional()
@@ -129,6 +132,31 @@ export class PostJournalDto {
   @ValidateNested({ each: true })
   @Type(() => JournalLineDto)
   lines: JournalLineDto[];
+}
+
+export class PostedJournalLineNoteDto {
+  @IsInt()
+  @Min(0)
+  index: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(JOURNAL_LINE_DESCRIPTION_MAX)
+  description?: string;
+}
+
+/** Non-financial corrections on a posted journal; amounts need a reversal. */
+export class UpdatePostedJournalDto {
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsDateString()
+  date?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PostedJournalLineNoteDto)
+  lines?: PostedJournalLineNoteDto[];
 }
 
 export class ClearPdcDto {

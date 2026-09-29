@@ -453,15 +453,50 @@ const DIMENSION_RULES: Record<string, DimensionRule> = {
   },
 }
 
-export function dimensionRuleForAccount(accountCode: string): DimensionRule {
-  return (
-    DIMENSION_RULES[accountCode] ?? {
-      entityType: null,
-      entityRequired: false,
-      projectRequired: false,
-      label: '',
-    }
-  )
+/** Direct Project Cost (COGS). Every head opened under it needs a project. */
+export const PROJECT_COST_GROUP_CODE = '5100'
+
+type AccountTree =
+  | ReadonlyMap<string, Pick<Account, 'code' | 'parentCode'>>
+  | ReadonlyArray<Pick<Account, 'code' | 'parentCode'>>
+
+/** True when the account's parent chain reaches 5100, at any depth. */
+export function isProjectCostAccount(
+  accountCode: string,
+  accounts: AccountTree,
+): boolean {
+  const byCode: ReadonlyMap<string, Pick<Account, 'code' | 'parentCode'>> =
+    'get' in accounts
+      ? accounts
+      : new Map(accounts.map((row) => [row.code, row]))
+  const seen = new Set<string>()
+  let parent = byCode.get(accountCode)?.parentCode ?? null
+  while (parent && !seen.has(parent)) {
+    if (parent === PROJECT_COST_GROUP_CODE) return true
+    seen.add(parent)
+    parent = byCode.get(parent)?.parentCode ?? null
+  }
+  return false
+}
+
+export function dimensionRuleForAccount(
+  accountCode: string,
+  accounts?: AccountTree,
+): DimensionRule {
+  const base = DIMENSION_RULES[accountCode] ?? {
+    entityType: null,
+    entityRequired: false,
+    projectRequired: false,
+    label: '',
+  }
+  if (
+    !base.projectRequired &&
+    accounts &&
+    isProjectCostAccount(accountCode, accounts)
+  ) {
+    return { ...base, projectRequired: true, label: base.label || 'Project' }
+  }
+  return base
 }
 
 export type JournalWriteBody = {
@@ -488,6 +523,20 @@ export type JournalWriteBody = {
     entityType?: string
     entityId?: string
   }>
+}
+
+export const JOURNAL_LINE_DESCRIPTION_MAX = 400
+
+/** Date and line notes are the only fields a posted journal can change. */
+export type PostedJournalDetailsBody = {
+  date?: string
+  lines?: Array<{ index: number; description?: string }>
+}
+
+export type PostedJournalEditability = {
+  id: string
+  editable: boolean
+  dateLockedReason: string | null
 }
 
 export function money(value: number): string {

@@ -37,6 +37,8 @@ export const SystemAccountCode = {
   RETAINED_EARNINGS: '3200',
   PROJECT_REVENUE: '4110',
   OTHER_INCOME: '4200',
+  /** Direct Project Cost (COGS) header. Every head under it needs a project. */
+  DIRECT_PROJECT_COST: '5100',
   PROJECT_MATERIALS: '5110',
   PROJECT_LABOR: '5120',
   EQUIPMENT_RENTAL: '5130',

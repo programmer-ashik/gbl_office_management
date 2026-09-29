@@ -4,9 +4,11 @@ import { api } from "../api/client";
 import { ExpandableText } from "../components/ExpandableText";
 import {
   journalDeleteDisabledReason,
+  journalDetailsEditDisabledReason,
   journalEditDisabledReason,
   journalReverseDisabledReason,
 } from "../components/JournalRegister";
+import { PostedJournalEditModal } from "../components/PostedJournalEditModal";
 import { MetricCard } from "../components/MetricCard";
 import {
   JOURNAL_STATUS_LABEL,
@@ -41,6 +43,7 @@ export function JournalDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [editingDetails, setEditingDetails] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -158,6 +161,7 @@ export function JournalDetailPage() {
   const editReason = journalEditDisabledReason(entry);
   const deleteReason = journalDeleteDisabledReason(entry);
   const reverseReason = journalReverseDisabledReason(entry);
+  const detailsReason = journalDetailsEditDisabledReason(entry);
   const projectLabel = entry.projectId
     ? (projects.find((project) => project.id === entry.projectId)?.code ??
       "Tagged")
@@ -197,6 +201,16 @@ export function JournalDetailPage() {
             <Link to={`/journals?edit=${entry.id}`} className='action-link'>
               Edit
             </Link>
+          ) : null}
+          {!detailsReason ? (
+            <button
+              type='button'
+              className='ghost'
+              disabled={busy}
+              onClick={() => setEditingDetails(true)}
+            >
+              Edit date / description
+            </button>
           ) : null}
           {entry.status === JournalStatus.DRAFT ? (
             <button
@@ -241,6 +255,14 @@ export function JournalDetailPage() {
         url={previewUrl}
         title={`${entry.entryNumber} PDF`}
         onClose={closePreview}
+      />
+      <PostedJournalEditModal
+        entry={editingDetails ? entry : null}
+        onClose={() => setEditingDetails(false)}
+        onSaved={(updated) => {
+          setEntry(updated);
+          setEditingDetails(false);
+        }}
       />
 
       <section className='grid metric-card-grid'>
@@ -326,7 +348,7 @@ export function JournalDetailPage() {
                 <th>Entity</th>
                 <th>Project</th>
                 <th>Ledger Head</th>
-                <th>Description</th>
+                <th className='description-cell'>Description</th>
                 <th className='num'>Debit</th>
                 <th className='num'>Credit</th>
               </tr>
@@ -354,10 +376,10 @@ export function JournalDetailPage() {
                   <td className='ledger-reference-cell'>
                     {lineCounterpart(entry, line) || "—"}
                   </td>
-                  <td>
+                  <td className='description-cell'>
                     <ExpandableText
                       text={lineDescription(entry, line)}
-                      maxChars={48}
+                      maxChars={60}
                     />
                   </td>
                   <td className='num amount-debit-cell'>

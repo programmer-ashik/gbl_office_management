@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { ExpandableText } from "./ExpandableText";
+import { PostedJournalEditModal } from "./PostedJournalEditModal";
 import { ActionMenu, Select } from "./ui";
 import { VoucherPdfPreview } from "./VoucherPdfPreview";
 import { ReportExportMenu } from "./ReportExportMenu";
@@ -43,7 +44,7 @@ export function journalEditDisabledReason(
     return "Reversed journals cannot be edited.";
   }
   if (entry.status === JournalStatus.POSTED) {
-    return "Posted journals cannot be edited — reverse instead.";
+    return "Posted: use Edit date / description, or reverse to change amounts.";
   }
   if (
     entry.status !== JournalStatus.DRAFT &&
@@ -51,6 +52,17 @@ export function journalEditDisabledReason(
     entry.status !== JournalStatus.APPROVED
   ) {
     return `Cannot edit status ${entry.status}.`;
+  }
+  return undefined;
+}
+
+export function journalDetailsEditDisabledReason(
+  entry: JournalEntry,
+): string | undefined {
+  if (entry.status !== JournalStatus.POSTED) {
+    return entry.status === JournalStatus.REVERSED
+      ? "Reversed journals cannot be edited."
+      : "Only posted journals — drafts use Edit.";
   }
   return undefined;
 }
@@ -158,6 +170,7 @@ export function JournalRegister({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState("Voucher PDF");
+  const [detailsEntry, setDetailsEntry] = useState<JournalEntry | null>(null);
   const [page, setPage] = useState(1);
   const [applied, setApplied] = useState({
     from: "",
@@ -497,6 +510,7 @@ export function JournalRegister({
     const editReason = journalEditDisabledReason(entry);
     const deleteReason = journalDeleteDisabledReason(entry);
     const reverseReason = journalReverseDisabledReason(entry);
+    const detailsReason = journalDetailsEditDisabledReason(entry);
     return (
       <ActionMenu
         disabled={busyId === entry.id}
@@ -512,6 +526,12 @@ export function JournalRegister({
               ? "Edit this journal from the Journals page."
               : editReason,
             onSelect: () => onEdit?.(entry),
+          },
+          {
+            label: "Edit date / description",
+            disabled: Boolean(detailsReason),
+            disabledReason: detailsReason,
+            onSelect: () => setDetailsEntry(entry),
           },
           {
             label: "Post draft",
@@ -580,7 +600,7 @@ export function JournalRegister({
               {typeTag}
             </td>
             <td>—</td>
-            <td className='ledger-description-cell'>
+            <td className='ledger-description-cell description-cell'>
               <ExpandableText text={journalDescription(entry)} maxChars={60} />
             </td>
             <td>—</td>
@@ -618,7 +638,7 @@ export function JournalRegister({
                 {line.accountName}
               </Link>
             </td>
-            <td className='ledger-description-cell'>
+            <td className='ledger-description-cell description-cell'>
               <ExpandableText
                 text={lineDescription(entry, line)}
                 maxChars={60}
@@ -645,6 +665,20 @@ export function JournalRegister({
         url={previewUrl}
         title={previewTitle}
         onClose={closePreview}
+      />
+      <PostedJournalEditModal
+        entry={detailsEntry}
+        onClose={() => setDetailsEntry(null)}
+        onSaved={() => {
+          setDetailsEntry(null);
+          load()
+            .then(() => onChanged?.())
+            .catch((err: unknown) => {
+              setError(
+                err instanceof Error ? err.message : "Unable to load journals",
+              );
+            });
+        }}
       />
       {exportTitle ? (
         <div className='table-head'>
@@ -767,7 +801,7 @@ export function JournalRegister({
                 <th>Date</th>
                 <th>Journal</th>
                 <th>Ledger Head</th>
-                <th>Description</th>
+                <th className='description-cell'>Description</th>
                 <th>Entity</th>
                 <th>Project</th>
                 <th className='num'>Debit</th>
@@ -804,7 +838,7 @@ export function JournalRegister({
                 <th>Type</th>
                 <th>Status</th>
                 <th>Ledger Head</th>
-                <th>Description</th>
+                <th className='description-cell'>Description</th>
                 <th>Project</th>
                 <th className='num'>Debit</th>
                 <th className='num'>Credit</th>
@@ -836,10 +870,10 @@ export function JournalRegister({
                         maxChars={48}
                       />
                     </td>
-                    <td>
+                    <td className='description-cell'>
                       <ExpandableText
                         text={journalDescription(entry)}
-                        maxChars={48}
+                        maxChars={60}
                       />
                     </td>
                     <td>

@@ -11,7 +11,7 @@ import type { ApprovalService } from '../governance/approval.service';
 import type { UsersService } from '../users/users.service';
 import type { ArApService } from '../ar-ap/ar-ap.service';
 import type { ChequeBookService } from './cheque-book.service';
-import { PostJournalDto } from './dto/journal.dto';
+import { PostJournalDto, UpdatePostedJournalDto } from './dto/journal.dto';
 import type { JournalService } from './journal.service';
 
 const FINANCE = [Role.ADMIN, Role.ACCOUNTANT] as const;
@@ -171,6 +171,31 @@ export function createJournalsRouter(
         req.user!.userId,
       );
       sendSuccess(res, entry, 'Journal updated successfully');
+    }),
+  );
+
+  router.get(
+    '/:id/editability',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const result = await journalService.postedEditability(String(req.params.id));
+      sendSuccess(res, result, 'Journal editability retrieved successfully');
+    }),
+  );
+
+  router.patch(
+    '/:id/details',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(UpdatePostedJournalDto),
+    asyncHandler(async (req, res) => {
+      const entry = await journalService.updatePostedDetails(
+        String(req.params.id),
+        req.body as UpdatePostedJournalDto,
+        req.user!.userId,
+      );
+      sendSuccess(res, entry, 'Journal details updated successfully');
     }),
   );
 

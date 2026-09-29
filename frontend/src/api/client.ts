@@ -10,6 +10,8 @@ import type {
   JournalEntry,
   JournalSummary,
   JournalWriteBody,
+  PostedJournalDetailsBody,
+  PostedJournalEditability,
   BalanceSheetReport,
   TrialBalance,
 } from '../types/accounting'
@@ -397,6 +399,13 @@ export const api = {
     }),
   reverseJournal: (id: string) =>
     request<JournalEntry>(`/journals/${id}/reverse`, { method: 'POST' }),
+  journalEditability: (id: string) =>
+    request<PostedJournalEditability>(`/journals/${id}/editability`),
+  updatePostedJournal: (id: string, body: PostedJournalDetailsBody) =>
+    request<JournalEntry>(`/journals/${id}/details`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   chequeRegister: (params?: {
     status?: string
     direction?: string
