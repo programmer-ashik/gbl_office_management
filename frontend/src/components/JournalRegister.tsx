@@ -357,7 +357,8 @@ export function JournalRegister({
     { value: "", label: "All projects" },
     ...projects.map((project) => ({
       value: project.id,
-      label: `${project.code} · ${project.name}`,
+      label: project.name,
+      keywords: project.code,
     })),
   ];
 
@@ -380,7 +381,7 @@ export function JournalRegister({
   function projectName(id: string | null): string {
     if (!id) return "—";
     const project = projects.find((row) => row.id === id);
-    return project ? `${project.code} · ${project.name}` : "Tagged";
+    return project ? project.name : "Tagged";
   }
 
   const totals = useMemo(

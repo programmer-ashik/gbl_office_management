@@ -463,13 +463,15 @@ export function JournalsPage() {
     if (entityType === "customer") {
       return customers.map((row) => ({
         value: row.id,
-        label: `${row.customerNumber} · ${row.name}`,
+        label: row.name,
+        keywords: row.customerNumber,
       }));
     }
     if (entityType === "supplier") {
       return suppliers.map((row) => ({
         value: row.id,
-        label: `${row.supplierNumber} · ${row.name}`,
+        label: row.name,
+        keywords: row.supplierNumber,
       }));
     }
     if (entityType === "employee") {
@@ -496,7 +498,8 @@ export function JournalsPage() {
     { value: "", label: "None" },
     ...projects.map((project) => ({
       value: project.id,
-      label: `${project.code} · ${project.name}`,
+      label: project.name,
+      keywords: project.code,
     })),
   ];
 
@@ -518,7 +521,8 @@ export function JournalsPage() {
       { value: "", label: "None" },
       ...own.map((project) => ({
         value: project.id,
-        label: `${project.code} · ${project.name}`,
+        label: project.name,
+        keywords: project.code,
       })),
     ];
   }

@@ -146,8 +146,8 @@ export function ChequeEntryPage() {
   const partyOptions = useMemo(
     () =>
       isReceipt
-        ? customers.map((row) => ({ value: row.id, label: `${row.customerNumber} · ${row.name}` }))
-        : suppliers.map((row) => ({ value: row.id, label: `${row.supplierNumber} · ${row.name}` })),
+        ? customers.map((row) => ({ value: row.id, label: row.name, keywords: row.customerNumber }))
+        : suppliers.map((row) => ({ value: row.id, label: row.name, keywords: row.supplierNumber })),
     [isReceipt, customers, suppliers],
   )
 
@@ -506,7 +506,7 @@ export function ChequeEntryPage() {
                 onChange={setProjectId}
                 options={[
                   { value: '', label: 'None' },
-                  ...partyProjects.map((row) => ({ value: row.id, label: `${row.code} · ${row.name}` })),
+                  ...partyProjects.map((row) => ({ value: row.id, label: row.name, keywords: row.code })),
                 ]}
                 placeholder="None"
                 searchable

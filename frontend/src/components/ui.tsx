@@ -16,6 +16,8 @@ export type SelectOption = {
   value: string
   label: string
   disabled?: boolean
+  /** Extra text matched by search but not shown (e.g. a hidden code). */
+  keywords?: string
 }
 
 type SelectProps = {
@@ -82,7 +84,8 @@ export function Select({
     return options.filter(
       (option) =>
         option.label.toLowerCase().includes(needle) ||
-        option.value.toLowerCase().includes(needle),
+        option.value.toLowerCase().includes(needle) ||
+        option.keywords?.toLowerCase().includes(needle) === true,
     )
   }, [options, query])
 
