@@ -9,6 +9,13 @@ import {
   type JournalStatus as JournalStatusValue,
   type JournalType as JournalTypeValue,
 } from './journal.enums';
+import {
+  PDC_DIRECTION_VALUES,
+  PDC_STATUS_VALUES,
+  PdcStatus,
+  type PdcDirection,
+  type PdcStatus as PdcStatusValue,
+} from './pdc';
 
 export interface IJournalLine {
   accountId: Types.ObjectId;
@@ -43,6 +50,22 @@ export interface IJournalEntry {
   rejectedReason?: string;
   reversedByEntryId?: Types.ObjectId;
   reversesEntryId?: Types.ObjectId;
+  chequeNumber?: string;
+  chequeDate?: Date;
+  /** Legacy rows read as false / 'None' through schema defaults. */
+  isPdc?: boolean;
+  pdcStatus?: PdcStatusValue;
+  /** Bank GL account the cheque settles into / pays out of on clearing. */
+  intendedBankAccountId?: Types.ObjectId;
+  intendedBankAccountCode?: string;
+  pdcDirection?: PdcDirection;
+  /** On a PDC journal: the journal that cleared it. */
+  pdcClearingEntryId?: Types.ObjectId;
+  /** On a clearing journal: the PDC journal it settles. */
+  pdcClearsEntryId?: Types.ObjectId;
+  pdcSettledAt?: Date;
+  pdcSettledBy?: Types.ObjectId;
+  pdcBounceReason?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -110,11 +133,31 @@ const journalEntrySchema = new Schema<IJournalEntry>(
     rejectedReason: { type: String, trim: true, maxlength: 240 },
     reversedByEntryId: { type: Schema.Types.ObjectId, ref: 'JournalEntry' },
     reversesEntryId: { type: Schema.Types.ObjectId, ref: 'JournalEntry' },
+    chequeNumber: { type: String, trim: true, maxlength: 40 },
+    chequeDate: { type: Date },
+    isPdc: { type: Boolean, default: false },
+    pdcStatus: {
+      type: String,
+      enum: PDC_STATUS_VALUES,
+      default: PdcStatus.NONE,
+    },
+    intendedBankAccountId: { type: Schema.Types.ObjectId, ref: 'Account' },
+    intendedBankAccountCode: { type: String, trim: true, uppercase: true },
+    pdcDirection: { type: String, enum: PDC_DIRECTION_VALUES },
+    pdcClearingEntryId: { type: Schema.Types.ObjectId, ref: 'JournalEntry' },
+    pdcClearsEntryId: { type: Schema.Types.ObjectId, ref: 'JournalEntry' },
+    pdcSettledAt: { type: Date },
+    pdcSettledBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    pdcBounceReason: { type: String, trim: true, maxlength: 240 },
   },
   { timestamps: true, collection: 'journal_entries' },
 );
 
 journalEntrySchema.index({ date: -1, entryNumber: -1 });
+journalEntrySchema.index(
+  { pdcStatus: 1, chequeDate: 1 },
+  { partialFilterExpression: { isPdc: true } },
+);
 journalEntrySchema.index({ 'lines.entityId': 1, 'lines.entityType': 1 });
 
 export const JournalEntryModel =

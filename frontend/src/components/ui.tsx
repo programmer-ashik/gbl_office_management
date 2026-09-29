@@ -31,6 +31,9 @@ type SelectProps = {
   id?: string
   name?: string
   className?: string
+  /** Adds a footer action (e.g. "Add new client") that receives the current search text. */
+  onCreate?: (query: string) => void
+  createLabel?: (query: string) => string
 }
 
 type PopoverCoords = {
@@ -54,6 +57,8 @@ export function Select({
   id,
   name,
   className,
+  onCreate,
+  createLabel,
 }: SelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -308,6 +313,21 @@ export function Select({
           <li className="ui-select-empty muted">No matches</li>
         ) : null}
       </ul>
+      {onCreate ? (
+        <button
+          type="button"
+          className="ghost ui-select-create"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            const text = query.trim()
+            setOpen(false)
+            setQuery('')
+            onCreate(text)
+          }}
+        >
+          {createLabel ? createLabel(query.trim()) : '+ Add new'}
+        </button>
+      ) : null}
     </div>
   ) : null
 

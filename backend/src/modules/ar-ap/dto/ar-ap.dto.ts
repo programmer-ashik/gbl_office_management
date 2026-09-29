@@ -61,6 +61,23 @@ export class CollectInvoiceDto {
   date: string;
 }
 
+export class ReceiveOpeningDueDto {
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  amount: number;
+
+  @IsMongoId()
+  treasuryId: string;
+
+  @IsDateString()
+  date: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  memo?: string;
+}
+
 export class CreateSupplierBillDto {
   @IsMongoId()
   supplierId: string;

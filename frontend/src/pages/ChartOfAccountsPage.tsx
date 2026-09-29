@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import {
+  AccountOpeningModal,
+  type OpeningRequest,
+  type OpeningTarget,
+} from '../components/AccountOpeningModal'
 import { ActionMenu, Modal, Select } from '../components/ui'
 import {
   ACCOUNT_TYPE_LABEL,
   AccountType,
-  money,
   type Account,
   type Customer,
 } from '../types/accounting'
-import type { PublicUser } from '../types/auth'
-import type { Project } from '../types/project'
+import type { Employee } from '../types/employee'
 import type { Supplier } from '../types/procurement'
 
 const PARTY_CONTROL_ACCOUNTS: Record<
@@ -60,8 +62,7 @@ export function ChartOfAccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [employees, setEmployees] = useState<PublicUser[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
@@ -80,29 +81,19 @@ export function ChartOfAccountsPage() {
   const [editDescription, setEditDescription] = useState('')
   const [editActive, setEditActive] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
-  const [partyModal, setPartyModal] = useState<{
-    accountCode: string
-    entityType: 'customer' | 'supplier' | 'employee'
-    entityId: string
-    name: string
-  } | null>(null)
-  const [partyAmount, setPartyAmount] = useState('')
-  const [partyProjectId, setPartyProjectId] = useState('')
+  const [opening, setOpening] = useState<OpeningRequest | null>(null)
 
   async function load() {
-    const [rows, customerRows, supplierRows, employeeRows, projectRows] =
-      await Promise.all([
-        api.accounts(),
-        api.customers(true).catch(() => [] as Customer[]),
-        api.suppliers().catch(() => [] as Supplier[]),
-        api.employees().catch(() => [] as PublicUser[]),
-        api.projects().catch(() => [] as Project[]),
-      ])
+    const [rows, customerRows, supplierRows, employeeRows] = await Promise.all([
+      api.accounts(),
+      api.customers(true).catch(() => [] as Customer[]),
+      api.suppliers().catch(() => [] as Supplier[]),
+      api.employees().catch(() => [] as Employee[]),
+    ])
     setAccounts(rows)
     setCustomers(customerRows)
     setSuppliers(supplierRows)
     setEmployees(employeeRows)
-    setProjects(projectRows)
   }
 
   useEffect(() => {
@@ -162,7 +153,7 @@ export function ChartOfAccountsPage() {
                 ? employees.map((row) => ({
                     id: row.id,
                     name: `${row.firstName} ${row.lastName}`.trim(),
-                    meta: row.email,
+                    meta: row.designation ?? row.email ?? undefined,
                   }))
                 : []
         const hasChildren = accountChildren.length > 0 || parties.length > 0
@@ -355,40 +346,72 @@ export function ChartOfAccountsPage() {
     }
   }
 
-  async function onPartyOpening(event: FormEvent) {
-    event.preventDefault()
-    if (!partyModal) return
-    setSaving(true)
-    setError(null)
-    setMessage(null)
-    try {
-      const amount = Number(partyAmount)
-      if (!Number.isFinite(amount) || amount <= 0) {
-        throw new Error('Enter a positive opening amount')
-      }
-      if (partyModal.accountCode === '1161' && !partyProjectId) {
-        throw new Error('Employee advances require a project')
-      }
-      const journal = await api.postPartyOpeningBalance({
-        accountCode: partyModal.accountCode,
-        entityType: partyModal.entityType,
-        entityId: partyModal.entityId,
-        amount,
-        projectId: partyProjectId || undefined,
-      })
-      setMessage(
-        `Opening balance for ${partyModal.name} posted as ${journal.entryNumber}.`,
-      )
-      setPartyModal(null)
-      setPartyAmount('')
-      setPartyProjectId('')
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Unable to post party opening balance',
-      )
-    } finally {
-      setSaving(false)
+  function partiesFor(entityType: 'customer' | 'supplier' | 'employee') {
+    if (entityType === 'customer') {
+      return customers.map((row) => ({ id: row.id, name: row.name }))
     }
+    if (entityType === 'supplier') {
+      return suppliers
+        .filter((row) => row.isActive)
+        .map((row) => ({ id: row.id, name: row.name }))
+    }
+    return employees
+      .filter((row) => row.isActive)
+      .map((row) => ({
+        id: row.id,
+        name: `${row.firstName} ${row.lastName}`.trim() || row.email,
+      }))
+  }
+
+  function targetsForLeaf(account: Account): OpeningTarget[] {
+    const partyMeta = PARTY_CONTROL_ACCOUNTS[account.code]
+    if (!partyMeta) {
+      return [
+        {
+          key: account.code,
+          accountCode: account.code,
+          label: `${account.code} · ${account.name}`,
+          side: account.normalBalance,
+        },
+      ]
+    }
+    return partiesFor(partyMeta.entityType).map((party) => ({
+      key: `${account.code}:${party.id}`,
+      accountCode: account.code,
+      label: `${account.code} · ${party.name}`,
+      side: account.normalBalance,
+      entityType: partyMeta.entityType,
+      entityId: party.id,
+    }))
+  }
+
+  function openAccountOpening(account: Account) {
+    const leaves: Account[] = []
+    const collect = (row: Account) => {
+      if (row.isPostable) {
+        if (row.isActive) leaves.push(row)
+        return
+      }
+      for (const child of childrenMap.get(row.code) ?? []) collect(child)
+    }
+    collect(account)
+    const partyMeta = PARTY_CONTROL_ACCOUNTS[account.code]
+    setMessage(null)
+    setOpening({
+      title: `${account.code} · ${account.name}`,
+      targets: leaves.flatMap(targetsForLeaf),
+      emptyHint: partyMeta
+        ? `No ${partyMeta.label.toLowerCase()} yet. Add them first, then come back here.`
+        : 'No active postable accounts under this group.',
+    })
+  }
+
+  function canPostOpening(account: Account) {
+    return (
+      account.isActive &&
+      account.isPostable &&
+      (account.type === AccountType.ASSET || account.type === AccountType.LIABILITY)
+    )
   }
 
   const typeOptions = [
@@ -420,7 +443,7 @@ export function ChartOfAccountsPage() {
       </header>
 
       {message ? <p className="muted">{message}</p> : null}
-      {!modalOpen && !partyModal && error ? (
+      {!modalOpen && !opening && error ? (
         <p className="form-error">{error}</p>
       ) : null}
 
@@ -499,15 +522,24 @@ export function ChartOfAccountsPage() {
                           type="button"
                           className="ghost"
                           onClick={() => {
+                            const parent = accounts.find(
+                              (a) => a.code === row.parentCode,
+                            )
                             setError(null)
-                            setPartyModal({
-                              accountCode: row.parentCode,
-                              entityType: row.entityType,
-                              entityId: row.entityId,
-                              name: row.name,
+                            setMessage(null)
+                            setOpening({
+                              title: row.name,
+                              targets: [
+                                {
+                                  key: row.id,
+                                  accountCode: row.parentCode,
+                                  label: `${row.parentCode} · ${row.name}`,
+                                  side: parent?.normalBalance ?? 'debit',
+                                  entityType: row.entityType,
+                                  entityId: row.entityId,
+                                },
+                              ],
                             })
-                            setPartyAmount('')
-                            setPartyProjectId('')
                           }}
                         >
                           Opening balance
@@ -563,32 +595,43 @@ export function ChartOfAccountsPage() {
                     </td>
                     <td>{account.isActive ? 'Active' : 'Inactive'}</td>
                     <td>
-                      <ActionMenu
-                        disabled={busyId === account.id}
-                        items={[
-                          {
-                            label: 'Edit',
-                            onSelect: () => openEdit(account),
-                          },
-                          {
-                            label: 'Ledger',
-                            onSelect: () => {
-                              window.location.assign(
-                                `/ledgers/${encodeURIComponent(account.code)}`,
-                              )
+                      <div className="table-actions">
+                        {canPostOpening(account) ? (
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => openAccountOpening(account)}
+                          >
+                            Opening balance
+                          </button>
+                        ) : null}
+                        <ActionMenu
+                          disabled={busyId === account.id}
+                          items={[
+                            {
+                              label: 'Edit',
+                              onSelect: () => openEdit(account),
                             },
-                          },
-                          {
-                            label: 'Delete',
-                            danger: true,
-                            disabled: account.isSystem,
-                            disabledReason: account.isSystem
-                              ? 'System accounts cannot be deleted.'
-                              : undefined,
-                            onSelect: () => void onDelete(account),
-                          },
-                        ]}
-                      />
+                            {
+                              label: 'Ledger',
+                              onSelect: () => {
+                                window.location.assign(
+                                  `/ledgers/${encodeURIComponent(account.code)}`,
+                                )
+                              },
+                            },
+                            {
+                              label: 'Delete',
+                              danger: true,
+                              disabled: account.isSystem,
+                              disabledReason: account.isSystem
+                                ? 'System accounts cannot be deleted.'
+                                : undefined,
+                              onSelect: () => void onDelete(account),
+                            },
+                          ]}
+                        />
+                      </div>
                     </td>
                   </tr>
                 )
@@ -716,9 +759,8 @@ export function ChartOfAccountsPage() {
               />
             </label>
             <p className="muted">
-              For cash/bank/assets etc. vs capital 3100. For customers/suppliers,
-              expand the control account in the tree and use party Opening
-              balance.
+              For existing accounts, customers or suppliers, use the Opening
+              balance button in the tree.
             </p>
             <div className="form-actions">
               <button type="submit" disabled={saving}>
@@ -730,65 +772,14 @@ export function ChartOfAccountsPage() {
         )}
       </Modal>
 
-      <Modal
-        open={Boolean(partyModal)}
-        title={
-          partyModal
-            ? `Opening balance · ${partyModal.name}`
-            : 'Party opening balance'
-        }
-        description={
-          partyModal
-            ? `Posts Opening Balance on ${partyModal.accountCode} for this ${partyModal.entityType}. Does not create a live invoice/bill.`
-            : undefined
-        }
-        onClose={() => {
-          setPartyModal(null)
-          setError(null)
+      <AccountOpeningModal
+        request={opening}
+        onClose={() => setOpening(null)}
+        onPosted={(text) => {
+          setOpening(null)
+          setMessage(text)
         }}
-      >
-        <form className="stack-form" onSubmit={(event) => void onPartyOpening(event)}>
-          <label>
-            Amount
-            <input
-              inputMode="decimal"
-              value={partyAmount}
-              onChange={(e) => setPartyAmount(e.target.value)}
-              required
-              placeholder="0.00"
-            />
-          </label>
-          {partyModal?.accountCode === '1161' ? (
-            <label>
-              Project
-              <Select
-                value={partyProjectId}
-                onChange={setPartyProjectId}
-                options={projects.map((row) => ({
-                  value: row.id,
-                  label: `${row.code} · ${row.name}`,
-                }))}
-                searchable
-                placeholder="Select project"
-                required
-              />
-            </label>
-          ) : null}
-          <p className="muted">
-            Offset posts to Owner Capital (3100). Example display amount:{' '}
-            {money(Number(partyAmount) || 0)}
-          </p>
-          <div className="form-actions">
-            <button type="submit" disabled={saving}>
-              {saving ? 'Posting…' : 'Post opening balance'}
-            </button>
-          </div>
-          {error ? <p className="form-error">{error}</p> : null}
-          <p className="muted">
-            Related: <Link to="/journals">Journals</Link>
-          </p>
-        </form>
-      </Modal>
+      />
     </>
   )
 }

@@ -1,6 +1,11 @@
 import type {
   Account,
   AccountLedger,
+  ChequeActionResult,
+  ChequeBook,
+  ChequeLeaf,
+  ChequeRegisterRow,
+  CreateChequeBookBody,
   Customer,
   JournalEntry,
   JournalSummary,
@@ -11,6 +16,7 @@ import type {
 import type {
   AgingReport,
   ClientInvoice,
+  CustomerOpeningDue,
   InvoiceCollection,
   OverdueNotice,
   SupplierBill,
@@ -34,6 +40,12 @@ import type {
   QuotationStatus,
 } from '../types/quotation'
 import type { ApiError, ApiSuccess, AuthResult, HealthStatus, PublicUser, Role } from '../types/auth'
+import type {
+  CreateEmployeeBody,
+  Employee,
+  EmployeeProfileBody,
+  GrantEmployeeAccessBody,
+} from '../types/employee'
 import type {
   FundTransfer,
   Reconciliation,
@@ -147,6 +159,7 @@ async function request<T>(
     if (refreshed) {
       return request<T>(path, options, false)
     }
+    setAccessToken(null)
   }
 
   if (!res.ok || json.success === false) {
@@ -211,6 +224,21 @@ export const api = {
       body: JSON.stringify({}),
     }),
   users: () => request<PublicUser[]>('/users'),
+  createUser: (body: {
+    email: string
+    password: string
+    firstName: string
+    lastName: string
+    role?: Role
+  }) =>
+    request<PublicUser>('/users', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteUser: (id: string) =>
+    request<{ id: string; unlinkedEmployeeId: string | null }>(`/users/${id}`, {
+      method: 'DELETE',
+    }),
   updateUserRole: (id: string, role: Role) =>
     request<PublicUser>(`/users/${id}/role`, {
       method: 'PATCH',
@@ -236,16 +264,23 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
-  employees: () => request<PublicUser[]>('/employees'),
-  createEmployee: (body: {
-    email: string
-    password?: string
-    default_password?: string
-    firstName: string
-    lastName: string
-    role?: Role
-  }) =>
-    request<PublicUser>('/employees', {
+  employees: () => request<Employee[]>('/employees'),
+  employee: (id: string) => request<Employee>(`/employees/${id}`),
+  createEmployee: (body: CreateEmployeeBody) =>
+    request<Employee>('/employees', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateEmployee: (
+    id: string,
+    body: Partial<EmployeeProfileBody> & { isActive?: boolean },
+  ) =>
+    request<Employee>(`/employees/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  grantEmployeeAccess: (id: string, body: GrantEmployeeAccessBody) =>
+    request<Employee>(`/employees/${id}/grant-access`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -362,6 +397,76 @@ export const api = {
     }),
   reverseJournal: (id: string) =>
     request<JournalEntry>(`/journals/${id}/reverse`, { method: 'POST' }),
+  chequeRegister: (params?: {
+    status?: string
+    direction?: string
+    fromDate?: string
+    toDate?: string
+    search?: string
+  }) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params ?? {})) {
+      if (value) query.set(key, value)
+    }
+    const qs = query.toString()
+    return request<ChequeRegisterRow[]>(
+      qs ? `/transactions/cheques?${qs}` : '/transactions/cheques',
+    )
+  },
+  chequeBooks: (treasuryId?: string) =>
+    request<ChequeBook[]>(
+      treasuryId
+        ? `/cheque-books?treasuryId=${encodeURIComponent(treasuryId)}`
+        : '/cheque-books',
+    ),
+  createChequeBook: (body: CreateChequeBookBody) =>
+    request<ChequeBook>('/cheque-books', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteChequeBook: (id: string) =>
+    request<{ id: string; deletedLeaves: number }>(`/cheque-books/${id}`, {
+      method: 'DELETE',
+    }),
+  chequeLeaves: (params: {
+    bookId?: string
+    treasuryId?: string
+    status?: string
+    search?: string
+  }) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) {
+      if (value) query.set(key, value)
+    }
+    return request<ChequeLeaf[]>(`/cheque-books/leaves?${query.toString()}`)
+  },
+  availableChequeLeaves: (treasuryId: string) =>
+    request<ChequeLeaf[]>(
+      `/cheque-books/leaves/available?treasuryId=${encodeURIComponent(treasuryId)}`,
+    ),
+  cancelChequeLeaf: (id: string, reason: string) =>
+    request<ChequeLeaf>(`/cheque-books/leaves/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  restoreChequeLeaf: (id: string) =>
+    request<ChequeLeaf>(`/cheque-books/leaves/${id}/restore`, {
+      method: 'POST',
+    }),
+  clearCheque: (id: string, body: { date?: string; memo?: string }) =>
+    request<ChequeActionResult>(`/transactions/${id}/clear-pdc`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  bounceCheque: (id: string, body: { reason?: string }) =>
+    request<ChequeActionResult>(`/transactions/${id}/bounce-pdc`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  undoChequeClearing: (id: string) =>
+    request<ChequeActionResult>(`/transactions/${id}/undo-clear-pdc`, {
+      method: 'POST',
+    }),
   deleteJournal: (id: string) =>
     request<{ id: string; entryNumber: string }>(`/journals/${id}`, {
       method: 'DELETE',
@@ -464,6 +569,7 @@ export const api = {
       toDate?: string
       entityType?: string
       entityId?: string
+      projectId?: string
     },
   ) => {
     const query = new URLSearchParams()
@@ -472,6 +578,7 @@ export const api = {
     if (params?.toDate) query.set('toDate', params.toDate)
     if (params?.entityType) query.set('entityType', params.entityType)
     if (params?.entityId) query.set('entityId', params.entityId)
+    if (params?.projectId) query.set('projectId', params.projectId)
     const qs = query.toString()
     return request<AccountLedger>(
       qs ? `/ledgers/${accountCode}?${qs}` : `/ledgers/${accountCode}`,
@@ -962,6 +1069,19 @@ export const api = {
   invoices: () => request<ClientInvoice[]>('/receivables'),
   invoice: (id: string) => request<ClientInvoice>(`/receivables/${id}`),
   overdueInvoices: () => request<OverdueNotice[]>('/receivables/overdue'),
+  customerOpeningDues: () =>
+    request<CustomerOpeningDue[]>('/receivables/opening-dues'),
+  receiveCustomerOpeningDue: (
+    customerId: string,
+    body: { amount: number; treasuryId: string; date: string; memo?: string },
+  ) =>
+    request<CustomerOpeningDue>(
+      `/receivables/opening-dues/${customerId}/receive`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    ),
   arAging: (asOf?: string) =>
     request<AgingReport>(`/receivables/aging${asOf ? `?asOf=${asOf}` : ''}`),
   createInvoice: (body: {

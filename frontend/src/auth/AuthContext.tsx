@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { api, setAccessToken } from '../api/client'
+import { api, getAccessToken, setAccessToken } from '../api/client'
 import type { PublicUser } from '../types/auth'
 
 type AuthContextValue = {
@@ -30,12 +30,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true
+    const token = getAccessToken()
+    if (!token) {
+      setLoading(false)
+      return
+    }
+
     api
       .me()
       .then((profile) => {
         if (active) setUser(profile)
       })
       .catch(() => {
+        // Stale token after DB wipe / switch — drop session and show login
+        setAccessToken(null)
         if (active) setUser(null)
       })
       .finally(() => {

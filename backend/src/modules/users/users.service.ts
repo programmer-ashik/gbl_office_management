@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { Role } from '../../common/enums/role.enum';
 import {
   badRequest,
+  conflict,
   notFound,
   unauthorized,
 } from '../../common/errors/app-error';
@@ -10,6 +11,10 @@ import {
   comparePassword,
   hashPassword,
 } from '../../common/utils/crypto.util';
+import { withTransaction } from '../../database/connection';
+import { RefreshTokenModel } from '../auth/refresh-token.model';
+import { EmployeeModel } from '../employees/employee.model';
+import type { CreateUserDto } from './dto/create-user.dto';
 import { UserModel, type UserDocument } from './user.model';
 
 export interface CreateUserInput {
@@ -31,11 +36,77 @@ export interface PublicUser {
   allowedPermissions: string[] | null;
   deniedPermissions: string[];
   lastLoginAt: Date | null;
+  /** Linked HR record, when this login belongs to an employee. */
+  employeeId?: string | null;
   createdAt?: Date;
   updatedAt?: Date;
 }
 
 export class UsersService {
+  async withEmployeeIds(users: PublicUser[]): Promise<PublicUser[]> {
+    if (users.length === 0) return users;
+    const links = await EmployeeModel.find(
+      { userId: { $in: users.map((row) => new Types.ObjectId(row.id)) } },
+      { _id: 1, userId: 1 },
+    ).exec();
+    const byUser = new Map(
+      links.map((row) => [String(row.userId), row._id.toString()]),
+    );
+    return users.map((row) => ({ ...row, employeeId: byUser.get(row.id) ?? null }));
+  }
+
+  async toPublicUserWithEmployee(user: UserDocument): Promise<PublicUser> {
+    const [row] = await this.withEmployeeIds([this.toPublicUser(user)]);
+    return row;
+  }
+
+  /** POST /users — a login without an Employee profile. */
+  async createStandalone(dto: CreateUserDto): Promise<PublicUser> {
+    if (await this.findByEmail(dto.email)) {
+      throw conflict('Email is already registered');
+    }
+    const user = await this.create({
+      email: dto.email,
+      password: await hashPassword(dto.password),
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      role: dto.role ?? Role.EMPLOYEE,
+    });
+    return { ...this.toPublicUser(user), employeeId: null };
+  }
+
+  /**
+   * Deletes a login. A linked employee keeps its record; only its `userId`
+   * is cleared (user.model delete middleware).
+   */
+  async remove(
+    id: string,
+    actorId: string,
+  ): Promise<{ id: string; unlinkedEmployeeId: string | null }> {
+    const user = await this.findByIdOrFail(id);
+    if (user._id.toString() === actorId) {
+      throw badRequest('You cannot delete your own account');
+    }
+    if (user.role === Role.ADMIN && user.isActive) {
+      const adminCount = await UserModel.countDocuments({
+        role: Role.ADMIN,
+        isActive: true,
+      }).exec();
+      if (adminCount <= 1) {
+        throw badRequest('Cannot delete the last active administrator');
+      }
+    }
+    const linked = await EmployeeModel.findOne({ userId: user._id }, { _id: 1 }).exec();
+    await withTransaction(async (session) => {
+      await RefreshTokenModel.deleteMany({ userId: user._id }, { session }).exec();
+      await UserModel.deleteOne({ _id: user._id }, { session }).exec();
+    });
+    return {
+      id: user._id.toString(),
+      unlinkedEmployeeId: linked ? linked._id.toString() : null,
+    };
+  }
+
   toPublicUser(user: UserDocument): PublicUser {
     return {
       id: user._id.toString(),
@@ -116,7 +187,7 @@ export class UsersService {
       .sort({ createdAt: -1 })
       .limit(limit)
       .exec();
-    return users.map((user) => this.toPublicUser(user));
+    return this.withEmployeeIds(users.map((user) => this.toPublicUser(user)));
   }
 
   async touchLastLogin(id: string, session?: ClientSession): Promise<void> {

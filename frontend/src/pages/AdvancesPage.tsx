@@ -9,7 +9,8 @@ import {
   type Advance,
   type AdvanceProjectOption,
 } from '../types/advance'
-import { Role, type PublicUser } from '../types/auth'
+import { Role } from '../types/auth'
+import type { Employee } from '../types/employee'
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -26,7 +27,7 @@ export function AdvancesPage() {
   const [rows, setRows] = useState<Advance[]>([])
   const [total, setTotal] = useState(0)
   const [projects, setProjects] = useState<AdvanceProjectOption[]>([])
-  const [employees, setEmployees] = useState<PublicUser[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
   const [projectId, setProjectId] = useState('')
   const [amount, setAmount] = useState('')
   const [purpose, setPurpose] = useState('')
@@ -51,7 +52,7 @@ export function AdvancesPage() {
         pageSize: 100,
       }),
       api.advanceProjects(),
-      isFinance ? api.employees().catch(() => [] as PublicUser[]) : Promise.resolve([] as PublicUser[]),
+      isFinance ? api.employees().catch(() => [] as Employee[]) : Promise.resolve([] as Employee[]),
     ])
     setRows(advances.items)
     setTotal(advances.total)

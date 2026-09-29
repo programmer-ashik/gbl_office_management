@@ -229,18 +229,80 @@ function channelLabel(line: JournalLine): string {
   return name
 }
 
-function paymentPhrase(entry: JournalEntry, kind: 'debit' | 'credit'): string {
+function paymentChannels(entry: JournalEntry, kind: 'debit' | 'credit'): string[] {
   const lines = entry.lines.filter((line) => {
     const amount = kind === 'debit' ? line.credit : line.debit
     return amount > 0 && isTreasuryLine(line)
   })
-  if (lines.length === 0) return ''
-  const labels = [...new Set(lines.map(channelLabel))]
-  const verb = kind === 'debit' ? 'paid by' : 'received in'
-  return `${verb} ${labels.join(' and ')}`
+  return [...new Set(lines.map(channelLabel))]
 }
 
-function voucherLineItems(
+function chequeDateLabel(value: string): string {
+  const [year, month, day] = value.slice(0, 10).split('-')
+  return year && month && day ? `${day}/${month}/${year}` : value
+}
+
+/** "Cheque No. 000101, dated 20/10/2026 (post-dated)" — empty when no cheque. */
+export function voucherChequeText(entry: JournalEntry): string {
+  const number = entry.chequeNumber?.trim()
+  if (!number) return ''
+  const date = entry.chequeDate ? `, dated ${chequeDateLabel(entry.chequeDate)}` : ''
+  return `Cheque No. ${number}${date}${entry.isPdc ? ' (post-dated)' : ''}`
+}
+
+/** Payment Method field: Hand Cash, Cash in Bank (…), Mobile Banking (…), plus the cheque. */
+export function voucherPaymentMethod(
+  entry: JournalEntry,
+  kind: 'debit' | 'credit',
+): string {
+  return [paymentChannels(entry, kind).join(', '), voucherChequeText(entry)]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** Auto memo numbers from the Journals form (gbl-YYMMDD-…) are not narrative. */
+function isMemoNumber(text: string): boolean {
+  return /^gbl-\d{6}/i.test(text.trim())
+}
+
+function userText(text?: string | null): string {
+  const value = text?.trim() ?? ''
+  return value && !isMemoNumber(value) ? value : ''
+}
+
+/**
+ * Narrative for a printed row: its own line description, else descriptions
+ * typed on the counterpart lines (e.g. the Hand Cash / bank line, which is
+ * not printed as a row), else a non-auto memo.
+ */
+function lineNarrative(
+  entry: JournalEntry,
+  line: JournalLine,
+  printed: JournalLine[],
+): string {
+  const own = userText(line.description)
+  const counterpart = own
+    ? ''
+    : [
+        ...new Set(
+          entry.lines
+            .filter((other) => !printed.includes(other))
+            .map((other) => userText(other.description))
+            .filter(Boolean),
+        ),
+      ].join('; ')
+  const text = own || counterpart || userText(entry.memo)
+  const detail = text.replace(/^being the amount of\s+/i, '').trim()
+  const account = line.accountName.trim()
+  const extras = [account, line.entityName?.trim()].filter(
+    (part): part is string =>
+      Boolean(part) && !detail.toLowerCase().includes(part!.toLowerCase()),
+  )
+  if (!detail) return extras.join(' · ') || line.accountCode
+  return extras.length ? `${detail} (${extras.join(' · ')})` : detail
+}
+
+export function voucherLineItems(
   entry: JournalEntry,
   kind: 'debit' | 'credit',
 ): Array<{ description: string; major: string; minor: string }> {
@@ -252,21 +314,18 @@ function voucherLineItems(
     (line) => !isTreasuryLine(line),
   )
   const rows = source.length > 0 ? source : lines.length > 0 ? lines : entry.lines
-  const pay = paymentPhrase(entry, kind)
+  const channels = paymentChannels(entry, kind)
+  const chequeNo = entry.chequeNumber?.trim()
+  const vide = chequeNo ? ` vide cheque no. ${chequeNo}` : ''
+  const pay = channels.length
+    ? ` ${kind === 'debit' ? 'paid by' : 'received in'} ${channels.join(' and ')}${vide}`
+    : vide
   return rows.map((line) => {
     const amt = kind === 'debit' ? line.debit || line.credit : line.credit || line.debit
     const whole = Math.floor(Math.abs(amt))
     const cents = Math.round((Math.abs(amt) - whole) * 100)
-    const narrative =
-      line.description?.trim() ||
-      entry.memo?.trim() ||
-      `${line.accountCode} · ${line.accountName}`
-    const detail = narrative.replace(/^being the amount of\s+/i, '').trim()
-    const description = pay
-      ? `Being the amount of ${detail} ${pay}`
-      : `Being the amount of ${detail}`
     return {
-      description,
+      description: `Being the amount of ${lineNarrative(entry, line, rows)}${pay}`,
       major: whole.toLocaleString('en-US'),
       minor: String(cents).padStart(2, '0'),
     }
@@ -417,7 +476,7 @@ async function buildDebitCreditVoucherPdf(
   doc.setLineWidth(1.6)
   doc.line(contentRight - Math.min(titleW, 42), 24.5, contentRight, 24.5)
 
-  // Voucher Nu# + Received By
+  // Voucher Nu# + Payment Method
   let y = 38
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
@@ -428,10 +487,21 @@ async function buildDebitCreditVoucherPdf(
   y = 46
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
-  doc.text('Received By:', contentX, y)
+  const methodLabel = 'Payment Method:'
+  doc.text(methodLabel, contentX, y)
+  const methodX = contentX + doc.getTextWidth(methodLabel) + 3
+  const method = voucherPaymentMethod(entry, kind)
+  if (method) {
+    const methodW = contentRight - methodX - 2
+    doc.setFont('helvetica', 'bold')
+    if (doc.getTextWidth(method) > methodW) doc.setFontSize(8)
+    doc.text(method, methodX + 1, y, { maxWidth: methodW })
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+  }
   doc.setDrawColor(...INK)
   doc.setLineWidth(0.35)
-  doc.line(contentX + 28, y + 1, contentRight, y + 1)
+  doc.line(methodX, y + 1, contentRight, y + 1)
 
   // Detail table
   y = 52
@@ -440,8 +510,19 @@ async function buildDebitCreditVoucherPdf(
   const amtX = contentRight - amountColW
   const descW = amtX - contentX
   const headerH = 14
-  const bodyH = Math.max(42, 10 + items.length * 7)
   const totalH = 14
+  const LINE_H = 4
+  const ROW_GAP = 3
+  doc.setFontSize(8.5)
+  const wrappedItems = items.map(
+    (item) => doc.splitTextToSize(item.description, descW - 6) as string[],
+  )
+  const rowsH = wrappedItems.reduce(
+    (sum, lines) => sum + lines.length * LINE_H + ROW_GAP,
+    0,
+  )
+  const maxBodyH = pageH - 12 - tableTop - headerH - totalH
+  const bodyH = Math.min(maxBodyH, Math.max(42, 8 + rowsH))
   const tableH = headerH + bodyH + totalH
   const half = amountColW / 2
 
@@ -485,32 +566,33 @@ async function buildDebitCreditVoucherPdf(
     align: 'center',
   })
 
-  // Body rows
-  doc.setDrawColor(...LIGHT_GRAY)
-  doc.setLineWidth(0.2)
-  for (let i = 0; i < 5; i++) {
-    const ly = tableTop + headerH + 10 + i * 6.5
-    if (ly < tableTop + headerH + bodyH - 2) {
-      doc.setLineDashPattern([0.7, 0.7], 0)
-      doc.line(contentX + 2, ly, amtX - 3, ly)
-      doc.setLineDashPattern([], 0)
-    }
-  }
-
+  // Body rows: each description wraps in full; amounts sit on its first line.
+  const bodyBottom = tableTop + headerH + bodyH - 2
   doc.setTextColor(...INK)
   doc.setFontSize(8.5)
+  let rowY = tableTop + headerH + 7
   items.forEach((item, idx) => {
-    const ly = tableTop + headerH + 10 + idx * 6.5
-    if (ly >= tableTop + headerH + bodyH - 2) return
-    const wrapped = doc.splitTextToSize(item.description, descW - 6) as string[]
-    const shown = wrapped.slice(0, 2)
-    doc.text(shown, contentX + 2, ly)
+    const lines = wrappedItems[idx] ?? []
+    if (rowY >= bodyBottom) return
+    const fit = Math.max(1, Math.floor((bodyBottom - rowY) / LINE_H) + 1)
+    doc.setFont('helvetica', 'normal')
+    doc.text(lines.slice(0, fit), contentX + 2, rowY)
     doc.setFont('helvetica', 'bold')
-    doc.text(item.major, amtX + half - 2, ly, { align: 'right' })
+    doc.text(item.major, amtX + half - 2, rowY, { align: 'right' })
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(...MUTED)
-    doc.text(item.minor, contentRight - 2, ly, { align: 'right' })
+    doc.text(item.minor, contentRight - 2, rowY, { align: 'right' })
     doc.setTextColor(...INK)
+
+    const underline = rowY + (Math.min(lines.length, fit) - 1) * LINE_H + 1.8
+    rowY += lines.length * LINE_H + ROW_GAP
+    if (underline < bodyBottom) {
+      doc.setDrawColor(...LIGHT_GRAY)
+      doc.setLineWidth(0.2)
+      doc.setLineDashPattern([0.7, 0.7], 0)
+      doc.line(contentX + 2, underline, amtX - 3, underline)
+      doc.setLineDashPattern([], 0)
+    }
   })
 
   // TOTAL + words

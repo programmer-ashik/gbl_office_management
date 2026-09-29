@@ -3,7 +3,7 @@ import { Types } from 'mongoose';
 import { AccountType } from '../../common/enums/account-type.enum';
 import { AuditAction } from '../../common/enums/governance.enum';
 import { Role } from '../../common/enums/role.enum';
-import { badRequest, notFound } from '../../common/errors/app-error';
+import { badRequest, conflict, notFound } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import {
   assertDebitsEqualCredits,
@@ -16,7 +16,7 @@ import type { CustomersService } from '../customers/customers.service';
 import { TreasuryAccountModel } from '../banking/treasury-account.model';
 import { SupplierModel } from '../procurement/supplier.model';
 import type { ProjectsService } from '../projects/projects.service';
-import { UserModel } from '../users/user.model';
+import { findEmployee } from '../employees/employee-records';
 import type { UsersService } from '../users/users.service';
 import { assertManualLineDimensions } from './account-dimensions';
 import { AccountsService } from './accounts.service';
@@ -30,6 +30,23 @@ import {
   type JournalType as JournalTypeValue,
 } from './journal.enums';
 import { SystemAccountCode } from './system-account-codes';
+import { TreasuryKind } from '../../common/enums/treasury-kind.enum';
+import { AccountModel } from './account.model';
+import {
+  PdcStatus,
+  chequeDay,
+  chequeDayToDate,
+  planPdcSwap,
+  todayIsoDate,
+  type PdcDirection,
+  type PdcStatus as PdcStatusValue,
+} from './pdc';
+import { assertPdcAccountsReady } from './pdc-accounts';
+import {
+  effectiveJournalType,
+  journalMatchesType,
+  journalTypeTags,
+} from './journal-type-infer';
 import {
   JournalEntryModel,
   type IJournalLine,
@@ -112,6 +129,10 @@ export type PublicJournal = {
   memo: string;
   reference: string | null;
   journalType: string;
+  /** Primary type: stored type, else the leading inferred category. */
+  effectiveType: string;
+  /** Every Type-filter category the journal belongs to. */
+  typeTags: string[];
   status: string;
   source: string;
   projectId: string | null;
@@ -123,7 +144,30 @@ export type PublicJournal = {
   approvedAt: string | null;
   reversedByEntryId: string | null;
   reversesEntryId: string | null;
+  chequeNumber: string | null;
+  /** YYYY-MM-DD */
+  chequeDate: string | null;
+  isPdc: boolean;
+  pdcStatus: string;
+  intendedBankAccountId: string | null;
+  intendedBankAccountCode: string | null;
+  pdcDirection: string | null;
+  pdcClearingEntryId: string | null;
+  pdcClearsEntryId: string | null;
+  pdcSettledAt: string | null;
+  pdcBounceReason: string | null;
   lines: PublicJournalLine[];
+};
+
+/** Cheque / PDC columns written alongside a journal. */
+type ChequeFields = {
+  chequeNumber?: string;
+  chequeDate?: Date;
+  isPdc: boolean;
+  pdcStatus: PdcStatusValue;
+  intendedBankAccountId?: Types.ObjectId;
+  intendedBankAccountCode?: string;
+  pdcDirection?: PdcDirection;
 };
 
 export type JournalListFilters = {
@@ -212,6 +256,8 @@ export class JournalService {
       memo: entry.memo,
       reference: entry.reference ?? null,
       journalType: entry.journalType ?? JournalType.GENERAL,
+      effectiveType: effectiveJournalType(entry),
+      typeTags: journalTypeTags(entry),
       status: entry.status,
       source: entry.source,
       projectId: entry.projectId ? entry.projectId.toString() : null,
@@ -231,6 +277,25 @@ export class JournalService {
       reversesEntryId: entry.reversesEntryId
         ? entry.reversesEntryId.toString()
         : null,
+      chequeNumber: entry.chequeNumber ?? null,
+      chequeDate: entry.chequeDate
+        ? entry.chequeDate.toISOString().slice(0, 10)
+        : null,
+      isPdc: entry.isPdc === true,
+      pdcStatus: entry.pdcStatus ?? PdcStatus.NONE,
+      intendedBankAccountId: entry.intendedBankAccountId
+        ? entry.intendedBankAccountId.toString()
+        : null,
+      intendedBankAccountCode: entry.intendedBankAccountCode ?? null,
+      pdcDirection: entry.pdcDirection ?? null,
+      pdcClearingEntryId: entry.pdcClearingEntryId
+        ? entry.pdcClearingEntryId.toString()
+        : null,
+      pdcClearsEntryId: entry.pdcClearsEntryId
+        ? entry.pdcClearsEntryId.toString()
+        : null,
+      pdcSettledAt: entry.pdcSettledAt ? entry.pdcSettledAt.toISOString() : null,
+      pdcBounceReason: entry.pdcBounceReason ?? null,
       lines: entry.lines.map((line) => ({
         accountCode: line.accountCode,
         accountName: line.accountName,
@@ -529,6 +594,8 @@ export class JournalService {
       reference: existing.reference,
       journalType: existing.journalType,
       projectId: existing.projectId?.toString(),
+      chequeNumber: existing.chequeNumber,
+      chequeDate: existing.chequeDate?.toISOString().slice(0, 10),
       lines: existing.lines.map((line) => ({
         accountCode: line.accountCode,
         debit: fromMinorUnits(line.debitMinor) || undefined,
@@ -598,18 +665,35 @@ export class JournalService {
     filters: JournalListFilters = {},
   ): Promise<PublicJournal[]> {
     const filter = this.buildListFilter(filters);
-    const entries = await JournalEntryModel.find(filter)
-      .sort({ createdAt: -1, date: -1, entryNumber: -1 })
-      .limit(limit)
-      .exec();
-    return entries.map((entry) => this.toPublic(entry));
+    const query = JournalEntryModel.find(filter).sort({
+      createdAt: -1,
+      date: -1,
+      entryNumber: -1,
+    });
+    if (!filters.journalType) {
+      const entries = await query.limit(limit).exec();
+      return entries.map((entry) => this.toPublic(entry));
+    }
+    // A journal can carry several categories, so match after loading.
+    const entries = await query.exec();
+    return entries
+      .filter((entry) => journalMatchesType(entry, filters.journalType!))
+      .slice(0, limit)
+      .map((entry) => this.toPublic(entry));
   }
 
   async summary(filters: JournalListFilters = {}): Promise<JournalSummary> {
     const filter = this.buildListFilter(filters);
-    const rows = await JournalEntryModel.find(filter)
-      .select('status totalDebitMinor totalCreditMinor')
+    const found = await JournalEntryModel.find(filter)
+      .select(
+        filters.journalType
+          ? 'status totalDebitMinor totalCreditMinor journalType source memo reference reversesEntryId lines'
+          : 'status totalDebitMinor totalCreditMinor',
+      )
       .exec();
+    const rows = filters.journalType
+      ? found.filter((row) => journalMatchesType(row, filters.journalType!))
+      : found;
     const summary: JournalSummary = {
       total: rows.length,
       draft: 0,
@@ -636,36 +720,109 @@ export class JournalService {
     return summary;
   }
 
-  async reverse(id: string, userId: string): Promise<PublicJournal> {
+  /**
+   * Reversing a pending post-dated cheque cancels it (status Bounced).
+   * A cleared cheque must have its clearing journal reversed first; doing so
+   * returns the cheque to Pending.
+   */
+  async reverse(
+    id: string,
+    userId: string,
+    options: { bounceReason?: string } = {},
+  ): Promise<PublicJournal> {
     const original = await this.findByIdOrFail(id);
     if (original.status !== JournalStatus.POSTED) {
       throw badRequest('Only posted journals can be reversed');
+    }
+    if (original.isPdc && original.pdcStatus === PdcStatus.CLEARED) {
+      const clearing = original.pdcClearingEntryId
+        ? await JournalEntryModel.findById(original.pdcClearingEntryId)
+            .select('entryNumber')
+            .lean()
+            .exec()
+        : null;
+      throw badRequest(
+        `Post-dated cheque on ${original.entryNumber} is already cleared${clearing ? ` by ${clearing.entryNumber}` : ''}. Reverse the clearing journal first.`,
+      );
     }
 
     if (this.assertJournalReversible) {
       await this.assertJournalReversible(original._id.toString());
     }
 
-    const reversing = await this.post(
-      {
-        date: new Date().toISOString(),
-        memo: `Reversal of ${original.entryNumber}`,
-        reference: original.entryNumber,
-        journalType: original.journalType ?? JournalType.GENERAL,
-        projectId: original.projectId?.toString(),
-        lines: original.lines.map((line) => ({
-          accountCode: line.accountCode,
-          debit: fromMinorUnits(line.creditMinor),
-          credit: fromMinorUnits(line.debitMinor),
-          description: `Reversal of ${original.entryNumber}`,
-          projectId: line.projectId?.toString(),
-          entityType: line.entityType,
-          entityId: line.entityId?.toString(),
-        })),
-      },
-      userId,
-      'system',
-    );
+    const bouncing = original.isPdc === true && original.pdcStatus === PdcStatus.PENDING;
+    if (bouncing) {
+      const settledAt = new Date();
+      const bounceReason = options.bounceReason?.trim() || 'Cheque cancelled (journal reversed)';
+      const claimed = await JournalEntryModel.updateOne(
+        {
+          _id: original._id,
+          isPdc: true,
+          status: JournalStatus.POSTED,
+          pdcStatus: PdcStatus.PENDING,
+        },
+        {
+          $set: {
+            pdcStatus: PdcStatus.BOUNCED,
+            pdcBounceReason: bounceReason,
+            pdcSettledAt: settledAt,
+            pdcSettledBy: new Types.ObjectId(userId),
+          },
+        },
+      ).exec();
+      if (claimed.modifiedCount !== 1) {
+        throw conflict('Post-dated cheque status changed — reload and try again');
+      }
+      original.pdcStatus = PdcStatus.BOUNCED;
+      original.pdcBounceReason = bounceReason;
+      original.pdcSettledAt = settledAt;
+      original.pdcSettledBy = new Types.ObjectId(userId);
+    }
+
+    let reversing: PublicJournal;
+    try {
+      reversing = await this.post(
+        {
+          date: new Date().toISOString(),
+          memo: `Reversal of ${original.entryNumber}`,
+          reference: original.entryNumber,
+          journalType: original.journalType ?? JournalType.GENERAL,
+          projectId: original.projectId?.toString(),
+          lines: original.lines.map((line) => ({
+            accountCode: line.accountCode,
+            debit: fromMinorUnits(line.creditMinor),
+            credit: fromMinorUnits(line.debitMinor),
+            description: `Reversal of ${original.entryNumber}`,
+            projectId: line.projectId?.toString(),
+            entityType: line.entityType,
+            entityId: line.entityId?.toString(),
+          })),
+        },
+        userId,
+        'system',
+      );
+    } catch (error) {
+      if (bouncing) {
+        await JournalEntryModel.updateOne(
+          { _id: original._id, pdcStatus: PdcStatus.BOUNCED },
+          {
+            $set: { pdcStatus: PdcStatus.PENDING },
+            $unset: { pdcBounceReason: 1, pdcSettledAt: 1, pdcSettledBy: 1 },
+          },
+        ).exec();
+      }
+      throw error;
+    }
+
+    if (original.pdcClearsEntryId) {
+      await JournalEntryModel.updateOne(
+        { _id: original.pdcClearsEntryId, pdcStatus: PdcStatus.CLEARED },
+        {
+          $set: { pdcStatus: PdcStatus.PENDING },
+          $unset: { pdcClearingEntryId: 1, pdcSettledAt: 1, pdcSettledBy: 1 },
+        },
+      ).exec();
+    }
 
     original.status = JournalStatus.REVERSED;
     original.reversedByEntryId = new Types.ObjectId(reversing.id);
@@ -706,7 +863,9 @@ export class JournalService {
       ];
     }
     if (filters.status) filter.status = filters.status;
-    if (filters.journalType) filter.journalType = filters.journalType;
+    if (filters.journalType === JournalType.GENERAL) {
+      filter.journalType = { $in: [JournalType.GENERAL, null] };
+    }
     if (filters.source) filter.source = filters.source;
     if (filters.accountCode) {
       filter['lines.accountCode'] = filters.accountCode.trim().toUpperCase();
@@ -769,7 +928,8 @@ export class JournalService {
       writeLedger: boolean;
     },
   ): Promise<PublicJournal> {
-    const { debitMinor, creditMinor, prepared } = prepareJournalLines(dto.lines, {
+    const cheque = await this.applyChequeRules(dto, options.writeLedger);
+    const { debitMinor, creditMinor, prepared } = prepareJournalLines(cheque.lines, {
       requireBalance: options.requireBalance,
     });
     const date = new Date(dto.date);
@@ -778,13 +938,13 @@ export class JournalService {
     }
 
     await this.assertProjects(dto, prepared);
+    const journalType = (dto.journalType as JournalTypeValue) || JournalType.GENERAL;
     const resolved = await this.resolveLines(
       prepared,
       dto.projectId,
       options.source,
+      journalType === JournalType.OPENING_BALANCE,
     );
-
-    const journalType = (dto.journalType as JournalTypeValue) || JournalType.GENERAL;
     const postedAt = options.writeLedger ? new Date() : undefined;
 
     const entry = await withTransaction(async (session) => {
@@ -810,6 +970,7 @@ export class JournalService {
               ? new Types.ObjectId(userId)
               : undefined,
             createdBy: new Types.ObjectId(userId),
+            ...cheque.fields,
           },
         ],
         { session },
@@ -860,7 +1021,11 @@ export class JournalService {
     },
   ): Promise<PublicJournal> {
     const requireBalance = options.postNow || options.requireBalance;
-    const { debitMinor, creditMinor, prepared } = prepareJournalLines(dto.lines, {
+    const cheque = await this.applyChequeRules(
+      dto,
+      options.postNow || options.writeLedger,
+    );
+    const { debitMinor, creditMinor, prepared } = prepareJournalLines(cheque.lines, {
       requireBalance,
     });
     const date = new Date(dto.date);
@@ -869,12 +1034,17 @@ export class JournalService {
     }
 
     await this.assertProjects(dto, prepared);
-    const resolved = await this.resolveLines(prepared, dto.projectId, 'manual');
-    const before = this.toPublic(existing);
     const journalType =
       (dto.journalType as JournalTypeValue) ||
       existing.journalType ||
       JournalType.GENERAL;
+    const resolved = await this.resolveLines(
+      prepared,
+      dto.projectId,
+      'manual',
+      journalType === JournalType.OPENING_BALANCE,
+    );
+    const before = this.toPublic(existing);
 
     const updated = await withTransaction(async (session) => {
       existing.date = date;
@@ -887,6 +1057,13 @@ export class JournalService {
       existing.lines = resolved.lines;
       existing.totalDebitMinor = debitMinor;
       existing.totalCreditMinor = creditMinor;
+      existing.chequeNumber = cheque.fields.chequeNumber;
+      existing.chequeDate = cheque.fields.chequeDate;
+      existing.isPdc = cheque.fields.isPdc;
+      existing.pdcStatus = cheque.fields.pdcStatus;
+      existing.intendedBankAccountId = cheque.fields.intendedBankAccountId;
+      existing.intendedBankAccountCode = cheque.fields.intendedBankAccountCode;
+      existing.pdcDirection = cheque.fields.pdcDirection;
       existing.status = options.postNow
         ? JournalStatus.POSTED
         : (options.status as typeof JournalStatus.DRAFT);
@@ -931,6 +1108,96 @@ export class JournalService {
     return publicEntry;
   }
 
+  /**
+   * Cheque dated after today (company calendar) on a posting: the bank line
+   * moves to PDC Receivable (receipt) or PDC Payable (payment) and the bank
+   * is remembered for clearing. Drafts only record the cheque details; the
+   * decision is made when the journal is actually posted.
+   */
+  private async applyChequeRules(
+    dto: PostJournalDto,
+    posting: boolean,
+  ): Promise<{ lines: JournalLineDto[]; fields: ChequeFields }> {
+    const day = chequeDay(dto.chequeDate);
+    const fields: ChequeFields = {
+      chequeNumber: dto.chequeNumber?.trim() || undefined,
+      chequeDate: day ? chequeDayToDate(day) : undefined,
+      isPdc: false,
+      pdcStatus: PdcStatus.NONE,
+    };
+    if (!posting || !day || day <= todayIsoDate()) {
+      return { lines: dto.lines, fields };
+    }
+
+    const codes = dto.lines.map((line) => line.accountCode.trim().toUpperCase());
+    const plan = planPdcSwap(
+      dto.lines.map((line, index) => ({
+        accountCode: codes[index]!,
+        debitMinor: toMinorUnits(line.debit ?? 0),
+        creditMinor: toMinorUnits(line.credit ?? 0),
+        entityType: line.entityType,
+        entityId: line.entityId,
+      })),
+      await this.bankAccountCodes(codes),
+    );
+    try {
+      await assertPdcAccountsReady();
+    } catch (error) {
+      throw badRequest(error instanceof Error ? error.message : String(error));
+    }
+    const [bank] = await this.accountsService.findPostableByCodes([plan.bankCode]);
+    if (!bank) {
+      throw badRequest(`Account ${plan.bankCode} is not postable`);
+    }
+
+    const lines = dto.lines.map((line, index) =>
+      plan.lineIndexes.includes(index)
+        ? {
+            ...line,
+            accountCode: plan.clearingCode,
+            entityType: plan.counterparty?.entityType,
+            entityId: plan.counterparty?.entityId,
+          }
+        : line,
+    );
+    return {
+      lines,
+      fields: {
+        ...fields,
+        isPdc: true,
+        pdcStatus: PdcStatus.PENDING,
+        intendedBankAccountId: bank._id,
+        intendedBankAccountCode: bank.code,
+        pdcDirection: plan.direction,
+      },
+    };
+  }
+
+  /** Commercial bank GL codes among the given codes (cheques clear through banks). */
+  private async bankAccountCodes(codes: string[]): Promise<Set<string>> {
+    const unique = [...new Set(codes)];
+    const [treasury, accounts] = await Promise.all([
+      TreasuryAccountModel.find({
+        kind: TreasuryKind.COMMERCIAL_BANK,
+        glAccountCode: { $in: unique },
+      })
+        .select('glAccountCode')
+        .lean()
+        .exec(),
+      AccountModel.find({
+        code: { $in: unique },
+        parentCode: SystemAccountCode.CASH_IN_BANK,
+      })
+        .select('code')
+        .lean()
+        .exec(),
+    ]);
+    return new Set([
+      ...treasury.map((row) => row.glAccountCode.toUpperCase()),
+      ...accounts.map((row) => row.code.toUpperCase()),
+    ]);
+  }
+
   private async assertProjects(
     dto: PostJournalDto,
     prepared: Array<{ projectId?: string }>,
@@ -949,6 +1216,7 @@ export class JournalService {
     prepared: Omit<PreparedLine, 'accountId' | 'accountName' | 'entityName'>[],
     headerProjectId: string | undefined,
     source: 'manual' | 'system',
+    isOpeningBalance = false,
   ): Promise<{
     lines: IJournalLine[];
     byCode: Map<string, { _id: Types.ObjectId; code: string; name: string; type: string }>;
@@ -983,6 +1251,7 @@ export class JournalService {
           entityId: line.entityId,
           projectId: line.projectId,
           headerProjectId,
+          skipProjectRequirement: isOpeningBalance,
         });
       }
 
@@ -1076,14 +1345,14 @@ export class JournalService {
     }
 
     if (type === JournalEntityType.EMPLOYEE) {
-      const user = await UserModel.findById(entityId).exec();
-      if (!user || !user.isActive) {
+      const employee = await findEmployee(entityId);
+      if (!employee || !employee.isActive) {
         throw notFound('Employee not found');
       }
       return {
         entityType: type,
-        entityId,
-        entityName: `${user.firstName} ${user.lastName}`.trim(),
+        entityId: employee._id.toString(),
+        entityName: `${employee.firstName} ${employee.lastName}`.trim(),
       };
     }
 

@@ -17,10 +17,13 @@ export type LedgerPdfInput = {
   closingBalance: number
   periodDebit: number
   periodCredit: number
+  /** Chronological: oldest first, so the last entry is the last row. */
   rows: Array<{
     date: string
     entryNumber: string
     memo: string
+    /** Counterpart ledger head(s), plus the journal reference when set. */
+    reference?: string
     entity: string
     debit: number
     credit: number
@@ -54,11 +57,7 @@ export function buildLedgerPdf(input: LedgerPdfInput): jsPDF {
 
   doc.setFontSize(9)
   doc.setTextColor(40, 40, 40)
-  doc.text(
-    `Account: ${input.accountCode} · ${input.accountName}`,
-    14,
-    y,
-  )
+  doc.text(`Account: ${input.accountName || input.accountCode}`, 14, y)
   y += 5
   const range =
     input.fromDate || input.toDate
@@ -79,48 +78,73 @@ export function buildLedgerPdf(input: LedgerPdfInput): jsPDF {
     y += 2
   }
 
+  const openingLabel = input.fromDate
+    ? `Opening balance (before ${input.fromDate})`
+    : 'Opening balance'
+  const closingLabel = input.toDate
+    ? `Closing balance (as at ${input.toDate})`
+    : 'Closing balance'
+  const balanceRowStyle = {
+    fontStyle: 'bold' as const,
+    fillColor: [241, 245, 249] as [number, number, number],
+    textColor: NAVY,
+  }
+  const balanceRow = (label: string, amount: number) => [
+    { content: '', styles: balanceRowStyle },
+    { content: '', styles: balanceRowStyle },
+    { content: label, colSpan: 5, styles: balanceRowStyle },
+    { content: money(amount), styles: { ...balanceRowStyle, halign: 'right' as const } },
+  ]
+
   autoTable(doc, {
     startY: y,
     head: [
       [
         'Date',
         'Journal',
-        'Memo',
+        'Ledger Head',
+        'Description',
         'Party',
         'Debit',
         'Credit',
         'Balance',
       ],
     ],
-    body: input.rows.map((row) => [
-      row.date.slice(0, 10),
-      row.entryNumber,
-      row.memo,
-      row.entity,
-      row.debit ? money(row.debit) : '',
-      row.credit ? money(row.credit) : '',
-      money(row.runningBalance),
-    ]),
+    body: [
+      balanceRow(openingLabel, input.openingBalance),
+      ...input.rows.map((row) => [
+        row.date.slice(0, 10),
+        row.entryNumber,
+        row.reference || '—',
+        row.memo,
+        row.entity,
+        row.debit ? money(row.debit) : '',
+        row.credit ? money(row.credit) : '',
+        money(row.runningBalance),
+      ]),
+      balanceRow(closingLabel, input.closingBalance),
+    ],
     foot: [
       [
         '',
         '',
-        'Opening',
-        money(input.openingBalance),
-        'Period debit',
+        'Period totals',
+        '',
+        '',
         money(input.periodDebit),
-        '',
-      ],
-      [
-        '',
-        '',
-        'Closing',
-        money(input.closingBalance),
-        'Period credit',
         money(input.periodCredit),
         '',
       ],
     ],
+    columnStyles: {
+      0: { cellWidth: 20 },
+      1: { cellWidth: 24 },
+      2: { cellWidth: 52 },
+      3: { cellWidth: 70 },
+      5: { halign: 'right', cellWidth: 24 },
+      6: { halign: 'right', cellWidth: 24 },
+      7: { halign: 'right', cellWidth: 26 },
+    },
     styles: { fontSize: 8, cellPadding: 1.6 },
     headStyles: { fillColor: NAVY, textColor: 255 },
     footStyles: { fillColor: [241, 245, 249], textColor: NAVY, fontStyle: 'bold' },
@@ -146,4 +170,9 @@ export function downloadLedgerPdf(input: LedgerPdfInput): void {
   const doc = buildLedgerPdf(input)
   const stamp = input.generatedAt.slice(0, 10)
   doc.save(`general-ledger-${input.accountCode}-${stamp}.pdf`)
+}
+
+/** Blob URL for in-app preview; caller revokes it. */
+export function ledgerPdfPreviewUrl(input: LedgerPdfInput): string {
+  return URL.createObjectURL(buildLedgerPdf(input).output('blob'))
 }

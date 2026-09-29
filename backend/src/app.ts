@@ -15,6 +15,10 @@ import { AccountsService } from './modules/accounting/accounts.service';
 import { createAccountsRouter } from './modules/accounting/accounts.routes';
 import { JournalService } from './modules/accounting/journal.service';
 import { createJournalsRouter } from './modules/accounting/journals.routes';
+import { PdcService } from './modules/accounting/pdc.service';
+import { createTransactionsRouter } from './modules/accounting/transactions.routes';
+import { ChequeBookService } from './modules/accounting/cheque-book.service';
+import { createChequeBooksRouter } from './modules/accounting/cheque-books.routes';
 import { LedgerService } from './modules/accounting/ledger.service';
 import {
   createLedgersRouter,
@@ -37,6 +41,7 @@ import {
 } from './modules/ar-ap/ar-ap.routes';
 import { AnalyticsService } from './modules/analytics/analytics.service';
 import { createAnalyticsRouter } from './modules/analytics/analytics.routes';
+import { backfillEmployeesFromUsers } from './modules/employees/employee-records';
 import { EmployeesService } from './modules/employees/employees.service';
 import { createEmployeesRouter } from './modules/employees/employees.routes';
 import { ApprovalService } from './modules/governance/approval.service';
@@ -80,6 +85,7 @@ export async function createApp(): Promise<Express> {
   const usersService = new UsersService();
   const authService = new AuthService(usersService);
   await authService.bootstrapAdmin();
+  const employeesService = new EmployeesService(usersService);
 
   const accountsService = new AccountsService();
   await accountsService.seedDefaults();
@@ -95,6 +101,7 @@ export async function createApp(): Promise<Express> {
     usersService,
     customersService,
   );
+  const pdcService = new PdcService(journalService);
   const ledgerService = new LedgerService();
   const bankingService = new BankingService(
     accountsService,
@@ -102,6 +109,7 @@ export async function createApp(): Promise<Express> {
     ledgerService,
   );
   await bankingService.seedDefaults();
+  const chequeBookService = new ChequeBookService(bankingService);
   const advancesService = new AdvancesService(
     journalService,
     projectsService,
@@ -138,7 +146,6 @@ export async function createApp(): Promise<Express> {
     usersService,
   );
   const analyticsService = new AnalyticsService(ledgerService, bankingService);
-  const employeesService = new EmployeesService(usersService);
   const templatesService = new ReportTemplatesService();
   const quotationsService = new QuotationsService(usersService);
 
@@ -154,6 +161,11 @@ export async function createApp(): Promise<Express> {
     console.log(
       'Production boot: CoA + admin bootstrap only (no demo data). Add employees from the admin UI.',
     );
+  }
+
+  const backfilled = await backfillEmployeesFromUsers();
+  if (backfilled > 0) {
+    console.log(`Linked ${backfilled} existing staff user(s) to employee records`);
   }
 
   const app = express();
@@ -178,7 +190,9 @@ export async function createApp(): Promise<Express> {
 
   app.use('/api/v1/health', createHealthRouter());
   app.use('/api/v1/auth', createAuthRouter(authService, usersService));
-  app.use('/api/v1/users', createUsersRouter(usersService, authService));
+  const usersRouter = createUsersRouter(usersService, authService);
+  app.use('/api/v1/users', usersRouter);
+  app.use('/api/v1/settings/users', usersRouter);
   app.use(
     '/api/v1/employees',
     createEmployeesRouter(employeesService, advancesService, authService, usersService),
@@ -208,7 +222,16 @@ export async function createApp(): Promise<Express> {
       usersService,
       approvalService,
       arApService,
+      chequeBookService,
     ),
+  );
+  app.use(
+    '/api/v1/transactions',
+    createTransactionsRouter(pdcService, authService, usersService),
+  );
+  app.use(
+    '/api/v1/cheque-books',
+    createChequeBooksRouter(chequeBookService, authService, usersService),
   );
   app.use(
     '/api/v1/ledgers',

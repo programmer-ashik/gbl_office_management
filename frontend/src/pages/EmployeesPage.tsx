@@ -2,33 +2,36 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { Modal, Select } from '../components/ui'
-import { ROLE_LABEL, Role, type PublicUser } from '../types/auth'
+import {
+  EmployeeProfileFields,
+  LoginAccountFields,
+  emptyLogin,
+  emptyProfile,
+  profileBody,
+  type EmployeeProfileValues,
+  type LoginAccountValues,
+} from '../components/EmployeeForms'
+import { Modal } from '../components/ui'
+import { money } from '../types/accounting'
+import { ROLE_LABEL, Role } from '../types/auth'
+import type { Employee } from '../types/employee'
 
-const ROLE_OPTIONS = [
-  { value: Role.EMPLOYEE, label: ROLE_LABEL[Role.EMPLOYEE] },
-  { value: Role.PROJECT_MANAGER, label: ROLE_LABEL[Role.PROJECT_MANAGER] },
-  { value: Role.ACCOUNTANT, label: ROLE_LABEL[Role.ACCOUNTANT] },
-]
-
-/** Staff directory for payroll / advances — kept separate from admin permissions UI. */
+/** Staff directory for payroll / advances. Software access is optional per employee. */
 export function EmployeesPage() {
   const { user } = useAuth()
-  const [rows, setRows] = useState<PublicUser[]>([])
+  const [rows, setRows] = useState<Employee[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [role, setRole] = useState<string>(Role.EMPLOYEE)
+  const [profile, setProfile] = useState<EmployeeProfileValues>(emptyProfile())
+  const [grantAccess, setGrantAccess] = useState(false)
+  const [login, setLogin] = useState<LoginAccountValues>(emptyLogin())
 
   const canAdd = user?.role === Role.ADMIN
 
   async function load() {
-    const data = await api.employees()
-    setRows(data)
+    setRows(await api.employees())
   }
 
   useEffect(() => {
@@ -37,27 +40,35 @@ export function EmployeesPage() {
     })
   }, [])
 
+  function closeModal() {
+    setModalOpen(false)
+    setFormError(null)
+  }
+
   async function onCreate(event: FormEvent) {
     event.preventDefault()
     setSaving(true)
-    setError(null)
+    setFormError(null)
     try {
-      await api.createEmployee({
-        email,
-        default_password: password,
-        firstName,
-        lastName,
-        role: role as Role,
-      })
-      setEmail('')
-      setPassword('')
-      setFirstName('')
-      setLastName('')
-      setRole(Role.EMPLOYEE)
+      const body = profileBody(profile)
+      await api.createEmployee(
+        grantAccess
+          ? {
+              ...body,
+              createAccount: true,
+              email: login.email.trim(),
+              password: login.password,
+              role: login.role as Role,
+            }
+          : { ...body, createAccount: false },
+      )
+      setProfile(emptyProfile())
+      setLogin(emptyLogin())
+      setGrantAccess(false)
       setModalOpen(false)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to add employee')
+      setFormError(err instanceof Error ? err.message : 'Unable to add employee')
     } finally {
       setSaving(false)
     }
@@ -79,79 +90,65 @@ export function EmployeesPage() {
       <Modal
         open={modalOpen}
         title="Add employee"
-        description="Creates a login for payroll, advances, and project work."
-        onClose={() => setModalOpen(false)}
+        description="HR record for payroll, advances, and project work. A software login is optional."
+        onClose={closeModal}
       >
         <form className="stack-form" onSubmit={(event) => void onCreate(event)}>
-          <div className="name-row">
-            <label>
-              First name
-              <input
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                required
-              />
-            </label>
-            <label>
-              Last name
-              <input
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                required
-              />
-            </label>
-          </div>
-          <label>
-            Email
+          <EmployeeProfileFields
+            values={profile}
+            onChange={(patch) => setProfile((prev) => ({ ...prev, ...patch }))}
+            hideEmail={grantAccess}
+          />
+          <label className="checkbox-row">
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
+              type="checkbox"
+              checked={grantAccess}
+              onChange={(e) => {
+                setGrantAccess(e.target.checked)
+                if (e.target.checked && !login.email && profile.email) {
+                  setLogin((prev) => ({ ...prev, email: profile.email }))
+                }
+              }}
             />
+            Grant Software Access
           </label>
-          <label>
-            Temporary password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={8}
-              autoComplete="new-password"
-            />
-          </label>
-          <label>
-            Role
-            <Select
-              value={role}
-              onChange={setRole}
-              options={ROLE_OPTIONS}
-              placeholder="Select role"
-              portal={false}
-            />
-          </label>
+          {grantAccess ? (
+            <fieldset className="employee-access-fields">
+              <legend>Login account</legend>
+              <LoginAccountFields
+                values={login}
+                onChange={(patch) => setLogin((prev) => ({ ...prev, ...patch }))}
+              />
+            </fieldset>
+          ) : (
+            <p className="field-hint">
+              Without access the employee can still be paid, given advances, and
+              tagged on journals. You can create a login later.
+            </p>
+          )}
           <div className="form-actions">
             <button type="submit" disabled={saving}>
               {saving ? 'Saving…' : 'Create employee'}
             </button>
           </div>
-          {error ? <p className="form-error">{error}</p> : null}
+          {formError ? <p className="form-error">{formError}</p> : null}
         </form>
       </Modal>
 
       <section className="table-card">
         <div className="table-head">
           <h2>Directory</h2>
-          <p className="muted">Employees, project managers, and accountants</p>
+          <p className="muted">HR records, with or without a software login</p>
         </div>
-        {error && !modalOpen ? <p className="form-error">{error}</p> : null}
+        {error ? <p className="form-error">{error}</p> : null}
         <table>
           <thead>
             <tr>
               <th>Name</th>
-              <th>Email</th>
-              <th>Role</th>
+              <th>Designation</th>
+              <th>Phone</th>
+              <th className="num">Salary</th>
+              <th>Software access</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -159,18 +156,32 @@ export function EmployeesPage() {
             {rows.map((row) => (
               <tr key={row.id}>
                 <td>
-                  <Link to={`/employees/${row.id}/ledger`}>
+                  <Link to={`/employees/${row.id}`}>
                     {row.firstName} {row.lastName}
                   </Link>
                 </td>
-                <td>{row.email}</td>
-                <td>{ROLE_LABEL[row.role]}</td>
-                <td>{row.isActive ? 'Active' : 'Disabled'}</td>
+                <td>{row.designation ?? '—'}</td>
+                <td>{row.phone ?? '—'}</td>
+                <td className="num">{row.salary != null ? money(row.salary) : '—'}</td>
+                <td>
+                  {row.account ? (
+                    <>
+                      {ROLE_LABEL[row.account.role]}
+                      <span className="muted"> · {row.account.email}</span>
+                      {row.account.isActive ? null : (
+                        <span className="status-pill is-off"> Login disabled</span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="muted">No login</span>
+                  )}
+                </td>
+                <td>{row.isActive ? 'Active' : 'Inactive'}</td>
               </tr>
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={4} className="muted">
+                <td colSpan={6} className="muted">
                   No employees yet.
                 </td>
               </tr>

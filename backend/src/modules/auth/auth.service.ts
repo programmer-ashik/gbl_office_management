@@ -159,7 +159,7 @@ export class AuthService {
 
   async me(actor: AuthenticatedUser): Promise<PublicUser> {
     const user = await this.usersService.findByIdOrFail(actor.userId);
-    return this.usersService.toPublicUser(user);
+    return this.usersService.toPublicUserWithEmployee(user);
   }
 
   verifyAccessToken(token: string): JwtPayload {
@@ -194,7 +194,7 @@ export class AuthService {
     });
 
     return {
-      user: this.usersService.toPublicUser(user),
+      user: await this.usersService.toPublicUserWithEmployee(user),
       tokens: {
         accessToken,
         refreshToken,

@@ -15,6 +15,7 @@ import type { CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
 import { assertAccountIsPostable } from './account-rollup';
 import { repairCashBankChart } from './cash-bank-repair';
 import { LedgerLineModel } from './ledger.model';
+import { ensurePdcAccounts } from './pdc-accounts';
 
 export type PublicAccount = {
   id: string;
@@ -68,6 +69,20 @@ export class AccountsService {
     } catch (err) {
       console.warn(
         'Chart of Accounts JSON seed skipped:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+    try {
+      const pdc = await ensurePdcAccounts();
+      if (pdc.created.length > 0) {
+        console.log(`PDC clearing accounts created: ${pdc.created.join(', ')}`);
+      }
+      for (const conflict of pdc.conflicts) {
+        console.warn(`PDC clearing account conflict: ${conflict}`);
+      }
+    } catch (err) {
+      console.warn(
+        'PDC clearing accounts check skipped:',
         err instanceof Error ? err.message : err,
       );
     }

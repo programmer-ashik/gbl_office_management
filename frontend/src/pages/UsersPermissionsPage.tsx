@@ -117,9 +117,9 @@ export function UsersPermissionsPage() {
     setSaving(true)
     setError(null)
     try {
-      await api.createEmployee({
+      await api.createUser({
         email,
-        default_password: defaultPassword,
+        password: defaultPassword,
         firstName,
         lastName,
         role: role as Role,
@@ -171,6 +171,23 @@ export function UsersPermissionsPage() {
     }
   }
 
+  async function onDelete(row: PublicUser) {
+    const note = row.employeeId
+      ? ' Their employee record stays; it just loses its login.'
+      : ''
+    if (!window.confirm(`Delete the login for ${row.email}?${note}`)) return
+    setBusyId(row.id)
+    setError(null)
+    try {
+      await api.deleteUser(row.id)
+      setRows((current) => current.filter((item) => item.id !== row.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to delete user')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function onResetPassword(event: FormEvent) {
     event.preventDefault()
     if (!resetTarget) return
@@ -212,7 +229,7 @@ export function UsersPermissionsPage() {
       <Modal
         open={modalOpen}
         title="Add user"
-        description="Creates a login with a default password and permission role."
+        description="Creates a login only, with no employee profile (e.g. an external admin). To add staff, use Employees."
         onClose={() => setModalOpen(false)}
       >
         <form className="stack-form" onSubmit={(event) => void onCreate(event)}>
@@ -259,7 +276,7 @@ export function UsersPermissionsPage() {
             <Select
               value={role}
               onChange={setRole}
-              options={CREATE_ROLE_OPTIONS}
+              options={PERMISSION_ROLE_OPTIONS}
               placeholder="Select role"
               portal={false}
             />
@@ -399,9 +416,16 @@ export function UsersPermissionsPage() {
                 return (
                   <tr key={row.id}>
                     <td>
-                      <Link to={`/employees/${row.id}/ledger`}>
-                        {row.firstName} {row.lastName}
-                      </Link>
+                      {row.employeeId ? (
+                        <Link to={`/employees/${row.employeeId}`}>
+                          {row.firstName} {row.lastName}
+                        </Link>
+                      ) : (
+                        <>
+                          {row.firstName} {row.lastName}
+                          <span className="muted"> · login only</span>
+                        </>
+                      )}
                       {isSelf ? <span className="muted"> · you</span> : null}
                     </td>
                     <td>{row.email}</td>
@@ -462,6 +486,15 @@ export function UsersPermissionsPage() {
                               ? 'You cannot disable your own account'
                               : undefined,
                             onSelect: () => void onToggleActive(row),
+                          },
+                          {
+                            label: 'Delete user',
+                            danger: true,
+                            disabled: isSelf,
+                            disabledReason: isSelf
+                              ? 'You cannot delete your own account'
+                              : undefined,
+                            onSelect: () => void onDelete(row),
                           },
                         ]}
                       />

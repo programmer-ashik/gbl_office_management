@@ -32,8 +32,18 @@ describe('buildLedgerPdf', () => {
   it('builds a multi-page capable PDF with filtered rows', () => {
     const doc = buildLedgerPdf(sample)
     expect(doc.getNumberOfPages()).toBeGreaterThanOrEqual(1)
-    const text = doc.output('text')
+    const text = doc.output()
     expect(text).toContain('GBL Enterprise')
     expect(text).toContain('1112')
+  })
+
+  it('puts the opening balance first and the closing balance last', () => {
+    const text = buildLedgerPdf(sample).output()
+    const opening = text.indexOf('Opening balance')
+    const entry = text.indexOf('JE-1')
+    const closing = text.indexOf('Closing balance')
+    expect(opening).toBeGreaterThan(-1)
+    expect(opening).toBeLessThan(entry)
+    expect(entry).toBeLessThan(closing)
   })
 })

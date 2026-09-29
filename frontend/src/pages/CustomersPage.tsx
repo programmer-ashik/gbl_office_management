@@ -20,6 +20,9 @@ export function CustomersPage() {
   const [contactName, setContactName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
+  const [billingAddress, setBillingAddress] = useState('')
+  const [addOpen, setAddOpen] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
 
   const [modalMode, setModalMode] = useState<ModalMode>(null)
   const [selected, setSelected] = useState<Customer | null>(null)
@@ -41,25 +44,48 @@ export function CustomersPage() {
     })
   }, [])
 
+  function resetAddForm() {
+    setName('')
+    setContactName('')
+    setPhone('')
+    setEmail('')
+    setBillingAddress('')
+    setAddError(null)
+  }
+
+  function openAdd() {
+    resetAddForm()
+    setAddOpen(true)
+  }
+
+  function closeAdd() {
+    setAddOpen(false)
+    resetAddForm()
+  }
+
   async function onCreate(event: FormEvent) {
     event.preventDefault()
     if (!canManage) return
+    if (!billingAddress.trim()) {
+      setAddError('Billing address is required')
+      return
+    }
     setSaving(true)
-    setError(null)
+    setAddError(null)
     try {
       await api.createCustomer({
-        name,
-        contactName: contactName || undefined,
-        phone: phone || undefined,
-        email: email || undefined,
+        name: name.trim(),
+        contactName: contactName.trim() || undefined,
+        phone: phone.trim() || undefined,
+        email: email.trim() || undefined,
+        address: billingAddress.trim(),
       })
-      setName('')
-      setContactName('')
-      setPhone('')
-      setEmail('')
+      closeAdd()
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create customer')
+      setAddError(
+        err instanceof Error ? err.message : 'Unable to create customer',
+      )
     } finally {
       setSaving(false)
     }
@@ -158,63 +184,19 @@ export function CustomersPage() {
         <div>
           <h1>Customers</h1>
         </div>
-        <Link to="/journals" className="ghost-link">
-          Journals
-        </Link>
+        <div className="form-actions">
+          <Link to="/journals" className="ghost-link">
+            Journals
+          </Link>
+          {canManage ? (
+            <button type="button" onClick={openAdd}>
+              Add customer
+            </button>
+          ) : null}
+        </div>
       </header>
 
-      {canManage ? (
-        <section className="table-card">
-          <div className="table-head">
-            <h2>Add customer</h2>
-            <p className="muted">
-              AR control account 1100 uses customer as the sub-ledger entity — not
-              a separate CoA account per customer.
-            </p>
-          </div>
-          <form className="stack-form" onSubmit={(event) => void onCreate(event)}>
-            <div className="name-row">
-              <label>
-                Name
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                Contact
-                <input
-                  value={contactName}
-                  onChange={(e) => setContactName(e.target.value)}
-                />
-              </label>
-            </div>
-            <div className="name-row">
-              <label>
-                Phone
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} />
-              </label>
-              <label>
-                Email
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </label>
-            </div>
-            <div className="form-actions">
-              <button type="submit" disabled={saving}>
-                {saving ? 'Saving…' : 'Add customer'}
-              </button>
-            </div>
-            {error ? <p className="form-error">{error}</p> : null}
-          </form>
-        </section>
-      ) : null}
-
-      {!canManage && error ? <p className="form-error">{error}</p> : null}
+      {error ? <p className="form-error">{error}</p> : null}
 
       <section className="table-card">
         <div className="table-head">
@@ -290,6 +272,68 @@ export function CustomersPage() {
         </table>
       </section>
 
+      <Modal open={addOpen} title="Add customer" onClose={closeAdd}>
+        <form className="stack-form" onSubmit={(event) => void onCreate(event)}>
+          <p className="muted">
+            AR control account 1151 uses the customer as the sub-ledger entity —
+            not a separate CoA account per customer.
+          </p>
+          <div className="name-row">
+            <label>
+              Name
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                minLength={2}
+                autoFocus
+              />
+            </label>
+            <label>
+              Contact
+              <input
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="name-row">
+            <label>
+              Phone
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </label>
+            <label>
+              Email
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </label>
+          </div>
+          <label>
+            Billing address
+            <textarea
+              rows={3}
+              value={billingAddress}
+              onChange={(e) => setBillingAddress(e.target.value)}
+              maxLength={240}
+              required
+              placeholder="House / road, area, city, postcode"
+            />
+          </label>
+          {addError ? <p className="form-error">{addError}</p> : null}
+          <div className="form-actions">
+            <button type="button" className="ghost" onClick={closeAdd}>
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Add customer'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
       <Modal
         open={modalMode === 'view' && Boolean(selected)}
         title="Customer details"
@@ -313,7 +357,7 @@ export function CustomersPage() {
               <strong>Email:</strong> {selected.email ?? '—'}
             </p>
             <p>
-              <strong>Address:</strong> {selected.address ?? '—'}
+              <strong>Billing address:</strong> {selected.address ?? '—'}
             </p>
             <p>
               <strong>Status:</strong>{' '}
@@ -376,10 +420,12 @@ export function CustomersPage() {
               />
             </label>
             <label>
-              Address
-              <input
+              Billing address
+              <textarea
+                rows={3}
                 value={editAddress}
                 onChange={(e) => setEditAddress(e.target.value)}
+                maxLength={240}
               />
             </label>
             {modalError ? <p className="form-error">{modalError}</p> : null}

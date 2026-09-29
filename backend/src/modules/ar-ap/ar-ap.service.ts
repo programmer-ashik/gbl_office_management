@@ -16,6 +16,7 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 import { fromMinorUnits, toMinorUnits } from '../../common/utils/money';
 import { AccountsService } from '../accounting/accounts.service';
 import { CounterModel } from '../accounting/counter.model';
+import { JournalEntryModel } from '../accounting/journal-entry.model';
 import type {
   JournalService,
   PublicJournal,
@@ -25,6 +26,7 @@ import { JournalEntityType } from '../accounting/journal.enums';
 import { SystemAccountCode } from '../accounting/system-account-codes';
 import type { BankingService } from '../banking/banking.service';
 import { CustomerModel } from '../customers/customer.model';
+import { customerForProject } from '../customers/customer-projects';
 import type { AuditService } from '../governance/audit.service';
 import { GoodsMovementModel } from '../procurement/goods-movement.model';
 import { SupplierModel, type SupplierDocument } from '../procurement/supplier.model';
@@ -34,13 +36,19 @@ import {
   ClientInvoiceModel,
   type ClientInvoiceDocument,
 } from './client-invoice.model';
+import {
+  CustomerOpeningReceiptModel,
+  CustomerOpeningReceiptStatus,
+} from './customer-opening-receipt.model';
 import type {
   CollectInvoiceDto,
   CreateInvoiceDto,
   CreateSupplierBillDto,
   CreateSupplierPaymentDto,
   ExecuteSupplierPaymentDto,
+  ReceiveOpeningDueDto,
 } from './dto/ar-ap.dto';
+import { openingPartyRows, sumOpeningByEntity } from './opening-dues';
 import {
   InvoiceCollectionModel,
   type InvoiceCollectionDocument,
@@ -71,6 +79,35 @@ const AP_PAYMENT_ACCOUNT_CODES = new Set<string>([
   SystemAccountCode.ACCOUNTS_PAYABLE,
   SystemAccountCode.SUBCONTRACTOR_PAYABLE,
 ]);
+
+const AP_OPENING_CODES = [
+  SystemAccountCode.ACCOUNTS_PAYABLE,
+  SystemAccountCode.SUBCONTRACTOR_PAYABLE,
+] as const;
+
+const AR_OPENING_CODES = [SystemAccountCode.ACCOUNTS_RECEIVABLE] as const;
+
+export type PublicCustomerOpeningDue = {
+  customerId: string;
+  customerName: string;
+  openingDate: string;
+  journalNumber: string;
+  openingAmount: number;
+  receivedAmount: number;
+  openAmount: number;
+};
+
+export type PublicCustomerOpeningReceipt = {
+  id: string;
+  receiptNumber: string;
+  customerId: string;
+  customerName: string;
+  amount: number;
+  date: string;
+  treasuryAccountCode: string;
+  journalNumber: string;
+  memo: string | null;
+};
 
 export type SupplierOutstandingSnapshot = {
   supplierId: string;
@@ -154,6 +191,7 @@ export type PublicVendorLedger = {
     name: string;
     paymentTermsDays: number;
   };
+  opening: number;
   purchased: number;
   returned: number;
   billed: number;
@@ -219,6 +257,7 @@ export class ArApService {
     }
     const amountMinor = toMinorUnits(dto.amount);
     const invoiceNumber = await this.nextNumber('invoice', 'INV', date);
+    const customer = await customerForProject(project.id);
     const journal = await this.journalService.post(
       {
         date: date.toISOString(),
@@ -229,6 +268,7 @@ export class ArApService {
           amountMinor,
           projectId: project.id,
           description: dto.description.trim(),
+          customerId: customer?.id,
         }),
       },
       actor.userId,
@@ -278,6 +318,7 @@ export class ArApService {
     const treasury = await this.bankingService.requireActive(dto.treasuryId);
     const date = this.parseDate(dto.date);
     const collectionNumber = await this.nextNumber('collection', 'RC', date);
+    const customer = await customerForProject(invoice.projectId.toString());
     const journal = await this.journalService.post(
       {
         date: date.toISOString(),
@@ -289,6 +330,7 @@ export class ArApService {
           treasuryAccountCode: treasury.glAccountCode,
           projectId: invoice.projectId.toString(),
           description: `Collection ${invoice.invoiceNumber}`,
+          customerId: customer?.id,
         }),
       },
       actor.userId,
@@ -402,7 +444,200 @@ export class ArApService {
       })
       .filter((row) => row !== null);
 
+    const openingDues = await this.computeCustomerOpeningDues();
+    for (const due of openingDues) {
+      if (due.openMinor <= 0) continue;
+      lines.push({
+        id: `opening-${due.customerId}`,
+        reference: `Opening ${due.journalNumber}`,
+        partyName: due.customerName,
+        date: due.date.toISOString(),
+        dueDate: due.date.toISOString(),
+        openAmount: fromMinorUnits(due.openMinor),
+      });
+    }
+
     return buildAgingReport(asOf, lines);
+  }
+
+  async listCustomerOpeningDues(
+    actor: AuthenticatedUser,
+  ): Promise<PublicCustomerOpeningDue[]> {
+    this.assertFinance(actor);
+    return this.publicOpeningDues();
+  }
+
+  async listCustomerOpeningReceipts(
+    actor: AuthenticatedUser,
+  ): Promise<PublicCustomerOpeningReceipt[]> {
+    this.assertFinance(actor);
+    const rows = await CustomerOpeningReceiptModel.find({
+      status: CustomerOpeningReceiptStatus.EXECUTED,
+    })
+      .sort({ date: -1, receiptNumber: -1 })
+      .exec();
+    return rows.map((row) => ({
+      id: row._id.toString(),
+      receiptNumber: row.receiptNumber,
+      customerId: row.customerId.toString(),
+      customerName: row.customerName,
+      amount: fromMinorUnits(row.amountMinor),
+      date: row.date.toISOString(),
+      treasuryAccountCode: row.treasuryAccountCode,
+      journalNumber: row.journalNumber,
+      memo: row.memo ?? null,
+    }));
+  }
+
+  /**
+   * Cash/bank received against a customer's opening due (no invoice exists).
+   * Posts Dr treasury / Cr Accounts Receivable tagged with the customer.
+   */
+  async receiveCustomerOpeningDue(
+    customerId: string,
+    dto: ReceiveOpeningDueDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicCustomerOpeningDue> {
+    this.assertFinance(actor);
+    if (!Types.ObjectId.isValid(customerId)) {
+      throw notFound('Customer not found');
+    }
+    const customer = await CustomerModel.findById(customerId).exec();
+    if (!customer) {
+      throw notFound('Customer not found');
+    }
+
+    const due = (await this.computeCustomerOpeningDues(customer._id))[0];
+    const openMinor = due ? due.openMinor : 0;
+    const amountMinor = toMinorUnits(dto.amount);
+    if (openMinor <= 0) {
+      throw badRequest(`${customer.name} has no open opening balance to receive`);
+    }
+    if (amountMinor > openMinor) {
+      throw badRequest(
+        `Receipt ${fromMinorUnits(amountMinor).toFixed(2)} exceeds the open opening balance ${fromMinorUnits(openMinor).toFixed(2)}`,
+      );
+    }
+
+    const treasury = await this.bankingService.requireActive(dto.treasuryId);
+    const date = this.parseDate(dto.date);
+    const receiptNumber = await this.nextNumber('collection', 'RC', date);
+    const memo =
+      dto.memo?.trim() || `Opening balance receipt from ${customer.name}`;
+    const journal = await this.journalService.post(
+      {
+        date: date.toISOString(),
+        memo,
+        reference: receiptNumber,
+        journalType: 'customer_receipt',
+        lines: [
+          {
+            accountCode: treasury.glAccountCode,
+            debit: fromMinorUnits(amountMinor),
+            description: `Opening due received · ${customer.name}`,
+          },
+          {
+            accountCode: SystemAccountCode.ACCOUNTS_RECEIVABLE,
+            credit: fromMinorUnits(amountMinor),
+            description: `Opening due received · ${receiptNumber}`,
+            entityType: JournalEntityType.CUSTOMER,
+            entityId: customer._id.toString(),
+          },
+        ],
+      },
+      actor.userId,
+      'system',
+    );
+
+    await CustomerOpeningReceiptModel.create({
+      receiptNumber,
+      status: CustomerOpeningReceiptStatus.EXECUTED,
+      customerId: customer._id,
+      customerName: customer.name,
+      amountMinor,
+      date,
+      treasuryId: new Types.ObjectId(treasury.id),
+      treasuryAccountCode: treasury.glAccountCode,
+      memo,
+      journalId: new Types.ObjectId(journal.id),
+      journalNumber: journal.entryNumber,
+      createdBy: new Types.ObjectId(actor.userId),
+    });
+
+    const [updated] = await this.publicOpeningDues(customer._id);
+    return updated!;
+  }
+
+  private async publicOpeningDues(
+    customerId?: Types.ObjectId,
+  ): Promise<PublicCustomerOpeningDue[]> {
+    const dues = await this.computeCustomerOpeningDues(customerId);
+    return dues.map((due) => ({
+      customerId: due.customerId,
+      customerName: due.customerName,
+      openingDate: due.date.toISOString(),
+      journalNumber: due.journalNumber,
+      openingAmount: fromMinorUnits(due.openingMinor),
+      receivedAmount: fromMinorUnits(due.receivedMinor),
+      openAmount: fromMinorUnits(Math.max(0, due.openMinor)),
+    }));
+  }
+
+  private async computeCustomerOpeningDues(customerId?: Types.ObjectId): Promise<
+    Array<{
+      customerId: string;
+      customerName: string;
+      date: Date;
+      journalNumber: string;
+      openingMinor: number;
+      receivedMinor: number;
+      openMinor: number;
+    }>
+  > {
+    const [rows, receipts] = await Promise.all([
+      openingPartyRows({
+        entityType: JournalEntityType.CUSTOMER,
+        accountCodes: AR_OPENING_CODES,
+        normal: 'debit',
+        entityId: customerId,
+      }),
+      CustomerOpeningReceiptModel.find({
+        status: CustomerOpeningReceiptStatus.EXECUTED,
+        ...(customerId ? { customerId } : {}),
+      }).exec(),
+    ]);
+
+    const openingByCustomer = sumOpeningByEntity(rows);
+    const receivedByCustomer = new Map<string, number>();
+    for (const receipt of receipts) {
+      const key = receipt.customerId.toString();
+      receivedByCustomer.set(
+        key,
+        (receivedByCustomer.get(key) ?? 0) + receipt.amountMinor,
+      );
+    }
+
+    const firstRow = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      if (!firstRow.has(row.entityId)) firstRow.set(row.entityId, row);
+    }
+
+    const result = [];
+    for (const [id, openingMinor] of openingByCustomer) {
+      if (openingMinor <= 0) continue;
+      const first = firstRow.get(id)!;
+      const receivedMinor = receivedByCustomer.get(id) ?? 0;
+      result.push({
+        customerId: id,
+        customerName: first.entityName,
+        date: first.date,
+        journalNumber: first.journalNumber,
+        openingMinor,
+        receivedMinor,
+        openMinor: openingMinor - receivedMinor,
+      });
+    }
+    return result.sort((a, b) => a.customerName.localeCompare(b.customerName));
   }
 
   async listBills(actor: AuthenticatedUser): Promise<PublicSupplierBill[]> {
@@ -675,6 +910,12 @@ export class ArApService {
         .sort({ executedDate: 1, paymentNumber: 1 })
         .exec(),
     ]);
+    const openingRows = await openingPartyRows({
+      entityType: JournalEntityType.SUPPLIER,
+      accountCodes: AP_OPENING_CODES,
+      normal: 'credit',
+      entityId: supplierOid,
+    });
 
     type LedgerRow = {
       id: string;
@@ -688,6 +929,16 @@ export class ArApService {
     };
 
     const rows: LedgerRow[] = [
+      ...openingRows.map((row) => ({
+        id: `opening-${row.journalId}`,
+        date: row.date,
+        type: ApLedgerEntryType.OPENING,
+        reference: 'Opening balance',
+        poNumber: null,
+        journalNumber: row.journalNumber,
+        amountMinor: Math.abs(row.signedMinor),
+        signedMinor: row.signedMinor,
+      })),
       ...movements.map((row) => ({
         id: row._id.toString(),
         date: row.date,
@@ -735,17 +986,23 @@ export class ArApService {
       if (diff !== 0) {
         return diff;
       }
+      // Opening balance always leads its day so running totals start from it.
+      if (a.type === ApLedgerEntryType.OPENING) return -1;
+      if (b.type === ApLedgerEntryType.OPENING) return 1;
       return a.reference.localeCompare(b.reference);
     });
 
     let running = 0;
+    let opening = 0;
     let purchased = 0;
     let returned = 0;
     let billed = 0;
     let paid = 0;
     const entries = rows.map((row) => {
       running += row.signedMinor;
-      if (row.type === ApLedgerEntryType.RECEIPT) {
+      if (row.type === ApLedgerEntryType.OPENING) {
+        opening += row.signedMinor;
+      } else if (row.type === ApLedgerEntryType.RECEIPT) {
         purchased += row.amountMinor;
       } else if (row.type === ApLedgerEntryType.RETURN) {
         returned += row.amountMinor;
@@ -777,6 +1034,7 @@ export class ArApService {
         name: supplier.name,
         paymentTermsDays: supplier.paymentTermsDays,
       },
+      opening: fromMinorUnits(opening),
       purchased: fromMinorUnits(purchased),
       returned: fromMinorUnits(returned),
       billed: fromMinorUnits(billed),
@@ -794,7 +1052,7 @@ export class ArApService {
       suppliers.map((row) => [row._id.toString(), row.paymentTermsDays]),
     );
 
-    const [movements, bills, payments] = await Promise.all([
+    const [movements, bills, payments, openingRows] = await Promise.all([
       GoodsMovementModel.find().exec(),
       SupplierBillModel.find({
         paymentType: BillPaymentType.CREDIT,
@@ -803,6 +1061,11 @@ export class ArApService {
       SupplierPaymentModel.find({
         status: SupplierPaymentStatus.EXECUTED,
       }).exec(),
+      openingPartyRows({
+        entityType: JournalEntityType.SUPPLIER,
+        accountCodes: AP_OPENING_CODES,
+        normal: 'credit',
+      }),
     ]);
 
     const paidBySupplier = new Map<string, number>();
@@ -819,6 +1082,19 @@ export class ArApService {
       dueDate: string;
       openAmount: number;
     }> = [];
+
+    // Oldest first, so payments settle go-live dues before newer purchases.
+    for (const row of openingRows) {
+      if (row.signedMinor <= 0) continue;
+      lines.push({
+        id: `opening-${row.journalId}-${row.entityId}`,
+        reference: `Opening ${row.journalNumber}`,
+        partyName: row.entityName,
+        date: row.date.toISOString(),
+        dueDate: row.date.toISOString(),
+        openAmount: fromMinorUnits(row.signedMinor),
+      });
+    }
 
     for (const row of movements) {
       const supplierKey = row.supplierId.toString();
@@ -1030,7 +1306,7 @@ export class ArApService {
     const supplierIdFilter = {
       $or: [{ supplierId }, { supplierId: supplierId.toString() }],
     };
-    const [movements, bills, payments] = await Promise.all([
+    const [movements, bills, payments, openingRows] = await Promise.all([
       GoodsMovementModel.find({
         $or: [{ supplierId }, { supplierId: supplierId.toString() }],
       }).exec(),
@@ -1044,9 +1320,15 @@ export class ArApService {
         ...supplierIdFilter,
         status: SupplierPaymentStatus.EXECUTED,
       }).exec(),
+      openingPartyRows({
+        entityType: JournalEntityType.SUPPLIER,
+        accountCodes: AP_OPENING_CODES,
+        normal: 'credit',
+        entityId: supplierId,
+      }),
     ]);
 
-    let outstanding = 0;
+    let outstanding = openingRows.reduce((sum, row) => sum + row.signedMinor, 0);
     for (const row of movements) {
       outstanding +=
         row.type === VendorLedgerType.RECEIPT
@@ -1227,6 +1509,32 @@ export class ArApService {
         `Cannot reverse journal: bill ${bill.billNumber} is paid.`,
       );
     }
+
+    const journal = await JournalEntryModel.findById(journalObjectId)
+      .select('journalType lines.entityType lines.entityId lines.accountCode')
+      .lean()
+      .exec();
+    if (journal?.journalType === 'opening_balance') {
+      const customerIds = journal.lines
+        .filter(
+          (line) =>
+            line.entityType === JournalEntityType.CUSTOMER &&
+            line.entityId &&
+            line.accountCode === SystemAccountCode.ACCOUNTS_RECEIVABLE,
+        )
+        .map((line) => line.entityId!);
+      if (customerIds.length > 0) {
+        const receipt = await CustomerOpeningReceiptModel.findOne({
+          customerId: { $in: customerIds },
+          status: CustomerOpeningReceiptStatus.EXECUTED,
+        }).exec();
+        if (receipt) {
+          throw badRequest(
+            `Cannot reverse opening balance: ${receipt.customerName} already has opening receipt ${receipt.receiptNumber}. Reverse that receipt first.`,
+          );
+        }
+      }
+    }
   }
 
   async voidLinkedToJournal(journalId: string, _userId: string): Promise<void> {
@@ -1268,6 +1576,14 @@ export class ArApService {
       },
       { $set: { status: SupplierPaymentStatus.CANCELLED } },
     ).exec();
+
+    await CustomerOpeningReceiptModel.updateMany(
+      {
+        journalId: journalObjectId,
+        status: CustomerOpeningReceiptStatus.EXECUTED,
+      },
+      { $set: { status: CustomerOpeningReceiptStatus.CANCELLED } },
+    ).exec();
   }
 
   /**
@@ -1294,6 +1610,9 @@ export class ArApService {
         .filter((line) => (line.credit ?? 0) > 0)
         .map((line) => line.accountCode.trim().toUpperCase()),
     );
+    if (journal.isPdc && journal.intendedBankAccountCode) {
+      creditCodes.add(journal.intendedBankAccountCode.toUpperCase());
+    }
     const treasury =
       treasuryAccounts.find((row) =>
         creditCodes.has(row.glAccountCode.toUpperCase()),

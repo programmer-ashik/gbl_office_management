@@ -35,7 +35,8 @@ const RULES_BY_CODE: Record<string, DimensionRule> = {
   [SystemAccountCode.EMPLOYEE_ADVANCES]: {
     entityType: JournalEntityType.EMPLOYEE,
     entityRequired: true,
-    projectRequired: true,
+    // Office / general staff advances are not tied to a project; tag one when relevant.
+    projectRequired: false,
     label: 'Employee Advances',
   },
   [SystemAccountCode.EMPLOYEE_PAYABLES]: {
@@ -124,6 +125,8 @@ export function assertManualLineDimensions(input: {
   entityId?: string | null;
   projectId?: string | null;
   headerProjectId?: string | null;
+  /** Opening balances carry old dues that are often not tied to a project. */
+  skipProjectRequirement?: boolean;
 }): void {
   const rule = dimensionRuleForAccount(input.accountCode);
   const projectId = input.projectId || input.headerProjectId || null;
@@ -141,7 +144,7 @@ export function assertManualLineDimensions(input: {
     }
   }
 
-  if (rule.projectRequired && !projectId) {
+  if (rule.projectRequired && !projectId && !input.skipProjectRequirement) {
     throw badRequest(`${rule.label} (${input.accountCode}) requires a project`);
   }
 }

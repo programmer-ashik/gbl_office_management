@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf'
-import autoTable from 'jspdf-autotable'
+import autoTable, { type CellHookData } from 'jspdf-autotable'
 
 export type ReportBranding = {
   companyName: string
@@ -7,11 +7,23 @@ export type ReportBranding = {
   logoDataUrl: string | null
 }
 
+export type ReportSection = {
+  title: string
+  rows: string[][]
+  totals?: string[][]
+}
+
 export type ReportExport = {
   title: string
   filters: Array<{ label: string; value: string }>
   headers: string[]
   rows: string[][]
+  /** When set, rows are printed grouped under these headings instead of `rows`. */
+  sections?: ReportSection[]
+  /** Column indexes printed right-aligned (amounts). */
+  rightAlign?: number[]
+  /** Row indexes that start a group (e.g. a journal); groups get a divider and alternate shading. */
+  groupStarts?: number[]
   totals?: string[][]
   branding?: ReportBranding
 }
@@ -19,13 +31,20 @@ export type ReportExport = {
 const NAVY: [number, number, number] = [15, 39, 68]
 
 export function downloadReportCsv(input: ReportExport): void {
+  const bodyRows = input.sections
+    ? input.sections.flatMap((section) => [
+        [section.title],
+        ...section.rows,
+        ...(section.totals ?? []),
+      ])
+    : input.rows
   const lines = [
     input.branding?.companyName ?? '',
     input.title,
     ...input.filters.map((row) => `${row.label},${csvCell(row.value)}`),
     '',
     input.headers.map(csvCell).join(','),
-    ...input.rows.map((row) => row.map(csvCell).join(',')),
+    ...bodyRows.map((row) => row.map(csvCell).join(',')),
     ...(input.totals ?? []).map((row) => row.map(csvCell).join(',')),
     '',
     input.branding?.address ?? '',
@@ -76,12 +95,68 @@ export function buildReportPdf(input: ReportExport): jsPDF {
   doc.text(wrapped, 14, y)
   y += wrapped.length * 4 + 4
 
+  const sectionStyle = {
+    fontStyle: 'bold' as const,
+    fillColor: [226, 232, 240] as [number, number, number],
+    textColor: NAVY,
+  }
+  const totalStyle = {
+    fontStyle: 'bold' as const,
+    fillColor: [241, 245, 249] as [number, number, number],
+  }
+  const styled = (rows: string[][]) =>
+    rows.map((row) => row.map((content) => ({ content, styles: totalStyle })))
+  const body = input.sections
+    ? [
+        ...input.sections.flatMap((section) => [
+          [
+            {
+              content: section.title,
+              colSpan: input.headers.length,
+              styles: sectionStyle,
+            },
+          ],
+          ...section.rows,
+          ...styled(section.totals ?? []),
+        ]),
+        ...styled(input.totals ?? []),
+      ]
+    : [...input.rows, ...(input.totals ?? [])]
+
+  const starts = new Set(input.sections ? [] : (input.groupStarts ?? []))
+  const groupOfRow: number[] = []
+  let group = -1
+  input.rows.forEach((_, index) => {
+    if (starts.has(index)) group += 1
+    groupOfRow[index] = group
+  })
+
   autoTable(doc, {
     startY: y,
     head: [input.headers],
-    body: [...input.rows, ...(input.totals ?? [])],
+    body,
+    columnStyles: Object.fromEntries(
+      (input.rightAlign ?? []).map((index) => [index, { halign: 'right' as const }]),
+    ),
     styles: { fontSize: 8 },
     headStyles: { fillColor: NAVY, textColor: 255 },
+    ...(starts.size
+      ? {
+          alternateRowStyles: {},
+          didParseCell: (data: CellHookData) => {
+            if (data.section !== 'body' || data.row.index >= input.rows.length) return
+            const current = groupOfRow[data.row.index] ?? 0
+            data.cell.styles.fillColor =
+              current % 2 === 1 ? [241, 245, 249] : [255, 255, 255]
+          },
+          didDrawCell: (data: CellHookData) => {
+            if (data.section !== 'body' || !starts.has(data.row.index)) return
+            doc.setDrawColor(...NAVY)
+            doc.setLineWidth(0.3)
+            doc.line(data.cell.x, data.cell.y, data.cell.x + data.cell.width, data.cell.y)
+          },
+        }
+      : {}),
     margin: { left: 14, right: 14, bottom: 18 },
     didDrawPage: () => {
       const page = doc.getNumberOfPages()

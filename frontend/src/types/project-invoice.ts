@@ -25,6 +25,8 @@ export type InvoiceTextBox = {
 }
 
 export type ProjectInvoiceDraft = {
+  /** Heading printed at the top of the sheet and PDF. */
+  documentTitle: string
   invoiceNumber: string
   invoiceId: string | null
   date: string
@@ -43,7 +45,7 @@ export type ProjectInvoiceDraft = {
   address: string
   taxRate: number
   discountRate: number
-  /** Flat = base × rate%. Reverse = base × rate / (100 + rate) (inclusive extract). */
+  /** Flat = VAT added on top. Reverse = gross-up: net ÷ ((100 − rate) ÷ 100). */
   percentMode: 'flat' | 'reverse'
   note: string
   showPaymentMethods: boolean
@@ -190,48 +192,114 @@ export function lineTotal(line: InvoiceLine): number {
   return Number((line.unitPrice * line.quantity).toFixed(2))
 }
 
-export function applyPercent(
-  base: number,
-  rate: number,
-  mode: 'flat' | 'reverse' = 'flat',
-): number {
-  if (!rate || rate <= 0 || !base) return 0
-  if (mode === 'reverse') {
-    return Number(((base * rate) / (100 + rate)).toFixed(2))
-  }
-  return Number(((base * rate) / 100).toFixed(2))
+function round2(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
+/** Same VAT & Tax rate quotations use (net 100 → tax 17.65 → total 117.65). */
+export const DEFAULT_INVOICE_VAT_RATE = 15
+
+/** Quotation gross-up: grand = net ÷ ((100 − rate) ÷ 100), tax = grand − net. */
+export function grossUpTotals(netAmount: number, vatRate: number) {
+  const net = round2(netAmount)
+  const divisor = (100 - Math.max(vatRate || 0, 0)) / 100
+  const grandTotal = divisor > 0 ? round2(net / divisor) : net
+  return { net, taxAmount: round2(grandTotal - net), grandTotal }
+}
+
+/**
+ * Both modes:
+ *   discount      = subtotal × discountRate ÷ 100
+ *   taxableAmount = subtotal − discount          (known net amount)
+ * Flat (VAT added on top):
+ *   taxAmount  = taxableAmount × vatRate ÷ 100
+ *   grandTotal = taxableAmount + taxAmount
+ * Reverse (gross-up — VAT is vatRate% of the grand total):
+ *   divisor    = (100 − vatRate) ÷ 100
+ *   grandTotal = taxableAmount ÷ divisor
+ *   taxAmount  = grandTotal − taxableAmount
+ */
 export function invoiceTotals(draft: ProjectInvoiceDraft) {
-  const subtotal = draft.lines.reduce((sum, line) => sum + lineTotal(line), 0)
-  const mode = draft.percentMode === 'reverse' ? 'reverse' : 'flat'
-  const tax = applyPercent(subtotal, draft.taxRate, mode)
-  const discount = applyPercent(subtotal, draft.discountRate, mode)
-  // Flat: tax is added on top. Reverse: tax is extracted from an inclusive
-  // subtotal, so grand total must not add tax again.
-  const grandTotal = Number(
-    (mode === 'reverse'
-      ? subtotal - discount
-      : subtotal + tax - discount
-    ).toFixed(2),
+  const subtotal = round2(
+    draft.lines.reduce((sum, line) => sum + lineTotal(line), 0),
   )
-  return { subtotal, tax, discount, grandTotal, percentMode: mode }
+  const mode = draft.percentMode === 'flat' ? 'flat' : 'reverse'
+  const vatRate = Math.max(Number(draft.taxRate) || 0, 0)
+  const discountRate = Math.max(Number(draft.discountRate) || 0, 0)
+
+  const discount = round2((subtotal * discountRate) / 100)
+  const taxableAmount = round2(subtotal - discount)
+
+  const grandTotal =
+    mode === 'reverse'
+      ? grossUpTotals(taxableAmount, vatRate).grandTotal
+      : round2(taxableAmount + (taxableAmount * vatRate) / 100)
+  const taxAmount = round2(grandTotal - taxableAmount)
+
+  return {
+    subtotal,
+    discount,
+    taxableAmount,
+    taxAmount,
+    grandTotal,
+    percentMode: mode,
+  }
+}
+
+export type InvoiceSummaryRow = {
+  label: string
+  amount: number
+  negative?: boolean
+}
+
+/** Summary rows shared by the on-screen invoice and the PDF (no "reverse" wording). */
+export function invoiceSummaryRows(
+  draft: ProjectInvoiceDraft,
+): InvoiceSummaryRow[] {
+  const totals = invoiceTotals(draft)
+  const rows: InvoiceSummaryRow[] = [
+    { label: 'SUBTOTAL', amount: totals.subtotal },
+  ]
+  rows.push({
+    label: `Discount (${draft.discountRate || 0}%)`,
+    amount: totals.discount,
+    negative: true,
+  })
+  if (totals.discount > 0) {
+    rows.push({ label: 'Taxable amount', amount: totals.taxableAmount })
+  }
+  rows.push({
+    label: `VAT & Tax (${draft.taxRate || 0}%)`,
+    amount: totals.taxAmount,
+  })
+  return rows
 }
 
 export function draftStorageKey(projectId: string): string {
-  return `gbl-project-invoice:v7:${projectId}`
+  return `gbl-project-invoice:v9:${projectId}`
 }
 
-/** Prefer v7; fall back to prior keys so existing local drafts still load. */
+/**
+ * Prefer v9; fall back to prior keys so existing local drafts still load.
+ * Older drafts may carry flat tax, so they move to the quotation gross-up.
+ */
 export function readStoredInvoiceDraft(projectId: string): string | null {
-  const keys = [
-    draftStorageKey(projectId),
+  const current = localStorage.getItem(draftStorageKey(projectId))
+  if (current) return current
+  const legacyKeys = [
+    `gbl-project-invoice:v8:${projectId}`,
+    `gbl-project-invoice:v7:${projectId}`,
     `gbl-project-invoice:v6:${projectId}`,
     `gbl-project-invoice:v5:${projectId}`,
   ]
-  for (const key of keys) {
+  for (const key of legacyKeys) {
     const raw = localStorage.getItem(key)
-    if (raw) return raw
+    if (!raw) continue
+    try {
+      return JSON.stringify({ ...JSON.parse(raw), percentMode: 'reverse' })
+    } catch {
+      return raw
+    }
   }
   return null
 }
@@ -244,11 +312,22 @@ export const defaultColumnWidths = {
   total: 18,
 } as const
 
+export const DEFAULT_INVOICE_TITLE = 'INVOICE / BILL'
+
+export const INVOICE_TITLE_OPTIONS = [
+  'INVOICE / BILL',
+  'INVOICE',
+  'BILL',
+  'TAX INVOICE',
+  'PROFORMA INVOICE',
+] as const
+
 export const DEFAULT_INVOICE_NOTE =
   'ALL PAYMENTS MUST BE MADE IN FULL WITHIN 30 DAYS. CONTACT FOR SUPPORT. THANK YOU FOR YOUR BUSINESS.'
 
 export function defaultInvoiceExtras(): Pick<
   ProjectInvoiceDraft,
+  | 'documentTitle'
   | 'showPaymentMethods'
   | 'paymentPaypal'
   | 'acceptCard'
@@ -260,6 +339,7 @@ export function defaultInvoiceExtras(): Pick<
   | 'note'
 > {
   return {
+    documentTitle: DEFAULT_INVOICE_TITLE,
     note: DEFAULT_INVOICE_NOTE,
     showPaymentMethods: false,
     paymentPaypal: '',
@@ -286,7 +366,12 @@ export function normalizeInvoiceDraft(
     ...raw,
     currencyCode: currency.code,
     currency: currency.symbol,
-    percentMode: raw.percentMode === 'reverse' ? 'reverse' : 'flat',
+    percentMode: raw.percentMode === 'flat' ? 'flat' : 'reverse',
+    taxRate: Number.isFinite(Number(raw.taxRate))
+      ? Number(raw.taxRate)
+      : DEFAULT_INVOICE_VAT_RATE,
+    documentTitle:
+      typeof raw.documentTitle === 'string' ? raw.documentTitle : extras.documentTitle,
     note: raw.note?.trim() ? raw.note : extras.note,
     showPaymentMethods: Boolean(raw.showPaymentMethods),
     acceptCard: raw.acceptCard !== false,

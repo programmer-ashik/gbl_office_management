@@ -51,18 +51,10 @@ export function buildQuotationPdf(quotation: Quotation): jsPDF {
   doc.setFontSize(10)
   doc.setTextColor(...INK)
   doc.text('Client', margin, y)
-  doc.text('Project', pageWidth / 2, y)
   y += 5
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
   doc.text(quotation.clientInfo.name, margin, y)
-  doc.text(
-    quotation.projectCode
-      ? quotation.projectName || quotation.projectCode || '—'
-      : '—',
-    pageWidth / 2,
-    y,
-  )
   y += 4
   if (quotation.clientInfo.company) {
     doc.text(quotation.clientInfo.company, margin, y)
@@ -119,8 +111,33 @@ export function buildQuotationPdf(quotation: Quotation): jsPDF {
   }
 
   y += 6
+  const pageHeight = doc.internal.pageSize.getHeight()
+  const notes = quotation.notes?.trim()
+  if (notes) {
+    const noteLines = doc.splitTextToSize(notes, pageWidth - margin * 2)
+    if (y + 8 + noteLines.length * 3.5 > pageHeight - margin) {
+      doc.addPage()
+      y = margin
+    }
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor(...INK)
+    doc.text('Notes', margin, y)
+    y += 4
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(...MUTED)
+    doc.text(noteLines, margin, y)
+    y += noteLines.length * 3.5 + 6
+  }
+
+  if (y + 20 > pageHeight - margin) {
+    doc.addPage()
+    y = margin
+  }
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(9)
+  doc.setTextColor(...INK)
   doc.text('Terms & Conditions', margin, y)
   y += 4
   doc.setFont('helvetica', 'normal')

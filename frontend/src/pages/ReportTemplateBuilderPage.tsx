@@ -43,6 +43,8 @@ import {
 import {
   clearJournalVoucherTemplateCache,
   amountInWords,
+  voucherLineItems,
+  voucherPaymentMethod,
 } from "../utils/journalVoucherPdf";
 import { type JournalEntry } from "../types/accounting";
 
@@ -150,7 +152,7 @@ function sampleJournalEntry(): JournalEntry {
         accountName: "Cash in Hand",
         debit: 0,
         credit: 3499.5,
-        description: "Cash payment",
+        description: null,
         projectId: null,
         entityType: null,
         entityId: null,
@@ -167,25 +169,23 @@ function JournalVoucherPreview({
   template: BalanceSheetTemplate;
   previewKind: "debit" | "credit";
 }) {
-  const entry = useMemo(() => sampleJournalEntry(), []);
+  const entry = useMemo(() => {
+    const sample = sampleJournalEntry();
+    if (previewKind === "debit") return sample;
+    return {
+      ...sample,
+      lines: sample.lines.map((l) => ({ ...l, debit: l.credit, credit: l.debit })),
+    };
+  }, [previewKind]);
   const vc: VoucherConfig = {
     ...defaultVoucherConfig(),
     ...(template.voucherConfig ?? {}),
   };
   const d = entry.date.slice(0, 10).split("-");
-  const items = entry.lines
-    .filter((l) => (previewKind === "debit" ? l.debit > 0 : l.credit > 0))
-    .map((l, i) => {
-      const amt = previewKind === "debit" ? l.debit : l.credit;
-      const whole = Math.floor(amt);
-      const cents = Math.round((amt - whole) * 100);
-      return {
-        id: String(i),
-        description: l.description || `${l.accountCode} · ${l.accountName}`,
-        major: whole.toLocaleString("en-US"),
-        minor: String(cents).padStart(2, "0"),
-      };
-    });
+  const items = voucherLineItems(entry, previewKind).map((item, i) => ({
+    id: String(i),
+    ...item,
+  }));
 
   return (
     <div className='tpl-voucher-preview-wrap'>
@@ -198,7 +198,7 @@ function JournalVoucherPreview({
         day={d[2] ?? ""}
         month={d[1] ?? ""}
         year={d[0] ?? ""}
-        receivedBy=''
+        paymentMethod={voucherPaymentMethod(entry, previewKind)}
         partyName={
           entry.lines.find((l) => l.entityName)?.entityName ??
           "Sample Party Ltd."

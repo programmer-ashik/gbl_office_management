@@ -20,10 +20,14 @@ export const SystemAccountCode = {
   NAGAD: '1132',
   ACCOUNTS_RECEIVABLE: '1151',
   ALLOWANCE_DOUBTFUL: '1159',
+  /** Incoming customer cheques dated in the future (clearing account). */
+  PDC_RECEIVABLE: '1152',
   EMPLOYEE_ADVANCES: '1161',
   INVENTORY: '1141',
   SITE_STOCK: '1142',
   ACCOUNTS_PAYABLE: '2111',
+  /** Outgoing supplier cheques dated in the future (clearing account). */
+  PDC_PAYABLE: '2112',
   SUBCONTRACTOR_PAYABLE: '2113',
   EMPLOYEE_PAYABLES: '2121',
   SOURCE_TAX_PAYABLE: '2131',

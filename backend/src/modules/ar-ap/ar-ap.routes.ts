@@ -14,6 +14,7 @@ import {
   CreateSupplierBillDto,
   CreateSupplierPaymentDto,
   ExecuteSupplierPaymentDto,
+  ReceiveOpeningDueDto,
 } from './dto/ar-ap.dto';
 
 const FINANCE = [Role.ADMIN, Role.ACCOUNTANT] as const;
@@ -56,6 +57,41 @@ export function createReceivablesRouter(
         req.user!,
       );
       sendSuccess(res, report, 'AR aging report generated');
+    }),
+  );
+
+  router.get(
+    '/opening-dues',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const rows = await arApService.listCustomerOpeningDues(req.user!);
+      sendSuccess(res, rows, 'Customer opening dues retrieved successfully');
+    }),
+  );
+
+  router.get(
+    '/opening-dues/receipts',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const rows = await arApService.listCustomerOpeningReceipts(req.user!);
+      sendSuccess(res, rows, 'Opening due receipts retrieved successfully');
+    }),
+  );
+
+  router.post(
+    '/opening-dues/:customerId/receive',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(ReceiveOpeningDueDto),
+    asyncHandler(async (req, res) => {
+      const row = await arApService.receiveCustomerOpeningDue(
+        String(req.params.customerId),
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Opening due receipt recorded successfully', 201);
     }),
   );
 

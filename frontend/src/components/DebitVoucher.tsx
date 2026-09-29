@@ -84,7 +84,8 @@ export type DebitCreditVoucherProps = {
   day: string;
   month: string;
   year: string;
-  receivedBy?: string;
+  /** Hand Cash, Cash in Bank (…), Mobile Banking (…). */
+  paymentMethod?: string;
   /** Debit: Paid to; Credit: Received from */
   partyLabel?: string;
   partyName?: string;
@@ -145,7 +146,7 @@ export function DebitCreditVoucherView({
   day,
   month,
   year,
-  receivedBy = "",
+  paymentMethod = "",
   partyLabel,
   partyName = "",
   currencyLabel = "Amount in BDT",
@@ -184,7 +185,7 @@ export function DebitCreditVoucherView({
 
   return (
     <div
-      className={`w-full max-w-[920px] bg-white overflow-hidden border border-slate-200 ${className}`}
+      className={`voucher-sheet w-full max-w-[920px] bg-white overflow-hidden border border-slate-200 ${className}`}
       style={{ minHeight: 540, ...style }}
     >
       <div className='flex flex-col md:flex-row h-full min-h-[540px]'>
@@ -338,10 +339,10 @@ export function DebitCreditVoucherView({
               </div>
               <div className='flex items-baseline space-x-2 text-xs'>
                 <span className='font-semibold text-slate-800 whitespace-nowrap'>
-                  Received By:
+                  Payment Method:
                 </span>
-                <div className='flex-1 border-b border-slate-400 pb-0.5 font-medium text-slate-800 min-h-[1.1rem]'>
-                  {receivedBy}
+                <div className='flex-1 border-b border-slate-400 pb-0.5 font-bold text-slate-800 min-h-[1.1rem]'>
+                  {paymentMethod}
                 </div>
               </div>
             </div>
@@ -367,48 +368,40 @@ export function DebitCreditVoucherView({
                 </div>
               </div>
 
-              <div className='grid grid-cols-12 min-h-[160px]'>
-                <div className='col-span-8 p-3 space-y-2 text-xs relative'>
-                  <span className='text-[10px] font-semibold text-slate-500 block mb-1'>
-                    Being the amount
-                  </span>
-                  <div className='space-y-2.5'>
-                    {items.map((item) => (
-                      <div
-                        key={item.id}
-                        className='border-b border-slate-200 pb-1 text-slate-800 text-xs'
-                      >
+              <div className='min-h-[160px] flex flex-col text-xs'>
+                {items.map((item) => (
+                  <div key={item.id} className='grid grid-cols-12'>
+                    <div className='col-span-8 px-3 pt-2.5'>
+                      <div className='border-b border-slate-200 pb-1 text-slate-800 whitespace-normal break-words'>
                         {item.description || "—"}
                       </div>
-                    ))}
-                    {Array.from({ length: blankRows }).map((_, i) => (
-                      <div
-                        key={`blank-${i}`}
-                        className='border-b border-slate-200 h-5'
-                      />
-                    ))}
-                  </div>
-                </div>
-                <div className='col-span-4 border-l border-slate-400 grid grid-cols-2 font-mono text-xs'>
-                  <div className='border-r border-slate-300 p-2 text-right space-y-2.5'>
-                    {items.map((item) => (
-                      <div
-                        key={`${item.id}-m`}
-                        className='h-5 flex items-center justify-end font-semibold'
-                      >
+                    </div>
+                    <div className='col-span-4 border-l border-slate-400 grid grid-cols-2 font-mono'>
+                      <div className='border-r border-slate-300 px-2 pt-2.5 text-right font-semibold'>
                         {item.major || "0"}
                       </div>
-                    ))}
-                  </div>
-                  <div className='p-2 text-right space-y-2.5'>
-                    {items.map((item) => (
-                      <div
-                        key={`${item.id}-c`}
-                        className='h-5 flex items-center justify-end text-slate-600'
-                      >
+                      <div className='px-2 pt-2.5 text-right text-slate-600'>
                         {item.minor || "00"}
                       </div>
-                    ))}
+                    </div>
+                  </div>
+                ))}
+                {Array.from({ length: blankRows }).map((_, i) => (
+                  <div key={`blank-${i}`} className='grid grid-cols-12'>
+                    <div className='col-span-8 px-3 pt-2.5'>
+                      <div className='border-b border-slate-200 h-5' />
+                    </div>
+                    <div className='col-span-4 border-l border-slate-400 grid grid-cols-2'>
+                      <div className='border-r border-slate-300' />
+                      <div />
+                    </div>
+                  </div>
+                ))}
+                <div className='grid grid-cols-12 flex-1'>
+                  <div className='col-span-8' />
+                  <div className='col-span-4 border-l border-slate-400 grid grid-cols-2'>
+                    <div className='border-r border-slate-300' />
+                    <div />
                   </div>
                 </div>
               </div>

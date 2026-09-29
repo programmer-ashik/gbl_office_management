@@ -25,6 +25,7 @@ import {
   voucherKindTitle,
 } from "../utils/journalVoucherPdf";
 import { VoucherPdfPreview } from "../components/VoucherPdfPreview";
+import { lineCounterpart, lineDescription } from "../utils/journalNarrative";
 
 async function getJvTemplate() {
   return loadJournalVoucherTemplate(() => api.journalVoucherTemplate(), {
@@ -161,10 +162,9 @@ export function JournalDetailPage() {
     ? (projects.find((project) => project.id === entry.projectId)?.code ??
       "Tagged")
     : "—";
+  const type = entry.effectiveType ?? entry.journalType;
   const typeLabel =
-    JOURNAL_TYPE_LABEL[entry.journalType as JournalType] ??
-    entry.journalType ??
-    "General";
+    JOURNAL_TYPE_LABEL[type as JournalType] ?? type ?? "General";
   const voucherKind = resolveVoucherKind(entry);
   const voucherTitle = voucherKindTitle(voucherKind);
 
@@ -268,6 +268,50 @@ export function JournalDetailPage() {
           </p>
         </div>
         <p>{entry.memo}</p>
+        {entry.chequeNumber || entry.isPdc || entry.pdcClearsEntryId ? (
+          <p className='muted'>
+            {entry.pdcClearsEntryId ? (
+              <>
+                Clears post-dated cheque{" "}
+                <Link to={`/journals/${entry.pdcClearsEntryId}`}>
+                  {entry.reference ?? "journal"}
+                </Link>
+                {entry.chequeNumber ? ` · Cheque ${entry.chequeNumber}` : ""}
+              </>
+            ) : (
+              <>
+                Cheque {entry.chequeNumber ?? "—"}
+                {entry.chequeDate ? ` · dated ${entry.chequeDate}` : ""}
+                {entry.isPdc ? (
+                  <>
+                    {" "}
+                    · PDC <strong>{entry.pdcStatus}</strong>
+                    {entry.intendedBankAccountCode
+                      ? ` · clears to ${entry.intendedBankAccountCode}`
+                      : ""}
+                    {entry.pdcClearingEntryId ? (
+                      <>
+                        {" "}
+                        ·{" "}
+                        <Link to={`/journals/${entry.pdcClearingEntryId}`}>
+                          clearing journal
+                        </Link>
+                      </>
+                    ) : null}
+                  </>
+                ) : entry.pdcStatus === "Bounced" ? (
+                  <>
+                    {" "}
+                    · <strong>Bounced</strong>
+                  </>
+                ) : null}
+                {entry.pdcBounceReason ? ` · ${entry.pdcBounceReason}` : ""}
+                {" · "}
+                <Link to='/banking/cheques'>Cheque register</Link>
+              </>
+            )}
+          </p>
+        ) : null}
       </section>
 
       <section className='table-card'>
@@ -281,6 +325,7 @@ export function JournalDetailPage() {
                 <th>Account</th>
                 <th>Entity</th>
                 <th>Project</th>
+                <th>Ledger Head</th>
                 <th>Description</th>
                 <th className='num'>Debit</th>
                 <th className='num'>Credit</th>
@@ -306,8 +351,14 @@ export function JournalDetailPage() {
                         )?.name ?? "Tagged")
                       : "—"}
                   </td>
+                  <td className='ledger-reference-cell'>
+                    {lineCounterpart(entry, line) || "—"}
+                  </td>
                   <td>
-                    <ExpandableText text={line.description} maxChars={48} />
+                    <ExpandableText
+                      text={lineDescription(entry, line)}
+                      maxChars={48}
+                    />
                   </td>
                   <td className='num amount-debit-cell'>
                     {line.debit > 0 ? money(line.debit) : "—"}
@@ -320,7 +371,7 @@ export function JournalDetailPage() {
             </tbody>
             <tfoot>
               <tr>
-                <th colSpan={4}>Totals</th>
+                <th colSpan={5}>Totals</th>
                 <th className='num'>{money(entry.totalDebit)}</th>
                 <th className='num'>{money(entry.totalCredit)}</th>
               </tr>

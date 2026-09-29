@@ -37,7 +37,11 @@ export function AdvanceDetailPage() {
   const [saving, setSaving] = useState(false)
 
   const isFinance = user?.role === Role.ADMIN || user?.role === Role.ACCOUNTANT
-  const isOwner = Boolean(user && row && user.id === row.employeeId)
+  const isOwner = Boolean(
+    user &&
+      row &&
+      (row.employeeId === user.employeeId || row.employeeId === user.id),
+  )
 
   async function load() {
     if (!id) {

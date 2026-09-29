@@ -13,7 +13,11 @@ import { BankingReconciliationPage } from './pages/BankingReconciliationPage'
 import { BankingTransfersPage } from './pages/BankingTransfersPage'
 import { CashFlowAnalyticsPage } from './pages/CashFlowAnalyticsPage'
 import { ChartOfAccountsPage } from './pages/ChartOfAccountsPage'
+import { ChequeBooksPage } from './pages/ChequeBooksPage'
+import { ChequeEntryPage } from './pages/ChequeEntryPage'
+import { ChequeRegisterPage } from './pages/ChequeRegisterPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { EmployeeDetailPage } from './pages/EmployeeDetailPage'
 import { EmployeesPage } from './pages/EmployeesPage'
 import { UsersPermissionsPage } from './pages/UsersPermissionsPage'
 import { InvoiceDetailPage } from './pages/InvoiceDetailPage'
@@ -135,6 +139,9 @@ export default function App() {
 
             <Route path="/banking" element={<BankingPage />} />
             <Route path="/banking/transfers" element={<BankingTransfersPage />} />
+            <Route path="/banking/cheques" element={<ChequeRegisterPage />} />
+            <Route path="/banking/cheques/new" element={<ChequeEntryPage />} />
+            <Route path="/banking/cheque-books" element={<ChequeBooksPage />} />
             <Route
               path="/banking/reconciliation"
               element={<BankingReconciliationPage />}
@@ -163,6 +170,7 @@ export default function App() {
               path="/procurement/products/select"
               element={<PurchaseOrderProductSelectPage />}
             />
+            
             <Route path="/procurement/catalog" element={<ProcurementCatalogPage />} />
             <Route path="/procurement/vendors" element={<VendorsPage />} />
             <Route path="/procurement/:id" element={<PurchaseOrderDetailPage />} />
@@ -190,6 +198,7 @@ export default function App() {
             />
             <Route path="/payroll/:id" element={<PayrollDetailPage />} />
             <Route path="/employees" element={<EmployeesPage />} />
+            <Route path="/employees/:id" element={<EmployeeDetailPage />} />
             <Route path="/employees/:id/ledger" element={<EmployeeLedgerPage />} />
             <Route
               path="/dashboard/employees/:id/ledger"

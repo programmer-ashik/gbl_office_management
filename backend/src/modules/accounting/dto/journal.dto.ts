@@ -5,10 +5,13 @@ import {
   IsBoolean,
   IsDateString,
   IsIn,
+  IsInt,
   IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -104,9 +107,95 @@ export class PostJournalDto {
   @MaxLength(500)
   overrideReason?: string;
 
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  @MaxLength(40)
+  chequeNumber?: string;
+
+  /** A date after today turns the bank line into a post-dated cheque (PDC). */
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsDateString()
+  chequeDate?: string;
+
+  /** Company chequebook leaf being issued; marked used when the journal posts. */
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsMongoId()
+  chequeLeafId?: string;
+
   @IsArray()
   @ArrayMinSize(2, { message: 'A journal entry needs at least two lines' })
   @ValidateNested({ each: true })
   @Type(() => JournalLineDto)
   lines: JournalLineDto[];
+}
+
+export class ClearPdcDto {
+  /** Clearing (bank settlement) date; defaults to today. */
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsDateString()
+  date?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  @MaxLength(500)
+  memo?: string;
+}
+
+export class BouncePdcDto {
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  @MaxLength(240)
+  reason?: string;
+}
+
+export class CreateChequeBookDto {
+  @IsMongoId()
+  treasuryId: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  @MaxLength(80)
+  bookName?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  @MaxLength(12)
+  prefix?: string;
+
+  /** First leaf number as printed; leading zeros set the padding width. */
+  @IsString()
+  @Matches(/^\d{1,12}$/, { message: 'Start number must contain digits only' })
+  startNumber: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  leafCount: number;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsDateString()
+  receivedDate?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
+export class CancelChequeLeafDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(240)
+  reason: string;
 }

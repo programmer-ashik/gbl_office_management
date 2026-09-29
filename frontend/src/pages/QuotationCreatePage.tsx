@@ -16,6 +16,7 @@ import {
   QUOTATION_STATUS_LABEL,
   QuotationStatus,
   lineTotalPreview,
+  quotationTotalsPreview,
   type Quotation,
 } from "../types/quotation";
 import {
@@ -257,11 +258,11 @@ export function QuotationCreatePage() {
         ),
       0,
     );
-    const tax = Number(((subTotal * (Number(taxRate) || 0)) / 100).toFixed(2));
+    const totals = quotationTotalsPreview(subTotal, Number(taxRate) || 0);
     return {
-      subTotal: Number(subTotal.toFixed(2)),
-      tax,
-      grandTotal: Number((subTotal + tax).toFixed(2)),
+      subTotal: totals.subTotal,
+      tax: totals.taxAmount,
+      grandTotal: totals.grandTotal,
     };
   }, [lines, taxRate]);
 
@@ -819,6 +820,7 @@ export function QuotationCreatePage() {
               <input
                 type='number'
                 min={0}
+                max={99.99}
                 step='0.01'
                 value={taxRate}
                 onChange={(e) => setTaxRate(e.target.value)}

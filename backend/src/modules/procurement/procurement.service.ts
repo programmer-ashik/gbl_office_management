@@ -1318,8 +1318,27 @@ export class ProcurementService {
       );
     }
 
+    // Check every item before consuming any lot, so a short item cannot leave
+    // earlier items deducted without an issue or journal.
+    const items = new Map<string, ItemDocument>();
     for (const [itemId, quantityMilli] of mergedLines) {
       const item = await this.findItemOrFail(itemId);
+      items.set(itemId, item);
+      const [onHand] = await StockLotModel.aggregate<{ milli: number }>([
+        { $match: { warehouseId: warehouse._id, itemId: item._id } },
+        { $group: { _id: null, milli: { $sum: '$remainingMilli' } } },
+      ]);
+      const availableMilli = onHand?.milli ?? 0;
+      if (availableMilli < quantityMilli) {
+        throw badRequest(
+          `Insufficient warehouse quantity for ${item.sku} · ${item.name}: ` +
+            `${fromMilliQty(availableMilli)} ${item.unit} available`,
+        );
+      }
+    }
+
+    for (const [itemId, quantityMilli] of mergedLines) {
+      const item = items.get(itemId)!;
       const consumed = await this.consumeLotsFifo(
         warehouse._id,
         item._id,

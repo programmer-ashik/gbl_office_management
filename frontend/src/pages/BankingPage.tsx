@@ -74,6 +74,9 @@ export function BankingPage() {
           <Link to="/banking/transfers" className="action-link">
             Transfers
           </Link>
+          <Link to="/banking/cheques" className="action-link">
+            Cheques
+          </Link>
           <Link to="/banking/reconciliation" className="action-link">
             Reconciliation
           </Link>

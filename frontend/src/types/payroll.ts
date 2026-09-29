@@ -74,7 +74,8 @@ export type PayrollEmployee = {
   id: string
   name: string
   email: string
-  role: string
+  /** Login role; null when the employee has no software access. */
+  role: string | null
 }
 
 export type TimeLog = {

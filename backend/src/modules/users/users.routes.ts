@@ -10,6 +10,7 @@ import {
   ChangeOwnPasswordDto,
   ResetUserPasswordDto,
 } from './dto/password.dto';
+import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserPermissionsDto } from './dto/update-user-permissions.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
@@ -32,6 +33,17 @@ export function createUsersRouter(
     }),
   );
 
+  router.post(
+    '/',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(CreateUserDto),
+    asyncHandler(async (req, res) => {
+      const user = await usersService.createStandalone(req.body);
+      sendSuccess(res, user, 'User created successfully', 201);
+    }),
+  );
+
   router.get(
     '/me',
     auth,
@@ -39,7 +51,7 @@ export function createUsersRouter(
       const user = await usersService.findByIdOrFail(req.user!.userId);
       sendSuccess(
         res,
-        usersService.toPublicUser(user),
+        await usersService.toPublicUserWithEmployee(user),
         'Current user retrieved successfully',
       );
     }),
@@ -68,9 +80,22 @@ export function createUsersRouter(
       const user = await usersService.findByIdOrFail(String(req.params.id));
       sendSuccess(
         res,
-        usersService.toPublicUser(user),
+        await usersService.toPublicUserWithEmployee(user),
         'User retrieved successfully',
       );
+    }),
+  );
+
+  router.delete(
+    '/:id',
+    auth,
+    requireRoles(Role.ADMIN),
+    asyncHandler(async (req, res) => {
+      const result = await usersService.remove(
+        String(req.params.id),
+        req.user!.userId,
+      );
+      sendSuccess(res, result, 'User deleted successfully');
     }),
   );
 

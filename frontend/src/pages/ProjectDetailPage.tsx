@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { MetricCard } from '../components/MetricCard'
+import { ReportExportMenu } from '../components/ReportExportMenu'
 import { money } from '../types/accounting'
 import {
   PROJECT_STATUS_LABEL,
@@ -13,6 +14,123 @@ import {
   type Quotation,
 } from '../types/quotation'
 import { downloadQuotationPdf } from '../utils/quotationPdf'
+import type { ReportExport, ReportSection } from '../utils/reportExport'
+
+type BreakdownRow = Project['financials']['breakdown'][number]
+
+const COST_CLASSES = ['Revenue', 'Direct cost', 'Other expense'] as const
+
+function breakdownClass(row: BreakdownRow): (typeof COST_CLASSES)[number] {
+  if (row.accountType === 'revenue') return 'Revenue'
+  return row.isDirectCost ? 'Direct cost' : 'Other expense'
+}
+
+function projectFilters(project: Project): ReportExport['filters'] {
+  return [
+    { label: 'Project', value: `${project.code} · ${project.name}` },
+    { label: 'Client', value: project.client.name },
+    { label: 'Status', value: PROJECT_STATUS_LABEL[project.status] },
+    { label: 'Contract value', value: money(project.financials.contractValue) },
+    { label: 'Budget', value: money(project.financials.totalBudget) },
+  ]
+}
+
+function costRevenueExport(project: Project): ReportExport {
+  const { financials } = project
+  const sections: ReportSection[] = COST_CLASSES.map((label) => {
+    const rows = financials.breakdown.filter((row) => breakdownClass(row) === label)
+    const sum = (pick: (row: BreakdownRow) => number) =>
+      rows.reduce((total, row) => total + pick(row), 0)
+    return {
+      title: label,
+      rows: rows.map((row) => [
+        row.date ?? '',
+        row.accountName,
+        money(row.debit ?? 0),
+        money(row.credit ?? 0),
+        money(row.amount),
+      ]),
+      totals: [
+        [
+          '',
+          `${label} total`,
+          money(sum((row) => row.debit ?? 0)),
+          money(sum((row) => row.credit ?? 0)),
+          money(sum((row) => row.amount)),
+        ],
+      ],
+    }
+  }).filter((section) => section.rows.length > 0)
+  const summary = (label: string, amount: number) => ['', label, '', '', money(amount)]
+  return {
+    title: `Project cost and revenue — ${project.name}`,
+    filters: projectFilters(project),
+    headers: ['Date', 'Ledger Head', 'Debit', 'Credit', 'Amount'],
+    rows: sections.flatMap((section) => section.rows),
+    sections,
+    rightAlign: [2, 3, 4],
+    totals: [
+      summary('Recognized revenue', financials.recognizedRevenue),
+      summary('Direct cost', financials.directCost),
+      summary('Other expense', financials.otherExpense),
+      summary('Total cost', financials.totalCost),
+      summary('Gross profit', financials.grossProfit),
+      summary('Net profit', financials.netProfit),
+    ],
+  }
+}
+
+function materialsSummaryExport(project: Project): ReportExport {
+  const rows = project.materialsSummary ?? []
+  return {
+    title: `Project materials by item — ${project.name}`,
+    filters: projectFilters(project),
+    headers: ['SKU', 'Item', 'Qty', 'Avg unit cost', 'Amount'],
+    rows: rows.map((row) => [
+      row.sku,
+      row.name,
+      `${qty(row.quantity)} ${row.unit}`,
+      money(row.unitCost),
+      money(row.amount),
+    ]),
+    rightAlign: [2, 3, 4],
+    totals: [
+      ['', 'Total', '', '', money(rows.reduce((sum, row) => sum + row.amount, 0))],
+    ],
+  }
+}
+
+function materialIssuesExport(project: Project): ReportExport {
+  const rows = project.materialIssues ?? []
+  return {
+    title: `Project material issue history — ${project.name}`,
+    filters: projectFilters(project),
+    headers: ['Date', 'Issue', 'SKU', 'Item', 'Qty', 'Unit cost', 'Amount', 'Journal'],
+    rows: rows.map((row) => [
+      row.date.slice(0, 10),
+      row.issueNumber,
+      row.sku,
+      row.name,
+      `${qty(row.quantity)} ${row.unit}`,
+      money(row.unitCost),
+      money(row.amount),
+      row.journalNumber ?? '',
+    ]),
+    rightAlign: [4, 5, 6],
+    totals: [
+      [
+        '',
+        '',
+        '',
+        'Total',
+        '',
+        '',
+        money(rows.reduce((sum, row) => sum + row.amount, 0)),
+        '',
+      ],
+    ],
+  }
+}
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -237,7 +355,10 @@ export function ProjectDetailPage() {
         </p>
         {(project.materialsSummary?.length ?? 0) > 0 ? (
           <>
-            <h3>By item</h3>
+            <div className="table-head">
+              <h3>By item</h3>
+              <ReportExportMenu payload={() => materialsSummaryExport(project)} />
+            </div>
             <table>
               <thead>
                 <tr>
@@ -264,7 +385,13 @@ export function ProjectDetailPage() {
             </table>
           </>
         ) : null}
-        <h3>Issue history</h3>
+        <div className="table-head">
+          <h3>Issue history</h3>
+          <ReportExportMenu
+            payload={() => materialIssuesExport(project)}
+            disabled={(project.materialIssues?.length ?? 0) === 0}
+          />
+        </div>
         <table>
           <thead>
             <tr>
@@ -309,13 +436,18 @@ export function ProjectDetailPage() {
       </section>
 
       <section className="table-card">
-        <h2>Cost and revenue by account</h2>
+        <div className="table-head">
+          <h2>Cost and revenue by account</h2>
+          <ReportExportMenu
+            payload={() => costRevenueExport(project)}
+            disabled={financials.breakdown.length === 0}
+          />
+        </div>
         <table>
           <thead>
             <tr>
               <th>Date</th>
-              <th>Code</th>
-              <th>Account</th>
+              <th>Ledger Head</th>
               <th>Class</th>
               <th>Debit</th>
               <th>Credit</th>
@@ -326,15 +458,8 @@ export function ProjectDetailPage() {
             {financials.breakdown.map((row) => (
               <tr key={row.accountCode}>
                 <td>{row.date ?? '—'}</td>
-                <td>{row.accountCode}</td>
                 <td>{row.accountName}</td>
-                <td>
-                  {row.accountType === 'revenue'
-                    ? 'Revenue'
-                    : row.isDirectCost
-                      ? 'Direct cost'
-                      : 'Other expense'}
-                </td>
+                <td>{breakdownClass(row)}</td>
                 <td>{money(row.debit ?? 0)}</td>
                 <td>{money(row.credit ?? 0)}</td>
                 <td>{money(row.amount)}</td>
@@ -342,7 +467,7 @@ export function ProjectDetailPage() {
             ))}
             {financials.breakdown.length === 0 ? (
               <tr>
-                <td colSpan={7} className="muted">
+                <td colSpan={6} className="muted">
                   No tagged journals yet. Post a journal with this project selected.
                 </td>
               </tr>

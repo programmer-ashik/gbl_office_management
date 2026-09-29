@@ -128,6 +128,10 @@ export type JournalEntry = {
   memo: string
   reference: string | null
   journalType: string
+  /** Stored type, or the category the API inferred for system/general journals. */
+  effectiveType?: string
+  /** Every Type-filter category the journal belongs to. */
+  typeTags?: string[]
   status: string
   source: string
   projectId: string | null
@@ -139,7 +143,94 @@ export type JournalEntry = {
   approvedAt: string | null
   reversedByEntryId: string | null
   reversesEntryId: string | null
+  chequeNumber?: string | null
+  /** YYYY-MM-DD */
+  chequeDate?: string | null
+  isPdc?: boolean
+  pdcStatus?: PdcStatus
+  intendedBankAccountId?: string | null
+  intendedBankAccountCode?: string | null
+  pdcDirection?: PdcDirection | null
+  pdcClearingEntryId?: string | null
+  pdcClearsEntryId?: string | null
+  pdcSettledAt?: string | null
+  pdcBounceReason?: string | null
   lines: JournalLine[]
+}
+
+export type PdcStatus = 'None' | 'Pending' | 'Cleared' | 'Bounced'
+export type PdcDirection = 'receipt' | 'payment'
+
+/** Cheque register row: journal + derived cheque summary. */
+export type ChequeRegisterRow = JournalEntry & {
+  chequeAmount: number
+  direction: PdcDirection | null
+  bankAccountCode: string | null
+  bankAccountName: string | null
+  partyName: string | null
+  partyType: string | null
+  clearingEntryNumber: string | null
+  reversalEntryNumber: string | null
+}
+
+export type ChequeActionResult = {
+  pdc: JournalEntry
+  clearingJournal?: JournalEntry
+  reversal?: JournalEntry
+}
+
+export type ChequeLeafStatus = 'available' | 'issued' | 'cancelled'
+
+/** A company chequebook registered for one of our own bank accounts. */
+export type ChequeBook = {
+  id: string
+  treasuryId: string
+  bankAccountCode: string
+  bankName: string
+  bookName: string
+  prefix: string
+  startNumber: string
+  endNumber: string
+  leafCount: number
+  receivedDate: string | null
+  notes: string | null
+  availableCount: number
+  issuedCount: number
+  cancelledCount: number
+  nextAvailable: string | null
+  createdAt: string | null
+}
+
+export type ChequeLeaf = {
+  id: string
+  bookId: string
+  bookName: string
+  treasuryId: string
+  bankAccountCode: string
+  bankName: string
+  chequeNumber: string
+  sequence: number
+  status: ChequeLeafStatus
+  journalId: string | null
+  journalNumber: string | null
+  journalStatus: string | null
+  pdcStatus: string | null
+  issuedAt: string | null
+  payeeName: string | null
+  amount: number | null
+  chequeDate: string | null
+  cancelReason: string | null
+  cancelledAt: string | null
+}
+
+export type CreateChequeBookBody = {
+  treasuryId: string
+  bookName?: string
+  prefix?: string
+  startNumber: string
+  leafCount: number
+  receivedDate?: string
+  notes?: string
 }
 
 export type JournalSummary = {
@@ -233,6 +324,7 @@ export type AccountLedger = {
     journalEntryId?: string
     memo: string
     description: string
+    counterpart?: string | null
     reference: string | null
     debit: number
     credit: number
@@ -259,6 +351,8 @@ export type DimensionRule = {
   entityType: JournalEntityType | null
   entityRequired: boolean
   projectRequired: boolean
+  /** Show the project picker (optional, "None" allowed) even when not required. */
+  projectOptional?: boolean
   label: string
 }
 
@@ -267,24 +361,28 @@ const DIMENSION_RULES: Record<string, DimensionRule> = {
     entityType: JournalEntityType.CUSTOMER,
     entityRequired: true,
     projectRequired: false,
+    projectOptional: true,
     label: 'Customer',
   },
   '2111': {
     entityType: JournalEntityType.SUPPLIER,
     entityRequired: true,
     projectRequired: false,
+    projectOptional: true,
     label: 'Supplier',
   },
   '2113': {
     entityType: JournalEntityType.SUPPLIER,
     entityRequired: true,
     projectRequired: false,
+    projectOptional: true,
     label: 'Supplier',
   },
   '1161': {
     entityType: JournalEntityType.EMPLOYEE,
     entityRequired: true,
-    projectRequired: true,
+    projectRequired: false,
+    projectOptional: true,
     label: 'Employee',
   },
   '2121': {
@@ -376,6 +474,11 @@ export type JournalWriteBody = {
   approvalId?: string
   overrideSupplierPayable?: boolean
   overrideReason?: string
+  chequeNumber?: string
+  /** A date after today posts the bank side to PDC Receivable / Payable. */
+  chequeDate?: string
+  /** Company chequebook leaf being issued; the server marks it used on posting. */
+  chequeLeafId?: string
   lines: Array<{
     accountCode: string
     debit?: number

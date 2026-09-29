@@ -12,6 +12,9 @@ export type NavIconName =
   | 'banking'
   | 'transfer'
   | 'reconcile'
+  | 'cheque'
+  | 'chequeRegister'
+  | 'chequeBook'
   | 'invoice'
   | 'bill'
   | 'aging'
@@ -124,6 +127,31 @@ const ICONS: Record<NavIconName, (props: IconProps) => ReactNode> = {
       <path d="M3 18h18" />
       <path d="M9 14v4" />
       <path d="M15 14v4" />
+    </Svg>
+  ),
+  cheque: (p) => (
+    <Svg {...p}>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <path d="M6 10h6" />
+      <path d="M6 14h3" />
+      <path d="M13 15l2-2 3 1.5" />
+    </Svg>
+  ),
+  chequeRegister: (p) => (
+    <Svg {...p}>
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8 8h8" />
+      <path d="M8 12h8" />
+      <path d="M8 16h5" />
+    </Svg>
+  ),
+  chequeBook: (p) => (
+    <Svg {...p}>
+      <rect x="3" y="7" width="16" height="11" rx="1.5" />
+      <path d="M6 4h14a1 1 0 0 1 1 1v10" />
+      <path d="M6 11h6" />
+      <path d="M6 14h3" />
+      <path d="M15 11v4" />
     </Svg>
   ),
   transfer: (p) => (

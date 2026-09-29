@@ -16,10 +16,11 @@ import {
   type JournalSummary,
   type JournalWriteBody,
 } from "../types/accounting";
-import { Role, type PublicUser } from "../types/auth";
+import { Role } from "../types/auth";
+import type { Employee } from "../types/employee";
 import type { TreasuryAccount } from "../types/banking";
 import type { Supplier } from "../types/procurement";
-import type { Project } from "../types/project";
+import { projectBelongsToCustomer, type Project } from "../types/project";
 import { buildJournalMemo } from "../utils/journalMemo";
 
 type DraftLine = {
@@ -68,7 +69,7 @@ export function JournalsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [employees, setEmployees] = useState<PublicUser[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [treasury, setTreasury] = useState<TreasuryAccount[]>([]);
   const [summary, setSummary] = useState<JournalSummary | null>(null);
 
@@ -212,6 +213,16 @@ export function JournalsPage() {
           next.entityId = "";
           if (rule.projectRequired && !next.projectId && projectId) {
             next.projectId = projectId;
+          }
+        }
+        if (
+          patch.entityId !== undefined &&
+          next.entityType === "customer" &&
+          next.projectId
+        ) {
+          const own = customerProjects(next.entityId);
+          if (own && !own.some((project) => project.id === next.projectId)) {
+            next.projectId = "";
           }
         }
         return next;
@@ -465,6 +476,29 @@ export function JournalsPage() {
     })),
   ];
 
+  /** A customer line only offers that customer's projects (all, if it has none). */
+  function customerProjects(customerId: string): Project[] | null {
+    const customer = customers.find((row) => row.id === customerId);
+    if (!customer) return null;
+    const own = projects.filter((project) =>
+      projectBelongsToCustomer(project, customer),
+    );
+    return own.length > 0 ? own : null;
+  }
+
+  function projectOptionsForLine(line: DraftLine) {
+    if (line.entityType !== "customer" || !line.entityId) return projectOptions;
+    const own = customerProjects(line.entityId);
+    if (!own) return projectOptions;
+    return [
+      { value: "", label: "None" },
+      ...own.map((project) => ({
+        value: project.id,
+        label: `${project.code} · ${project.name}`,
+      })),
+    ];
+  }
+
   return (
     <>
       <header className='workspace-header'>
@@ -479,7 +513,7 @@ export function JournalsPage() {
             Customers
           </Link>
           <Link to='/reports' className='action-link'>
-            Full register
+            All reports
           </Link>
         </div>
       </header>
@@ -592,6 +626,7 @@ export function JournalsPage() {
                   const showEntity = Boolean(rule.entityType);
                   const showProject =
                     rule.projectRequired ||
+                    rule.projectOptional ||
                     journalType === JournalType.PROJECT_COST ||
                     journalType === JournalType.PROJECT_REVENUE ||
                     Boolean(line.projectId) ||
@@ -648,7 +683,7 @@ export function JournalsPage() {
                             onChange={(value) =>
                               updateLine(index, { projectId: value })
                             }
-                            options={projectOptions}
+                            options={projectOptionsForLine(line)}
                             searchable
                             required={rule.projectRequired}
                           />
@@ -740,6 +775,19 @@ export function JournalsPage() {
                               : line.entityId
                                 ? " Loading unsettled balance…"
                                 : " Select an employee to see unsettled advance balance."}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {line.accountCode === "1151" &&
+                    line.debit &&
+                    !(line.projectId || projectId) ? (
+                      <tr className="journal-dimension-hint">
+                        <td colSpan={7}>
+                          <div className="callout callout-info">
+                            A <strong>1151 debit</strong> creates a client
+                            invoice, which needs a project. Pick one of the
+                            customer&apos;s projects before posting.
                           </div>
                         </td>
                       </tr>

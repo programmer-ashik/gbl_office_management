@@ -155,6 +155,28 @@ export const NAV_SECTIONS: NavSection[] = [
         roles: FINANCE,
       },
       {
+        label: 'Cheque Entry',
+        to: '/banking/cheques/new',
+        icon: 'cheque',
+        hint: 'Receive · Issue · PDC',
+        roles: FINANCE,
+      },
+      {
+        label: 'Cheque Register',
+        to: '/banking/cheques',
+        end: true,
+        icon: 'chequeRegister',
+        hint: 'PDC · Clear · Bounce',
+        roles: FINANCE,
+      },
+      {
+        label: 'Cheque Books',
+        to: '/banking/cheque-books',
+        icon: 'chequeBook',
+        hint: 'Own cheque leaves',
+        roles: FINANCE,
+      },
+      {
         label: 'Bank Reconciliation',
         to: '/banking/reconciliation',
         icon: 'reconcile',
@@ -272,19 +294,20 @@ export const NAV_SECTIONS: NavSection[] = [
     roles: FINANCE,
     items: [
       {
-        label: 'Journal Register',
+        label: 'Reports',
         to: '/reports',
         icon: 'reports',
-        hint: 'Full report suite',
-        roles: FINANCE,
-      },
-      {
-        label: 'Reports',
-        to: '/reports/purchase/invoices',
-        icon: 'reports',
-        hint: 'Purchase · Sales · Accounts',
+        hint: 'All · Purchase · Sales · Accounts',
         roles: FINANCE,
         children: [
+          {
+            label: 'All reports',
+            to: '/reports',
+            end: true,
+            icon: 'reports',
+            hint: 'Full filtered register · PDF',
+            roles: FINANCE,
+          },
           {
             label: 'Purchase Invoice Record',
             to: '/reports/purchase/invoices',

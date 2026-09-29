@@ -3,6 +3,7 @@ import autoTable from 'jspdf-autotable'
 import { resolveAssetUrl } from '../types/report-template'
 import {
   formatInvoiceMoneyForPdf,
+  invoiceSummaryRows,
   invoiceTotals,
   lineTotal,
   type ProjectInvoiceDraft,
@@ -67,6 +68,19 @@ export async function downloadProjectInvoicePdf(
   let y = margin
   const totals = invoiceTotals(draft)
 
+  const title = draft.documentTitle?.trim()
+  if (title) {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(18)
+    doc.setTextColor(...INK)
+    doc.text(title.toUpperCase(), pageWidth / 2, y + 4, { align: 'center' })
+    const titleW = doc.getTextWidth(title.toUpperCase())
+    doc.setDrawColor(...YELLOW)
+    doc.setLineWidth(1.2)
+    doc.line(pageWidth / 2 - titleW / 2, y + 7, pageWidth / 2 + titleW / 2, y + 7)
+    y += 14
+  }
+
   const logoUrl = resolveAssetUrl(draft.logoUrl)
   if (logoUrl) {
     const dataUrl = await loadImageDataUrl(logoUrl)
@@ -95,6 +109,21 @@ export async function downloadProjectInvoicePdf(
   ].filter(Boolean)
   doc.text(contact.join('\n') || ' ', pageWidth - margin, y, { align: 'right' })
   y += 22
+
+  const metaY = y
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9)
+  doc.setTextColor(...INK)
+  doc.text(
+    [
+      `No: ${draft.invoiceNumber}`,
+      `Date: ${draft.date.slice(0, 10)}`,
+      `Due: ${draft.dueDate.slice(0, 10)}`,
+    ],
+    pageWidth - margin,
+    metaY,
+    { align: 'right' },
+  )
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
@@ -160,18 +189,10 @@ export async function downloadProjectInvoicePdf(
   }
 
   doc.setTextColor(...INK)
-  drawSummaryRow(
-    'SUBTOTAL',
-    formatInvoiceMoneyForPdf(totals.subtotal, draft.currencyCode),
-  )
-  drawSummaryRow(
-    `Tax (VAT @ ${draft.taxRate}%)`,
-    formatInvoiceMoneyForPdf(totals.tax, draft.currencyCode),
-  )
-  drawSummaryRow(
-    `Discount (${draft.discountRate}%)`,
-    `-${formatInvoiceMoneyForPdf(totals.discount, draft.currencyCode)}`,
-  )
+  for (const row of invoiceSummaryRows(draft)) {
+    const amount = formatInvoiceMoneyForPdf(row.amount, draft.currencyCode)
+    drawSummaryRow(row.label, row.negative ? `-${amount}` : amount)
+  }
 
   y += 1
   doc.setFillColor(...YELLOW)
@@ -274,6 +295,21 @@ export async function downloadProjectInvoicePdf(
   for (let page = 1; page <= pageCount; page += 1) {
     doc.setPage(page)
     drawColoredNoteFooter(doc, draft.note)
+  }
+
+  // Free text boxes sit where they were placed on the first page (x/y are % of the sheet).
+  doc.setPage(1)
+  for (const box of draft.textBoxes) {
+    const text = box.text.trim()
+    if (!text) continue
+    const boxW = (pageWidth * box.width) / 100
+    const left = (pageWidth * box.x) / 100
+    const top = (pageHeight * box.y) / 100
+    const x = box.align === 'center' ? left + boxW / 2 : box.align === 'right' ? left + boxW : left
+    doc.setFont('helvetica', box.bold ? 'bold' : 'normal')
+    doc.setFontSize(Math.max(6, box.fontSize * 0.75))
+    doc.setTextColor(box.color || '#333333')
+    doc.text(doc.splitTextToSize(text, boxW) as string[], x, top + 4, { align: box.align })
   }
 
   doc.save(`${draft.invoiceNumber || 'invoice'}.pdf`)

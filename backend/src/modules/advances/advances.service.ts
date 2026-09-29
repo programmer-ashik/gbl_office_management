@@ -15,6 +15,10 @@ import type { JournalService } from '../accounting/journal.service';
 import type { ApprovalService } from '../governance/approval.service';
 import type { BankingService } from '../banking/banking.service';
 import type { ProjectsService } from '../projects/projects.service';
+import {
+  employeeIdForUser,
+  findEmployeeOrFail,
+} from '../employees/employee-records';
 import type { UsersService } from '../users/users.service';
 import { AdvanceModel, type AdvanceDocument } from './advance.model';
 import {
@@ -189,8 +193,8 @@ export class AdvancesService {
     dto: CreateAdvanceDto,
     actor: AuthenticatedUser,
   ): Promise<PublicAdvance> {
-    const employeeId = this.resolveEmployeeId(dto.employeeId, actor);
-    const employee = await this.usersService.findByIdOrFail(employeeId);
+    const employeeId = await this.resolveEmployeeId(dto.employeeId, actor);
+    const employee = await findEmployeeOrFail(employeeId);
     if (!employee.isActive) {
       throw badRequest('Employee is inactive');
     }
@@ -240,12 +244,12 @@ export class AdvancesService {
       const projectIds = await this.projectsService.managedProjectIds(actor)
       and.push({
         $or: [
-          { employeeId: new Types.ObjectId(actor.userId) },
+          { employeeId: { $in: await this.selfEmployeeOids(actor) } },
           { projectId: { $in: projectIds } },
         ],
       })
     } else {
-      and.push({ employeeId: new Types.ObjectId(actor.userId) })
+      and.push({ employeeId: { $in: await this.selfEmployeeOids(actor) } })
     }
 
     if (filters?.projectId && Types.ObjectId.isValid(filters.projectId)) {
@@ -376,15 +380,16 @@ export class AdvancesService {
     employeeId: string,
     actor: AuthenticatedUser,
   ): Promise<{ employeeId: string; unsettledAdvanceBalance: number }> {
-    this.assertCanViewEmployeeLedger(employeeId, actor)
+    await this.assertCanViewEmployeeLedger(employeeId, actor)
     if (!Types.ObjectId.isValid(employeeId)) {
       throw notFound('Employee not found')
     }
+    const employee = await findEmployeeOrFail(employeeId)
     const rows = await LedgerLineModel.aggregate<{ balance: number }>([
       {
         $match: {
           entityType: JournalEntityType.EMPLOYEE,
-          entityId: new Types.ObjectId(employeeId),
+          entityId: employee._id,
           accountCode: ADVANCE_ASSET_CODE,
         },
       },
@@ -396,7 +401,7 @@ export class AdvancesService {
       },
     ])
     return {
-      employeeId,
+      employeeId: employee._id.toString(),
       unsettledAdvanceBalance: fromMinorUnits(rows[0]?.balance ?? 0),
     }
   }
@@ -535,7 +540,7 @@ export class AdvancesService {
     if (row.status !== AdvanceStatus.DISBURSED) {
       throw badRequest('Vouchers can only be submitted against a disbursed advance');
     }
-    if (!this.isFinance(actor) && row.employeeId.toString() !== actor.userId) {
+    if (!this.isFinance(actor) && !(await this.isSelf(row.employeeId, actor))) {
       throw forbidden('You can only settle your own advance');
     }
 
@@ -686,12 +691,12 @@ export class AdvancesService {
     employeeId: string,
     actor: AuthenticatedUser,
   ): Promise<EmployeeLedgerReport> {
-    this.assertCanViewEmployeeLedger(employeeId, actor);
+    await this.assertCanViewEmployeeLedger(employeeId, actor);
     if (!Types.ObjectId.isValid(employeeId)) {
       throw notFound('Employee not found');
     }
-    const employee = await this.usersService.findByIdOrFail(employeeId);
-    const employeeOid = new Types.ObjectId(employeeId);
+    const employee = await findEmployeeOrFail(employeeId);
+    const employeeOid = employee._id;
 
     const advances = await AdvanceModel.find({ employeeId: employeeOid })
       .sort({ requestedAt: 1 })
@@ -778,7 +783,7 @@ export class AdvancesService {
       .filter((row) => row.amount > 0);
 
     return {
-      employeeId,
+      employeeId: employee._id.toString(),
       employeeName: `${employee.firstName} ${employee.lastName}`.trim(),
       totalAdvancesGiven,
       totalExpenseSettled,
@@ -816,14 +821,31 @@ export class AdvancesService {
     return 'Employee ledger';
   }
 
-  private assertCanViewEmployeeLedger(
+  private async assertCanViewEmployeeLedger(
     employeeId: string,
     actor: AuthenticatedUser,
-  ): void {
-    if (this.isFinance(actor) || actor.userId === employeeId) {
+  ): Promise<void> {
+    if (this.isFinance(actor) || (await this.isSelf(employeeId, actor))) {
       return;
     }
     throw forbidden('You do not have access to this employee ledger');
+  }
+
+  /** Employee ids the logged-in user acts as (linked record, plus the legacy user id). */
+  private async selfEmployeeIds(actor: AuthenticatedUser): Promise<string[]> {
+    const linked = await employeeIdForUser(actor.userId);
+    return [...new Set([linked, actor.userId].filter((id): id is string => Boolean(id)))];
+  }
+
+  private async selfEmployeeOids(actor: AuthenticatedUser): Promise<Types.ObjectId[]> {
+    return (await this.selfEmployeeIds(actor)).map((id) => new Types.ObjectId(id));
+  }
+
+  private async isSelf(
+    employeeId: Types.ObjectId | string,
+    actor: AuthenticatedUser,
+  ): Promise<boolean> {
+    return (await this.selfEmployeeIds(actor)).includes(String(employeeId));
   }
 
   private async prepareVouchers(lines: SubmitSettlementDto['lines']) {
@@ -846,12 +868,13 @@ export class AdvancesService {
     });
   }
 
-  private resolveEmployeeId(
+  private async resolveEmployeeId(
     requestedId: string | undefined,
     actor: AuthenticatedUser,
-  ): string {
-    if (!requestedId || requestedId === actor.userId) {
-      return actor.userId;
+  ): Promise<string> {
+    const [selfId] = await this.selfEmployeeIds(actor);
+    if (!requestedId || (await this.isSelf(requestedId, actor))) {
+      return selfId;
     }
     if (!this.isFinance(actor) && actor.role !== Role.PROJECT_MANAGER) {
       throw forbidden('You can only request an advance for yourself');
@@ -888,7 +911,7 @@ export class AdvancesService {
     if (this.isFinance(actor)) {
       return row;
     }
-    if (row.employeeId.toString() === actor.userId) {
+    if (await this.isSelf(row.employeeId, actor)) {
       return row;
     }
     if (actor.role === Role.PROJECT_MANAGER) {

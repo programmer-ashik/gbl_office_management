@@ -22,6 +22,23 @@ import {
 const DEFAULT_TERMS =
   'Prices are valid for 30 days. Payment terms as agreed. Thank you for your business.';
 
+/**
+ * Gross-up tax (back calculation): VAT is taxRate% of the grand total.
+ *   divisor    = (100 − taxRate) ÷ 100
+ *   grandTotal = subTotal ÷ divisor
+ *   taxAmount  = grandTotal − subTotal
+ * Amounts are integer minor units, so rounding is to 2 decimal places.
+ */
+export function grossUpTotalsMinor(subTotalMinor: number, taxRate: number) {
+  const divisor = (100 - Math.max(taxRate || 0, 0)) / 100;
+  const grandTotalMinor =
+    divisor > 0 ? Math.round(subTotalMinor / divisor) : subTotalMinor;
+  return {
+    taxAmountMinor: grandTotalMinor - subTotalMinor,
+    grandTotalMinor,
+  };
+}
+
 export type QuotationListFilters = {
   createdBy?: string;
   projectId?: string;
@@ -138,8 +155,10 @@ export class QuotationsService {
       0,
     );
     const taxRate = dto.taxRate ?? 0;
-    const taxAmountMinor = Math.round((subTotalMinor * taxRate) / 100);
-    const grandTotalMinor = subTotalMinor + taxAmountMinor;
+    const { taxAmountMinor, grandTotalMinor } = grossUpTotalsMinor(
+      subTotalMinor,
+      taxRate,
+    );
 
     const user = await this.usersService.findById(actor.userId);
     const createdByName = user
@@ -303,8 +322,10 @@ export class QuotationsService {
       0,
     );
     const taxRate = dto.taxRate ?? 0;
-    const taxAmountMinor = Math.round((subTotalMinor * taxRate) / 100);
-    const grandTotalMinor = subTotalMinor + taxAmountMinor;
+    const { taxAmountMinor, grandTotalMinor } = grossUpTotalsMinor(
+      subTotalMinor,
+      taxRate,
+    );
 
     doc.clientInfo = {
       name: dto.clientInfo.name.trim(),

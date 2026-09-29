@@ -10,7 +10,7 @@ import {
 } from "../auth/permissions";
 import { Select, ActionMenu } from "../components/ui";
 import { money } from "../types/accounting";
-import type { PublicUser } from "../types/auth";
+import type { Employee } from "../types/employee";
 import type { Project } from "../types/project";
 import {
   QUOTATION_STATUS_LABEL,
@@ -30,7 +30,7 @@ export function QuotationsPage() {
   const canAudit = canAuditQuotations(user?.role);
 
   const [rows, setRows] = useState<Quotation[]>([]);
-  const [employees, setEmployees] = useState<PublicUser[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,7 +61,7 @@ export function QuotationsPage() {
       setRows(list);
       setProjects(projectRows);
       if (canAudit && employees.length === 0) {
-        const staff = await api.employees().catch(() => [] as PublicUser[]);
+        const staff = await api.employees().catch(() => [] as Employee[]);
         setEmployees(staff);
       }
     } catch (err) {
@@ -103,10 +103,12 @@ export function QuotationsPage() {
 
   const employeeOptions = useMemo(
     () =>
-      employees.map((row) => ({
-        value: row.id,
-        label: `${row.firstName} ${row.lastName}`.trim(),
-      })),
+      employees
+        .filter((row) => row.userId)
+        .map((row) => ({
+          value: row.userId!,
+          label: `${row.firstName} ${row.lastName}`.trim(),
+        })),
     [employees],
   );
 

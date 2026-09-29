@@ -10,6 +10,7 @@ import type { AuthService } from '../auth/auth.service';
 import type { ApprovalService } from '../governance/approval.service';
 import type { UsersService } from '../users/users.service';
 import type { ArApService } from '../ar-ap/ar-ap.service';
+import type { ChequeBookService } from './cheque-book.service';
 import { PostJournalDto } from './dto/journal.dto';
 import type { JournalService } from './journal.service';
 
@@ -38,6 +39,7 @@ export function createJournalsRouter(
   usersService: UsersService,
   approvalService?: ApprovalService,
   arApService?: Pick<ArApService, 'assertManualJournalSupplierPayments'>,
+  chequeBookService?: Pick<ChequeBookService, 'resolveLeafForJournal' | 'issueWithJournal'>,
 ) {
   const router = Router();
   const auth = requireAuth(authService, usersService);
@@ -85,6 +87,9 @@ export function createJournalsRouter(
       if (arApService) {
         await arApService.assertManualJournalSupplierPayments(dto, req.user!);
       }
+      if (chequeBookService) {
+        await chequeBookService.resolveLeafForJournal(dto);
+      }
 
       const amount = dto.lines.reduce((sum, line) => sum + (line.debit ?? 0), 0);
 
@@ -101,6 +106,9 @@ export function createJournalsRouter(
               reference: dto.reference,
               journalType: dto.journalType,
               projectId: dto.projectId,
+              chequeNumber: dto.chequeNumber,
+              chequeDate: dto.chequeDate,
+              chequeLeafId: dto.chequeLeafId,
               lines: dto.lines,
               overrideSupplierPayable: dto.overrideSupplierPayable,
               overrideReason: dto.overrideReason,
@@ -120,7 +128,12 @@ export function createJournalsRouter(
         }
       }
 
-      const entry = await journalService.post(dto, req.user!.userId);
+      const userId = req.user!.userId;
+      const entry = chequeBookService
+        ? await chequeBookService.issueWithJournal(dto, userId, (body) =>
+            journalService.post(body, userId),
+          )
+        : await journalService.post(dto, userId);
       if (approvalService && dto.approvalId) {
         await approvalService.markExecuted(
           dto.approvalId,

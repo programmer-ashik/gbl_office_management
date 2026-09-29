@@ -21,11 +21,14 @@ export function TreasuryTransactionReportPage({ mode }: Props) {
       date: string
       entryNumber: string
       memo: string
+      description: string
+      counterpart?: string | null
       debit: number
       credit: number
       runningBalance?: number
     }>
   >([])
+  const [balances, setBalances] = useState({ opening: 0, closing: 0 })
 
   const options = useMemo(
     () =>
@@ -59,6 +62,7 @@ export function TreasuryTransactionReportPage({ mode }: Props) {
     const channel = options.find((row) => row.id === accountId)
     if (!channel) {
       setLines([])
+      setBalances({ opening: 0, closing: 0 })
       return
     }
     setLoading(true)
@@ -67,9 +71,21 @@ export function TreasuryTransactionReportPage({ mode }: Props) {
         fromDate: fromDate || undefined,
         toDate: toDate || undefined,
       })
-      .then((ledger) => setLines(ledger.entries))
+      .then((ledger) => {
+        // API returns newest first; reports read oldest → newest.
+        const chrono = [...ledger.entries].reverse()
+        setLines(chrono)
+        setBalances({
+          opening: ledger.openingBalance ?? 0,
+          closing:
+            chrono.length > 0
+              ? (chrono[chrono.length - 1]!.runningBalance ?? 0)
+              : (ledger.closingBalance ?? ledger.openingBalance ?? 0),
+        })
+      })
       .catch((err: unknown) => {
         setLines([])
+        setBalances({ opening: 0, closing: 0 })
         setError(err instanceof Error ? err.message : 'Unable to load ledger')
       })
       .finally(() => setLoading(false))
@@ -81,6 +97,13 @@ export function TreasuryTransactionReportPage({ mode }: Props) {
   const debit = lines.reduce((sum, row) => sum + row.debit, 0)
   const credit = lines.reduce((sum, row) => sum + row.credit, 0)
 
+  const openingLabel = fromDate
+    ? `Opening balance (before ${fromDate})`
+    : 'Opening balance'
+  const closingLabel = toDate
+    ? `Closing balance (as at ${toDate})`
+    : 'Closing balance'
+
   function exportPayload() {
     return {
       title,
@@ -89,16 +112,38 @@ export function TreasuryTransactionReportPage({ mode }: Props) {
         { label: 'From', value: fromDate || '—' },
         { label: 'To', value: toDate || '—' },
       ],
-      headers: ['Date', 'Journal', 'Memo', 'Debit', 'Credit', 'Balance'],
-      rows: lines.map((row) => [
-        row.date.slice(0, 10),
-        row.entryNumber,
-        row.memo,
-        row.debit ? money(row.debit) : '',
-        row.credit ? money(row.credit) : '',
-        money(row.runningBalance ?? 0),
-      ]),
-      totals: [['', '', 'Totals', money(debit), money(credit), '']],
+      headers: [
+        'Date',
+        'Journal',
+        'Ledger Head',
+        'Description',
+        'Debit',
+        'Credit',
+        'Balance',
+      ],
+      rows: [
+        ['', '', openingLabel, '', '', '', money(balances.opening)],
+        ...lines.map((row) => [
+          row.date.slice(0, 10),
+          row.entryNumber,
+          row.counterpart || '—',
+          row.description || row.memo,
+          row.debit ? money(row.debit) : '',
+          row.credit ? money(row.credit) : '',
+          money(row.runningBalance ?? 0),
+        ]),
+      ],
+      totals: [
+        [
+          '',
+          '',
+          closingLabel,
+          '',
+          money(debit),
+          money(credit),
+          money(balances.closing),
+        ],
+      ],
     }
   }
 
@@ -155,18 +200,30 @@ export function TreasuryTransactionReportPage({ mode }: Props) {
             <tr>
               <th>Date</th>
               <th>Journal</th>
-              <th>Memo</th>
+              <th>Ledger Head</th>
+              <th>Description</th>
               <th className="num">Debit</th>
               <th className="num">Credit</th>
               <th className="num">Balance</th>
             </tr>
           </thead>
           <tbody>
+            <tr className="ledger-balance-row">
+              <td colSpan={4}>{openingLabel}</td>
+              <td className="num">—</td>
+              <td className="num">—</td>
+              <td className="num">{money(balances.opening)}</td>
+            </tr>
             {lines.map((row) => (
               <tr key={row.id}>
                 <td>{row.date.slice(0, 10)}</td>
                 <td>{row.entryNumber}</td>
-                <td>{row.memo}</td>
+                <td className="ledger-reference-cell">
+                  {row.counterpart || '—'}
+                </td>
+                <td className="ledger-reference-cell">
+                  {row.description || row.memo}
+                </td>
                 <td className="num">{row.debit ? money(row.debit) : '—'}</td>
                 <td className="num">{row.credit ? money(row.credit) : '—'}</td>
                 <td className="num">{money(row.runningBalance ?? 0)}</td>
@@ -174,11 +231,17 @@ export function TreasuryTransactionReportPage({ mode }: Props) {
             ))}
             {!loading && lines.length === 0 ? (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={7} className="muted">
                   No transactions in this range.
                 </td>
               </tr>
             ) : null}
+            <tr className="ledger-balance-row">
+              <td colSpan={4}>{closingLabel}</td>
+              <td className="num">{money(debit)}</td>
+              <td className="num">{money(credit)}</td>
+              <td className="num">{money(balances.closing)}</td>
+            </tr>
           </tbody>
         </table>
       </section>

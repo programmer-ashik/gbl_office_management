@@ -130,6 +130,8 @@ const DEFAULT_TREASURY: Array<{
   kind: TreasuryKind;
   glAccountCode: string;
   institution?: string;
+  /** Created when missing only; never renamed or reactivated on later boots. */
+  createOnly?: boolean;
 }> = [
   {
     name: 'Cash in Hand',
@@ -137,10 +139,24 @@ const DEFAULT_TREASURY: Array<{
     glAccountCode: SystemAccountCode.CASH,
   },
   {
+    name: 'DBBL Bank',
+    kind: TreasuryKind.COMMERCIAL_BANK,
+    glAccountCode: SystemAccountCode.BANK_ALT,
+    institution: 'Dutch-Bangla Bank',
+    createOnly: true,
+  },
+  {
     name: 'BRAC Bank',
     kind: TreasuryKind.COMMERCIAL_BANK,
     glAccountCode: SystemAccountCode.BANK,
     institution: 'BRAC Bank',
+  },
+  {
+    name: 'City Bank',
+    kind: TreasuryKind.COMMERCIAL_BANK,
+    glAccountCode: SystemAccountCode.CITY_BANK,
+    institution: 'City Bank',
+    createOnly: true,
   },
   {
     name: 'bKash',
@@ -173,6 +189,7 @@ export class BankingService {
         glAccountCode: row.glAccountCode,
       }).exec();
       if (existing) {
+        if (row.createOnly) continue;
         let dirty = false;
         if (existing.name !== row.name) {
           existing.name = row.name;
