@@ -43,7 +43,6 @@ export class JournalLineDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(240)
   description?: string;
 
   @IsOptional()

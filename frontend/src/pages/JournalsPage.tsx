@@ -95,6 +95,10 @@ export function JournalsPage() {
   >(null);
   const [overrideReason, setOverrideReason] = useState("");
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [noteEditor, setNoteEditor] = useState<{
+    index: number;
+    text: string;
+  } | null>(null);
 
   const accountByCode = useMemo(() => {
     const map = new Map<string, Account>();
@@ -692,13 +696,21 @@ export function JournalsPage() {
                         )}
                       </td>
                       <td>
-                        <input
-                          value={line.description}
-                          onChange={(e) =>
-                            updateLine(index, { description: e.target.value })
+                        <button
+                          type='button'
+                          className={
+                            line.description
+                              ? 'journal-line-note'
+                              : 'journal-line-note is-empty'
                           }
-                          placeholder='Line note'
-                        />
+                          title={line.description || 'Add line note'}
+                          aria-label={`Description line ${index + 1}`}
+                          onClick={() =>
+                            setNoteEditor({ index, text: line.description })
+                          }
+                        >
+                          {line.description || 'Line note'}
+                        </button>
                       </td>
                       <td className='num'>
                         <input
@@ -850,6 +862,56 @@ export function JournalsPage() {
           {formError ? <p className='form-error'>{formError}</p> : null}
         </form>
       </section>
+
+      <Modal
+        open={Boolean(noteEditor)}
+        title={
+          noteEditor
+            ? `Line ${noteEditor.index + 1} description`
+            : 'Line description'
+        }
+        description='Full note for this journal line. No length limit.'
+        onClose={() => setNoteEditor(null)}
+        wide
+      >
+        {noteEditor ? (
+          <form
+            className='stack-form'
+            onSubmit={(e) => {
+              e.preventDefault();
+              updateLine(noteEditor.index, { description: noteEditor.text });
+              setNoteEditor(null);
+            }}
+          >
+            <label>
+              Description
+              <textarea
+                className='journal-line-note-editor'
+                value={noteEditor.text}
+                onChange={(e) =>
+                  setNoteEditor({ ...noteEditor, text: e.target.value })
+                }
+                rows={10}
+                autoFocus
+                placeholder='Line note'
+              />
+            </label>
+            <p className='field-hint'>
+              {noteEditor.text.length.toLocaleString()} characters
+            </p>
+            <div className='form-actions'>
+              <button
+                type='button'
+                className='ghost'
+                onClick={() => setNoteEditor(null)}
+              >
+                Cancel
+              </button>
+              <button type='submit'>Save description</button>
+            </div>
+          </form>
+        ) : null}
+      </Modal>
 
       <Modal
         open={Boolean(payableReview)}

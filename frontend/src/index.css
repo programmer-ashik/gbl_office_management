@@ -493,7 +493,9 @@ button:hover:not(:disabled):not(.ghost):not(.ui-select-trigger):not(
     .ui-select-option
   ):not(.ui-action-item):not(.nav-section-toggle):not(.nav-subgroup-toggle):not(
     .sidebar-toggle
-  ):not(.theme-picker-card):not(.recon-clip):not(.file-upload-browse) {
+  ):not(.theme-picker-card):not(.recon-clip):not(.file-upload-browse):not(
+    .journal-line-note
+  ) {
   background: linear-gradient(
     90deg,
     var(--theme-btn-hover-from, var(--theme-btn-from, var(--navy))) 0%,
@@ -2721,6 +2723,48 @@ td .ui-action-menu {
   font-size: var(--text-sm);
 }
 
+.journal-line-note {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--input-h);
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: none;
+  cursor: text;
+}
+
+.journal-line-note:hover,
+.journal-line-note:focus-visible {
+  background: #fff;
+  color: var(--ink);
+  outline: none;
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(15, 39, 68, 0.12);
+}
+
+.journal-line-note.is-empty {
+  color: var(--muted);
+}
+
+.journal-line-note-editor {
+  min-height: 220px;
+  padding: 10px 12px;
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
 .journal-entry-lines .amount-debit,
 .journal-entry-lines .amount-credit {
   width: 100%;
@@ -3659,7 +3703,7 @@ table thead th,
     .ui-action-item
   ):not(.nav-section-toggle):not(.nav-subgroup-toggle):not(.sidebar-toggle):not(
     .theme-picker-card
-  ):not(.recon-clip):not(.file-upload-browse) {
+  ):not(.recon-clip):not(.file-upload-browse):not(.journal-line-note) {
   border-radius: 999px;
   background: linear-gradient(
     90deg,
@@ -3676,7 +3720,7 @@ table thead th,
     .ui-action-item
   ):not(.nav-section-toggle):not(.nav-subgroup-toggle):not(.sidebar-toggle):not(
     .theme-picker-card
-  ):not(.recon-clip):not(.file-upload-browse):hover {
+  ):not(.recon-clip):not(.file-upload-browse):not(.journal-line-note):hover {
   background: linear-gradient(
     90deg,
     var(--theme-btn-hover-from, var(--theme-btn-from, #0f2744)) 0%,
