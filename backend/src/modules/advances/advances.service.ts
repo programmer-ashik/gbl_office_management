@@ -33,6 +33,10 @@ import {
   buildSettlementJournalLines,
   classifySettlement,
 } from './settlement';
+import {
+  codesUnderProjectCost,
+  dimensionRuleForAccount,
+} from '../accounting/account-dimensions';
 import { JournalEntityType } from '../accounting/journal.enums';
 import { LedgerLineModel } from '../accounting/ledger.model';
 import type {
@@ -51,9 +55,9 @@ export type PublicAdvance = {
   status: AdvanceStatus;
   employeeId: string;
   employeeName: string;
-  projectId: string;
-  projectCode: string;
-  projectName: string;
+  projectId: string | null;
+  projectCode: string | null;
+  projectName: string | null;
   requestedAmount: number;
   purpose: string;
   requestedAt: string;
@@ -142,9 +146,9 @@ export class AdvancesService {
       status: row.status,
       employeeId: row.employeeId.toString(),
       employeeName: row.employeeName,
-      projectId: row.projectId.toString(),
-      projectCode: row.projectCode,
-      projectName: row.projectName,
+      projectId: row.projectId?.toString() ?? null,
+      projectCode: row.projectCode ?? null,
+      projectName: row.projectName ?? null,
       requestedAmount: fromMinorUnits(row.requestedMinor),
       purpose: row.purpose,
       requestedAt: row.requestedAt.toISOString(),
@@ -180,13 +184,19 @@ export class AdvancesService {
   }
 
   async expenseAccountOptions() {
-    const accounts = await this.accountsService.list(AccountType.EXPENSE);
-    return accounts
-      .filter((account) => account.isActive && account.isPostable)
-      .map((account) => ({
-        code: account.code,
-        name: account.name,
-      }));
+    const accounts = (await this.accountsService.list(AccountType.EXPENSE)).filter(
+      (account) => account.isActive && account.isPostable,
+    );
+    const projectCost = await codesUnderProjectCost(
+      accounts.map((account) => account.code),
+    );
+    return accounts.map((account) => ({
+      code: account.code,
+      name: account.name,
+      projectOnly:
+        projectCost.has(account.code) ||
+        dimensionRuleForAccount(account.code).projectRequired,
+    }));
   }
 
   async create(
@@ -198,8 +208,10 @@ export class AdvancesService {
     if (!employee.isActive) {
       throw badRequest('Employee is inactive');
     }
-    const project = await this.projectsService.findByIdOrFail(dto.projectId);
-    if (actor.role === Role.PROJECT_MANAGER) {
+    const project = dto.projectId
+      ? await this.projectsService.findByIdOrFail(dto.projectId)
+      : null;
+    if (project && actor.role === Role.PROJECT_MANAGER) {
       this.projectsService.assertCanAccessProject(actor, project);
     }
     const requestedAt = new Date();
@@ -208,9 +220,13 @@ export class AdvancesService {
       status: AdvanceStatus.PENDING,
       employeeId: employee._id,
       employeeName: `${employee.firstName} ${employee.lastName}`,
-      projectId: project._id,
-      projectCode: project.code,
-      projectName: project.name,
+      ...(project
+        ? {
+            projectId: project._id,
+            projectCode: project.code,
+            projectName: project.name,
+          }
+        : {}),
       requestedMinor: toMinorUnits(dto.amount),
       purpose: dto.purpose.trim(),
       requestedAt,
@@ -461,7 +477,7 @@ export class AdvancesService {
           entityType: ApprovalEntityType.ADVANCE_DISBURSE,
           amount,
           summary: `Disburse advance ${row.advanceNumber}`,
-          projectId: row.projectId.toString(),
+          projectId: row.projectId?.toString(),
           projectCode: row.projectCode,
           payload: {
             advanceId: row._id.toString(),
@@ -489,13 +505,13 @@ export class AdvancesService {
         date: date.toISOString(),
         memo: dto.memo?.trim() || `Advance ${row.advanceNumber} disbursed`,
         reference: row.advanceNumber,
-        projectId: row.projectId.toString(),
+        projectId: row.projectId?.toString(),
         lines: [
           {
             accountCode: ADVANCE_ASSET_CODE,
             debit: amount,
             description: `Advance to ${row.employeeName}`,
-            projectId: row.projectId.toString(),
+            projectId: row.projectId?.toString(),
             entityType: JournalEntityType.EMPLOYEE,
             entityId: row.employeeId.toString(),
           },
@@ -545,6 +561,9 @@ export class AdvancesService {
     }
 
     const vouchers = await this.prepareVouchers(dto.lines ?? []);
+    if (!row.projectId) {
+      await this.assertNoProjectCostVouchers(vouchers);
+    }
     const spentMinor = vouchers.reduce((sum, line) => sum + line.amountMinor, 0);
     classifySettlement(row.disbursedMinor ?? row.requestedMinor, spentMinor);
 
@@ -584,7 +603,7 @@ export class AdvancesService {
     }
 
     const { lines } = buildSettlementJournalLines({
-      projectId: row.projectId.toString(),
+      projectId: row.projectId?.toString(),
       employeeId: row.employeeId.toString(),
       advancedMinor,
       vouchers: row.vouchers,
@@ -602,7 +621,7 @@ export class AdvancesService {
         date: date.toISOString(),
         memo: `Advance ${row.advanceNumber} settlement (${settlementCase})`,
         reference: row.advanceNumber,
-        projectId: row.projectId.toString(),
+        projectId: row.projectId?.toString(),
         journalType:
           settlementCase === SettlementCase.MORE
             ? 'employee_settlement'
@@ -663,7 +682,7 @@ export class AdvancesService {
           dto.memo?.trim() ||
           `Reimburse excess on advance ${row.advanceNumber}`,
         reference: row.advanceNumber,
-        projectId: row.projectId.toString(),
+        projectId: row.projectId?.toString(),
         journalType: 'employee_settlement',
         lines: buildReimbursementJournalLines({
           employeeId: row.employeeId.toString(),
@@ -868,6 +887,26 @@ export class AdvancesService {
     });
   }
 
+  private async assertNoProjectCostVouchers(
+    vouchers: Array<{ accountCode: string; accountName: string }>,
+  ): Promise<void> {
+    const projectCost = await codesUnderProjectCost(
+      vouchers.map((line) => line.accountCode),
+    );
+    const blocked = vouchers.filter(
+      (line) =>
+        projectCost.has(line.accountCode) ||
+        dimensionRuleForAccount(line.accountCode).projectRequired,
+    );
+    if (blocked.length > 0) {
+      throw badRequest(
+        `This advance has no project, so project cost heads cannot be used: ${blocked
+          .map((line) => `${line.accountCode} ${line.accountName}`)
+          .join(', ')}. Choose an office expense head.`,
+      );
+    }
+  }
+
   private async resolveEmployeeId(
     requestedId: string | undefined,
     actor: AuthenticatedUser,
@@ -914,7 +953,7 @@ export class AdvancesService {
     if (await this.isSelf(row.employeeId, actor)) {
       return row;
     }
-    if (actor.role === Role.PROJECT_MANAGER) {
+    if (actor.role === Role.PROJECT_MANAGER && row.projectId) {
       await this.projectsService.assertCanAccessProjectId(
         actor,
         row.projectId.toString(),

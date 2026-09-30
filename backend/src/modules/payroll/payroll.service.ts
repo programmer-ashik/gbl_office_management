@@ -676,7 +676,7 @@ export class PayrollService {
         advanceDeductions: line.advanceDeductions.map((row) => ({
           advanceId: row.advanceId.toString(),
           advanceNumber: row.advanceNumber,
-          projectId: row.projectId.toString(),
+          projectId: row.projectId?.toString(),
           amountMinor: row.amountMinor,
         })),
         facilityDeductions: (line.facilityDeductions ?? []).map((row) => ({
@@ -876,7 +876,7 @@ export class PayrollService {
         .map((row) => ({
           advanceId: row._id.toString(),
           advanceNumber: row.advanceNumber,
-          projectId: row.projectId.toString(),
+          projectId: row.projectId?.toString(),
           outstandingMinor:
             (row.disbursedMinor ?? 0) - (row.payrollDeductedMinor ?? 0),
         }))
@@ -916,7 +916,9 @@ export class PayrollService {
       advanceDeductions: advanceProposal.deductions.map((row) => ({
         advanceId: new Types.ObjectId(row.advanceId),
         advanceNumber: row.advanceNumber,
-        projectId: new Types.ObjectId(row.projectId),
+        ...(row.projectId
+          ? { projectId: new Types.ObjectId(row.projectId) }
+          : {}),
         amountMinor: row.amountMinor,
       })),
       facilityDeductions: facilityProposal.deductions.map((row) => ({

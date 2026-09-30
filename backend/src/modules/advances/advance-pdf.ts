@@ -70,7 +70,9 @@ export async function buildAdvanceVoucherPdf(
     doc.text(`Date: ${dateLabel(row.disbursedAt ?? row.requestedAt)}`)
     doc.moveDown(0.6)
     doc.text(`Employee: ${row.employeeName}`)
-    doc.text(`Project: ${row.projectCode} · ${row.projectName}`)
+    doc.text(
+      `Project: ${row.projectCode ? `${row.projectCode} · ${row.projectName}` : 'None (office advance)'}`,
+    )
     doc.text(`Purpose: ${row.purpose}`)
     doc.moveDown(0.8)
 

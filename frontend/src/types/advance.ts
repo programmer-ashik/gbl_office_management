@@ -38,9 +38,10 @@ export type Advance = {
   status: AdvanceStatus
   employeeId: string
   employeeName: string
-  projectId: string
-  projectCode: string
-  projectName: string
+  /** null for office advances not tied to a project. */
+  projectId: string | null
+  projectCode: string | null
+  projectName: string | null
   requestedAmount: number
   purpose: string
   requestedAt: string
@@ -111,4 +112,6 @@ export type AdvanceProjectOption = {
 export type ExpenseAccountOption = {
   code: string
   name: string
+  /** Direct project cost head; not allowed on advances without a project. */
+  projectOnly?: boolean
 }

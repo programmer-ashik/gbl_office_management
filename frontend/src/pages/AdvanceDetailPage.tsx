@@ -190,19 +190,21 @@ export function AdvanceDetailPage() {
     value: account.id,
     label: `${account.glAccountCode} · ${account.name}`,
   }))
-  const expenseOptions = expenses.map((account) => ({
-    value: account.code,
-    label: `${account.code} · ${account.name}`,
-  }))
+  const expenseOptions = expenses
+    .filter((account) => row.projectId || !account.projectOnly)
+    .map((account) => ({
+      value: account.code,
+      label: `${account.code} · ${account.name}`,
+    }))
 
   return (
     <>
       <header className="workspace-header">
         <div>
           <p className="eyebrow">{row.advanceNumber}</p>
-          <h1>{row.projectName}</h1>
+          <h1>{row.projectName ?? 'Office advance'}</h1>
           <p className="muted">
-            {row.employeeName} · {row.projectName}
+            {row.employeeName} · {row.projectName ?? 'No project'}
           </p>
         </div>
         <Link to="/advances" className="ghost-link">

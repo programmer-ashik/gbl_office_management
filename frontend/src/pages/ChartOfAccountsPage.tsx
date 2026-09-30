@@ -15,20 +15,9 @@ import {
   EMPLOYEE_EXPENSE_KIND_LABELS,
   type Account,
   type Customer,
-  type EmployeeExpenseKind,
 } from '../types/accounting'
 import type { Employee } from '../types/employee'
 import type { Supplier } from '../types/procurement'
-
-const EMPLOYEE_KIND_OPTIONS = [
-  { value: '', label: 'None' },
-  ...(Object.keys(EMPLOYEE_EXPENSE_KIND_LABELS) as EmployeeExpenseKind[]).map(
-    (kind) => ({
-      value: kind,
-      label: `${EMPLOYEE_EXPENSE_KIND_LABELS[kind]} — pick an employee on journal lines`,
-    }),
-  ),
-]
 
 const PARTY_CONTROL_ACCOUNTS: Record<
   string,
@@ -98,8 +87,6 @@ export function ChartOfAccountsPage() {
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editActive, setEditActive] = useState(true)
-  const [editEmployeeKind, setEditEmployeeKind] = useState<EmployeeExpenseKind | ''>('')
-  const [employeeKind, setEmployeeKind] = useState<EmployeeExpenseKind | ''>('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [opening, setOpening] = useState<OpeningRequest | null>(null)
 
@@ -254,7 +241,6 @@ export function ChartOfAccountsPage() {
     setDescription('')
     setParentCode('')
     setOpeningBalance('')
-    setEmployeeKind('')
     setType(AccountType.ASSET)
     setError(null)
     setMessage(null)
@@ -274,7 +260,6 @@ export function ChartOfAccountsPage() {
     setEditName(account.name)
     setEditDescription(account.description ?? '')
     setEditActive(account.isActive)
-    setEditEmployeeKind(account.employeeExpenseKind ?? '')
     setModalOpen(true)
   }
 
@@ -316,15 +301,11 @@ export function ChartOfAccountsPage() {
         description: description || undefined,
         parentCode: parentCode || undefined,
         openingBalance: amount,
-        ...(type === AccountType.EXPENSE && employeeKind
-          ? { employeeExpenseKind: employeeKind }
-          : {}),
       })
       setName('')
       setDescription('')
       setParentCode('')
       setOpeningBalance('')
-      setEmployeeKind('')
       setModalOpen(false)
       if (created.openingJournalNumber) {
         setMessage(
@@ -347,16 +328,10 @@ export function ChartOfAccountsPage() {
     setSaving(true)
     setError(null)
     try {
-      const canTagEmployee =
-        editing.type === AccountType.EXPENSE && editing.isPostable
       await api.updateAccount(editing.id, {
         name: editName,
         description: editDescription,
         isActive: editActive,
-        ...(canTagEmployee &&
-        editEmployeeKind !== (editing.employeeExpenseKind ?? '')
-          ? { employeeExpenseKind: editEmployeeKind || null }
-          : {}),
       })
       setModalOpen(false)
       setEditing(null)
@@ -745,18 +720,6 @@ export function ChartOfAccountsPage() {
                 ]}
               />
             </label>
-            {editing.type === AccountType.EXPENSE && editing.isPostable ? (
-              <label>
-                Employee tagging
-                <Select
-                  value={editEmployeeKind}
-                  onChange={(value) =>
-                    setEditEmployeeKind(value as EmployeeExpenseKind | '')
-                  }
-                  options={EMPLOYEE_KIND_OPTIONS}
-                />
-              </label>
-            ) : null}
             <div className="form-actions">
               <button type="submit" disabled={saving}>
                 {saving ? 'Saving…' : 'Save changes'}
@@ -818,18 +781,6 @@ export function ChartOfAccountsPage() {
                 onChange={(e) => setDescription(e.target.value)}
               />
             </label>
-            {type === AccountType.EXPENSE ? (
-              <label>
-                Employee tagging
-                <Select
-                  value={employeeKind}
-                  onChange={(value) =>
-                    setEmployeeKind(value as EmployeeExpenseKind | '')
-                  }
-                  options={EMPLOYEE_KIND_OPTIONS}
-                />
-              </label>
-            ) : null}
             <label>
               Opening balance (optional)
               <input

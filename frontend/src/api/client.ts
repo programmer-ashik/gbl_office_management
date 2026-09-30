@@ -873,7 +873,7 @@ export const api = {
   advanceProjects: () => request<AdvanceProjectOption[]>('/advances/projects'),
   expenseAccounts: () =>
     request<ExpenseAccountOption[]>('/advances/expense-accounts'),
-  createAdvance: (body: { projectId: string; amount: number; purpose: string }) =>
+  createAdvance: (body: { projectId?: string; amount: number; purpose: string }) =>
     request<Advance>('/advances', {
       method: 'POST',
       body: JSON.stringify(body),

@@ -119,7 +119,7 @@ export function AdvanceSettlementsPage() {
                 <td className='mobile-stack-title'>
                   <Link to={`/advances/${row.id}`}>{row.advanceNumber}</Link>
                 </td>
-                <td data-label='Project'>{row.projectName}</td>
+                <td data-label='Project'>{row.projectName ?? "No project"}</td>
                 <td data-label='Employee'>{row.employeeName}</td>
                 <td data-label='Requested'>{money(row.requestedAmount)}</td>
                 <td data-label='Spent'>

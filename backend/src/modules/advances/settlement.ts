@@ -33,7 +33,7 @@ export function classifySettlement(
 }
 
 export function buildSettlementJournalLines(input: {
-  projectId: string;
+  projectId?: string;
   employeeId: string;
   advancedMinor: number;
   vouchers: VoucherInput[];

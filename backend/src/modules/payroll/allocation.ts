@@ -22,7 +22,7 @@ export type LaborAllocation = {
 export type AdvanceDeduction = {
   advanceId: string;
   advanceNumber: string;
-  projectId: string;
+  projectId?: string;
   amountMinor: number;
 };
 
@@ -81,7 +81,7 @@ export function proposeAdvanceDeductions(input: {
   advances: Array<{
     advanceId: string;
     advanceNumber: string;
-    projectId: string;
+    projectId?: string;
     outstandingMinor: number;
   }>;
 }): {

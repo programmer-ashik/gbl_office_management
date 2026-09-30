@@ -58,9 +58,6 @@ export function AdvancesPage() {
     setTotal(advances.total)
     setProjects(options)
     setEmployees(staff)
-    if (!projectId && options[0]) {
-      setProjectId(options[0].id)
-    }
   }
 
   useEffect(() => {
@@ -71,12 +68,11 @@ export function AdvancesPage() {
 
   async function onCreate(event: FormEvent) {
     event.preventDefault()
-    if (!projectId) return
     setSaving(true)
     setError(null)
     try {
       await api.createAdvance({
-        projectId,
+        projectId: projectId || undefined,
         amount: Number(amount),
         purpose,
       })
@@ -159,8 +155,9 @@ export function AdvancesPage() {
         <div className="table-head">
           <h2>Submit requisition</h2>
           <p className="muted">
-            Request cash for a project. Until settlement, the payment is an employee
-            advance asset — not a project expense.
+            Request cash for a project, or choose None for office / general
+            spending. Until settlement, the payment is an employee advance asset
+            — not an expense.
           </p>
         </div>
         <form className="stack-form" onSubmit={(event) => void onCreate(event)}>
@@ -170,10 +167,11 @@ export function AdvancesPage() {
               <Select
                 value={projectId}
                 onChange={setProjectId}
-                options={projectOptions}
+                options={[
+                  { value: '', label: 'None (office / general)' },
+                  ...projectOptions,
+                ]}
                 searchable
-                placeholder="Select project"
-                required
               />
             </label>
             <label>
@@ -196,7 +194,7 @@ export function AdvancesPage() {
             />
           </label>
           <div className="form-actions">
-            <button type="submit" disabled={saving || !projectId}>
+            <button type="submit" disabled={saving}>
               {saving ? 'Submitting…' : 'Submit requisition'}
             </button>
           </div>
@@ -297,7 +295,7 @@ export function AdvancesPage() {
                 <td className="mobile-stack-title">
                   <Link to={`/advances/${row.id}`}>{row.advanceNumber}</Link>
                 </td>
-                <td data-label="Project">{row.projectName}</td>
+                <td data-label="Project">{row.projectName ?? 'No project'}</td>
                 {isFinance ? (
                   <td data-label="Employee">{row.employeeName}</td>
                 ) : null}
