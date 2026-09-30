@@ -166,7 +166,7 @@ async function drawSlip(
   doc.moveDown(3);
   doc.fontSize(8).fillColor('#5a6578');
   doc.text(
-    'Accrual: Dr 5120/5230 · Cr 1131 / 2133 / 2131 / 2121. Disbursement: Dr 2121 · Cr Cash/Bank.',
+    'Accrual: Dr 5120/5230 · Cr 1161 / 2133 / 2131 / 2121. Disbursement: Dr 2121 · Cr Cash/Bank.',
   );
   doc.text('This slip is system-generated after payroll disbursement.');
 }

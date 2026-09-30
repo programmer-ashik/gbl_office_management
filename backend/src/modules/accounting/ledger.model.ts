@@ -54,7 +54,7 @@ const ledgerLineSchema = new Schema<ILedgerLine>(
     },
     date: { type: Date, required: true, index: true },
     memo: { type: String, required: true },
-    description: { type: String, trim: true, maxlength: 500 },
+    description: { type: String, trim: true },
     reference: { type: String, trim: true, maxlength: 120 },
     debitMinor: { type: Number, required: true, min: 0 },
     creditMinor: { type: Number, required: true, min: 0 },

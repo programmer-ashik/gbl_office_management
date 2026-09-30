@@ -6,6 +6,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { api } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { ExpandableText } from "../components/ExpandableText";
 import { MetricCard } from "../components/MetricCard";
 import { Select } from "../components/ui";
@@ -18,14 +19,22 @@ import {
   type Customer,
   type JournalEntityType as EntityType,
 } from "../types/accounting";
-import type { PublicUser } from "../types/auth";
-import type { TreasuryAccount } from "../types/banking";
+import type { Employee } from "../types/employee";
+import { TreasuryKind, type TreasuryAccount } from "../types/banking";
 import type { Supplier } from "../types/procurement";
-import type { Project } from "../types/project";
+import { projectBelongsToCustomer, type Project } from "../types/project";
+import { VoucherPdfPreview } from "../components/VoucherPdfPreview";
+import {
+  downloadLedgerPdf,
+  ledgerPdfPreviewUrl,
+  type LedgerPdfInput,
+} from "../utils/ledgerPdf";
+import { loadCompanyBranding } from "../utils/companyBranding";
 
 type EntityOption = { value: string; label: string };
 
 export function AccountLedgerPage() {
+  const { user } = useAuth();
   const { accountCode: routeCode } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -45,22 +54,80 @@ export function AccountLedgerPage() {
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [employees, setEmployees] = useState<PublicUser[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [treasury, setTreasury] = useState<TreasuryAccount[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
 
   const [ledger, setLedger] = useState<AccountLedger | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [bankCode, setBankCode] = useState("");
+
+  const selectedAccount = useMemo(
+    () => accounts.find((row) => row.code === accountCode),
+    [accounts, accountCode],
+  );
+
+  const bankAccounts = useMemo(() => {
+    const fromTreasury = treasury
+      .filter(
+        (row) =>
+          row.isActive &&
+          (row.kind === TreasuryKind.COMMERCIAL_BANK ||
+            row.glAccountCode.startsWith("1121") ||
+            row.glAccountCode.startsWith("1122") ||
+            row.glAccountCode.startsWith("1123")),
+      )
+      .map((row) => ({
+        code: row.glAccountCode,
+        name: row.name,
+      }));
+    const fromCoa = accounts
+      .filter(
+        (row) =>
+          row.isPostable &&
+          row.isActive &&
+          (row.parentCode === "1120" ||
+            row.code === "1121" ||
+            row.code === "1122" ||
+            row.code === "1123") &&
+          row.code !== "1111",
+      )
+      .map((row) => ({ code: row.code, name: row.name }));
+    const map = new Map<string, { code: string; name: string }>();
+    for (const row of [...fromCoa, ...fromTreasury]) {
+      map.set(row.code, row);
+    }
+    return [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
+  }, [accounts, treasury]);
+
+  const showBankPicker =
+    accountCode === "1120" ||
+    selectedAccount?.parentCode === "1120" ||
+    selectedAccount?.name.toLowerCase().includes("cash at bank") === true;
+
+  useEffect(() => {
+    if (!showBankPicker) return;
+    if (treasury.length > 0) return;
+    api
+      .treasury()
+      .then(setTreasury)
+      .catch(() => setTreasury([]));
+  }, [showBankPicker, treasury.length]);
 
   const dimension = useMemo(
-    () => (accountCode ? dimensionRuleForAccount(accountCode) : null),
-    [accountCode],
+    () =>
+      accountCode ? dimensionRuleForAccount(accountCode, accounts) : null,
+    [accountCode, accounts],
   );
 
   const entityType: EntityType | null = dimension?.entityType ?? null;
   const showEntityFilter = Boolean(entityType);
-  const showProjectFilter = Boolean(dimension?.projectRequired);
+  const showProjectFilter = Boolean(
+    dimension?.projectRequired || dimension?.projectOptional,
+  );
   const isSupplierPayable = accountCode === "2111" || accountCode === "2113";
 
   useEffect(() => {
@@ -163,6 +230,7 @@ export function AccountLedgerPage() {
     const params: {
       entityType?: EntityType;
       entityId?: string;
+      projectId?: string;
       fromDate?: string;
       toDate?: string;
     } = {};
@@ -170,18 +238,37 @@ export function AccountLedgerPage() {
       params.entityType = entityType;
       params.entityId = entityId;
     }
+    if (showProjectFilter && projectId) params.projectId = projectId;
     if (fromDate) params.fromDate = fromDate;
     if (toDate) params.toDate = toDate;
 
+    let cancelled = false;
     api
       .ledger(accountCode, params)
-      .then(setLedger)
+      .then((next) => {
+        if (!cancelled) setLedger(next);
+      })
       .catch((err: unknown) => {
+        if (cancelled) return;
         setLedger(null);
         setError(err instanceof Error ? err.message : "Unable to load ledger");
       })
-      .finally(() => setLoading(false));
-  }, [accountCode, entityId, entityType, showEntityFilter, fromDate, toDate]);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accountCode,
+    entityId,
+    entityType,
+    showEntityFilter,
+    projectId,
+    showProjectFilter,
+    fromDate,
+    toDate,
+  ]);
 
   const entityOptions: EntityOption[] = useMemo(() => {
     if (entityType === JournalEntityType.CUSTOMER) {
@@ -211,39 +298,54 @@ export function AccountLedgerPage() {
     return [];
   }, [entityType, customers, suppliers, employees, treasury]);
 
+  const selectedCustomer =
+    entityType === JournalEntityType.CUSTOMER && entityId
+      ? customers.find((row) => row.id === entityId)
+      : undefined;
+
+  /** With a customer selected, only that customer's projects can be picked. */
+  const scopedProjects = useMemo(
+    () =>
+      selectedCustomer
+        ? projects.filter((project) =>
+            projectBelongsToCustomer(project, selectedCustomer),
+          )
+        : projects,
+    [projects, selectedCustomer],
+  );
+
   const projectOptions = useMemo(
     () =>
-      projects.map((project) => ({
+      scopedProjects.map((project) => ({
         value: project.id,
         label: `${project.code} · ${project.name}`,
       })),
-    [projects],
+    [scopedProjects],
   );
 
-  const filteredEntries = useMemo(() => {
-    if (!ledger) return [];
-    if (!showProjectFilter || !projectId) return ledger.entries;
-    return ledger.entries.filter((row) => row.projectId === projectId);
-  }, [ledger, showProjectFilter, projectId]);
+  useEffect(() => {
+    if (!projectId || !selectedCustomer || projects.length === 0) return;
+    if (!scopedProjects.some((project) => project.id === projectId)) {
+      setProjectId("");
+      syncFilterParams({ projectId: "" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, selectedCustomer, scopedProjects, projects.length]);
 
-  const running = useMemo(() => {
-    // Backend already returns newest-first with bank-style runningBalance.
-    // Recompute only when project filter slices the period rows.
-    if (!showProjectFilter || !projectId || !ledger) {
-      return filteredEntries.map((row) => ({
+  /** Chronological (oldest first); the API returns newest first. */
+  const filteredEntries = useMemo(
+    () => (ledger ? [...ledger.entries].reverse() : []),
+    [ledger],
+  );
+
+  const running = useMemo(
+    () =>
+      filteredEntries.map((row) => ({
         ...row,
         runningBalance: row.runningBalance ?? 0,
-      }));
-    }
-    const creditNormal = ledger.account.normalBalance === "credit";
-    const chrono = [...filteredEntries].reverse();
-    let balance = ledger.openingBalance ?? 0;
-    const withRunning = chrono.map((row) => {
-      balance += creditNormal ? row.credit - row.debit : row.debit - row.credit;
-      return { ...row, runningBalance: Number(balance.toFixed(2)) };
-    });
-    return withRunning.reverse();
-  }, [filteredEntries, ledger, showProjectFilter, projectId]);
+      })),
+    [filteredEntries],
+  );
 
   const filteredTotals = useMemo(() => {
     const debit = filteredEntries.reduce((sum, row) => sum + row.debit, 0);
@@ -251,7 +353,7 @@ export function AccountLedgerPage() {
     const opening = ledger?.openingBalance ?? 0;
     const closing =
       running.length > 0
-        ? running[0]!.runningBalance
+        ? running[running.length - 1]!.runningBalance
         : (ledger?.closingBalance ?? opening);
     return { debit, credit, opening, closing };
   }, [filteredEntries, running, ledger]);
@@ -302,7 +404,94 @@ export function AccountLedgerPage() {
     setAccountCode(next);
     setEntityId("");
     setProjectId("");
+    setBankCode("");
     navigate(`/ledgers/${encodeURIComponent(next)}`, { replace: true });
+  }
+
+  function onBankChange(next: string) {
+    setBankCode(next);
+    if (!next) return;
+    setAccountCode(next);
+    setEntityId("");
+    setProjectId("");
+    navigate(`/ledgers/${encodeURIComponent(next)}`, { replace: true });
+  }
+
+  function ledgerPdfInput(): LedgerPdfInput | null {
+    if (!ledger) return null;
+    const entityLabel =
+      entityOptions.find((row) => row.value === entityId)?.label ??
+      (entityId ? entityId : "");
+    const projectLabel =
+      projectOptions.find((row) => row.value === projectId)?.label ??
+      (projectId ? projectId : "");
+    return {
+      companyName: "GBL Enterprise",
+      title: "General Ledger",
+      accountCode: ledger.account.accountCode,
+      accountName: ledger.account.accountName,
+      filters: [
+        ...(entityLabel
+          ? [{ label: entityFilterLabel, value: entityLabel }]
+          : []),
+        ...(projectLabel ? [{ label: "Project", value: projectLabel }] : []),
+      ],
+      fromDate: fromDate || ledger.fromDate,
+      toDate: toDate || ledger.toDate,
+      generatedBy: user?.email ?? user?.role ?? "user",
+      generatedAt: new Date().toISOString(),
+      openingBalance: filteredTotals.opening,
+      closingBalance: filteredTotals.closing,
+      periodDebit: filteredTotals.debit,
+      periodCredit: filteredTotals.credit,
+      rows: running.map((row) => ({
+        date: row.date,
+        entryNumber: row.entryNumber,
+        memo: row.description || row.memo || "",
+        reference: [
+          row.counterpart,
+          row.reference ? `Ref ${row.reference}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        entity: row.entityName ?? "—",
+        debit: row.debit,
+        credit: row.credit,
+        runningBalance: row.runningBalance ?? 0,
+      })),
+    };
+  }
+
+  async function onPdf(action: "preview" | "download") {
+    const base = ledgerPdfInput();
+    if (!base) return;
+    setExporting(true);
+    try {
+      const branding = await loadCompanyBranding();
+      const input = {
+        ...base,
+        companyName: branding.companyName,
+        logoDataUrl: branding.logoDataUrl,
+      };
+      if (action === "download") {
+        downloadLedgerPdf(input);
+        return;
+      }
+      const url = ledgerPdfPreviewUrl(input);
+      setPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return url;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to build PDF");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  function closePreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
   }
 
   function onEntityChange(next: string) {
@@ -354,8 +543,33 @@ export function AccountLedgerPage() {
           <Link to='/journals' className='ghost-link'>
             Journals
           </Link>
+          <button
+            type='button'
+            className='ghost'
+            disabled={!ledger || exporting || loading}
+            onClick={() => void onPdf("preview")}
+          >
+            Preview PDF
+          </button>
+          <button
+            type='button'
+            disabled={!ledger || exporting || loading}
+            onClick={() => void onPdf("download")}
+          >
+            {exporting ? "Exporting…" : "Download PDF"}
+          </button>
         </div>
       </header>
+
+      <VoucherPdfPreview
+        url={previewUrl}
+        title={
+          ledger
+            ? `Ledger ${ledger.account.accountCode} · ${ledger.account.accountName}`
+            : "Ledger PDF"
+        }
+        onClose={closePreview}
+      />
 
       <section className='table-card'>
         <div className='table-head'>
@@ -403,6 +617,30 @@ export function AccountLedgerPage() {
                 />
               </label>
             ) : null}
+
+            {showBankPicker ? (
+              <label className='ledger-filter-party'>
+                Bank
+                <Select
+                  value={
+                    bankAccounts.some((row) => row.code === accountCode)
+                      ? accountCode
+                      : bankCode
+                  }
+                  onChange={onBankChange}
+                  options={[
+                    { value: "", label: "Select a bank" },
+                    ...bankAccounts.map((row) => ({
+                      value: row.code,
+                      label: `${row.code} · ${row.name}`,
+                    })),
+                  ]}
+                  searchable
+                  portal
+                  placeholder='Select a bank'
+                />
+              </label>
+            ) : null}
           </div>
 
           <div className='ledger-filter-row'>
@@ -429,21 +667,28 @@ export function AccountLedgerPage() {
                   value={projectId}
                   onChange={onProjectChange}
                   options={[
-                    { value: "", label: "All projects" },
+                    {
+                      value: "",
+                      label: selectedCustomer
+                        ? `All ${selectedCustomer.name} projects`
+                        : "All projects",
+                    },
                     ...projectOptions,
                   ]}
                   searchable
                   portal
                   placeholder='All projects'
                 />
+                {selectedCustomer && projectOptions.length === 0 ? (
+                  <span className='muted field-hint'>
+                    No projects under this customer yet.
+                  </span>
+                ) : null}
               </label>
             ) : null}
           </div>
 
-          {showEntityFilter ||
-          showProjectFilter ||
-          fromDate ||
-          toDate ? (
+          {showEntityFilter || showProjectFilter || fromDate || toDate ? (
             <button
               type='button'
               className='ghost w-[120px]'
@@ -488,11 +733,7 @@ export function AccountLedgerPage() {
                 variant='teal'
                 title='Opening balance'
                 value={money(filteredTotals.opening)}
-                meta={
-                  fromDate
-                    ? `Before ${fromDate}`
-                    : "Start of ledger"
-                }
+                meta={fromDate ? `Before ${fromDate}` : "Start of ledger"}
               />
               <MetricCard
                 variant='purple'
@@ -514,8 +755,8 @@ export function AccountLedgerPage() {
                   <tr className='ledger-table-header'>
                     <th>Date</th>
                     <th>Journal</th>
+                    <th>Ledger Head</th>
                     <th>Description</th>
-                    <th>Reference</th>
                     <th>Entity</th>
                     <th className='num'>Debit</th>
                     <th className='num'>Credit</th>
@@ -525,12 +766,12 @@ export function AccountLedgerPage() {
                 <tbody>
                   <tr className='ledger-balance-row'>
                     <td colSpan={5}>
-                      Closing balance
-                      {toDate ? ` (as at ${toDate})` : " (current)"}
+                      Opening balance
+                      {fromDate ? ` (before ${fromDate})` : " (start)"}
                     </td>
                     <td className='num'>—</td>
                     <td className='num'>—</td>
-                    <td className='num'>{money(filteredTotals.closing)}</td>
+                    <td className='num'>{money(filteredTotals.opening)}</td>
                   </tr>
                   {running.map((row) => (
                     <tr key={row.id}>
@@ -546,13 +787,21 @@ export function AccountLedgerPage() {
                           {row.entryNumber}
                         </Link>
                       </td>
+                      <td className='ledger-reference-cell'>
+                        {row.counterpart || (row.reference ? null : "—")}
+                        {row.reference ? (
+                          <span className='muted ledger-reference-no'>
+                            Ref {row.reference}
+                          </span>
+                        ) : null}
+                      </td>
                       <td className='ledger-description-cell'>
                         <ExpandableText
                           text={row.description || row.memo}
                           maxChars={48}
                         />
                       </td>
-                      <td>{row.reference ?? "—"}</td>
+
                       <td>{entityCell(row)}</td>
                       <td className='num amount-debit-cell'>
                         {row.debit > 0 ? money(row.debit) : "—"}
@@ -563,15 +812,6 @@ export function AccountLedgerPage() {
                       <td className='num'>{money(row.runningBalance)}</td>
                     </tr>
                   ))}
-                  <tr className='ledger-balance-row'>
-                    <td colSpan={5}>
-                      Opening balance
-                      {fromDate ? ` (before ${fromDate})` : " (start)"}
-                    </td>
-                    <td className='num'>—</td>
-                    <td className='num'>—</td>
-                    <td className='num'>{money(filteredTotals.opening)}</td>
-                  </tr>
                   {running.length === 0 ? (
                     <tr>
                       <td colSpan={8} className='muted'>
@@ -583,6 +823,15 @@ export function AccountLedgerPage() {
                       </td>
                     </tr>
                   ) : null}
+                  <tr className='ledger-balance-row'>
+                    <td colSpan={5}>
+                      Closing balance
+                      {toDate ? ` (as at ${toDate})` : " (current)"}
+                    </td>
+                    <td className='num'>{money(filteredTotals.debit)}</td>
+                    <td className='num'>{money(filteredTotals.credit)}</td>
+                    <td className='num'>{money(filteredTotals.closing)}</td>
+                  </tr>
                 </tbody>
               </table>
             </div>

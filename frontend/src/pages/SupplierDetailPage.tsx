@@ -78,6 +78,14 @@ export function SupplierDetailPage() {
       </header>
 
       <section className="grid metric-card-grid">
+        {row.opening ? (
+          <MetricCard
+            variant="teal"
+            title="Opening balance"
+            value={money(row.opening)}
+            meta="Carried in from old books"
+          />
+        ) : null}
         <MetricCard
           variant="blue"
           title="Purchases (GRN)"

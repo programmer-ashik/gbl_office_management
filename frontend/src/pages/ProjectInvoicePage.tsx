@@ -27,12 +27,14 @@ import { api } from "../api/client";
 import { FileUploadField } from "../components/FileUploadField";
 import { ProjectInvoiceDocument } from "../components/ProjectInvoiceDocument";
 import {
+  DEFAULT_INVOICE_VAT_RATE,
   draftStorageKey,
   defaultColumnWidths,
   defaultInvoiceExtras,
   emptyInvoiceLine,
   formatInvoiceMoney,
   INVOICE_CURRENCIES,
+  INVOICE_TITLE_OPTIONS,
   invoiceCurrencyByCode,
   invoiceTotals,
   linesFromProjectMaterials,
@@ -216,6 +218,11 @@ export function ProjectInvoicePage() {
           );
           const next = {
             ...stored,
+            invoiceId: stored.invoiceId ?? existing?.id ?? null,
+            invoiceNumber:
+              !stored.invoiceId && existing
+                ? existing.invoiceNumber
+                : stored.invoiceNumber,
             logoUrl: stored.logoUrl || tpl.companyLogoUrl || null,
             lines:
               (project.materialsSummary?.length ?? 0) > 0
@@ -247,9 +254,9 @@ export function ProjectInvoicePage() {
           phone: project.client.phone ?? "",
           email: project.client.email ?? "",
           address: project.client.address ?? "",
-          taxRate: 15,
+          taxRate: DEFAULT_INVOICE_VAT_RATE,
           discountRate: 0,
-          percentMode: 'flat',
+          percentMode: 'reverse',
           ...defaultInvoiceExtras(),
           columnWidths: { ...defaultColumnWidths },
           lines: materialLines,
@@ -362,9 +369,9 @@ export function ProjectInvoicePage() {
     if (!draft) return;
     const box: InvoiceTextBox = {
       id: newTextBoxId(),
-      text: "Text box",
+      text: "",
       x: 20,
-      y: 40,
+      y: 40 + (draft.textBoxes.length % 5) * 6,
       width: 30,
       fontSize: 14,
       bold: false,
@@ -375,6 +382,22 @@ export function ProjectInvoicePage() {
     setDraft(next);
     persist(next);
     setSelectedId(box.id);
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLTextAreaElement>(`[data-textbox-id="${box.id}"] textarea`)
+        ?.focus();
+    }, 0);
+  }
+
+  function removeSelectedTextBox() {
+    if (!draft || !selectedBox) return;
+    const next = {
+      ...draft,
+      textBoxes: draft.textBoxes.filter((row) => row.id !== selectedBox.id),
+    };
+    setDraft(next);
+    persist(next);
+    setSelectedId(null);
   }
 
   async function ensurePostedInvoice() {
@@ -459,7 +482,11 @@ export function ProjectInvoicePage() {
             disabled={saving}
             onClick={() => void ensurePostedInvoice()}
           >
-            {saving ? "Posting…" : "Post to receivables"}
+            {saving
+              ? "Posting…"
+              : draft.invoiceId
+                ? "Sent to receivables"
+                : "Send invoice (post to AR)"}
           </button>
         </div>
       </header>
@@ -487,6 +514,69 @@ export function ProjectInvoicePage() {
                 Add text box
               </button>
             </div>
+
+            <label>
+              Invoice heading
+              <select
+                value={
+                  (INVOICE_TITLE_OPTIONS as readonly string[]).includes(
+                    draft.documentTitle,
+                  )
+                    ? draft.documentTitle
+                    : "__custom"
+                }
+                onChange={(e) => {
+                  if (e.target.value !== "__custom") {
+                    patchDraft({ documentTitle: e.target.value });
+                  }
+                }}
+              >
+                {INVOICE_TITLE_OPTIONS.map((title) => (
+                  <option key={title} value={title}>
+                    {title}
+                  </option>
+                ))}
+                <option value='__custom'>Custom (type on the invoice)</option>
+              </select>
+            </label>
+
+            {selectedBox ? (
+              <div className='inv-textbox-editor'>
+                <h3>Selected text box</h3>
+                <label>
+                  Text
+                  <textarea
+                    rows={4}
+                    value={selectedBox.text}
+                    placeholder='Type the text to show on the invoice…'
+                    onChange={(e) =>
+                      changeTextBox(selectedBox.id, { text: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Width %
+                  <input
+                    type='range'
+                    min={10}
+                    max={90}
+                    value={selectedBox.width}
+                    onChange={(e) =>
+                      changeTextBox(selectedBox.id, {
+                        width: Number(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <button
+                  type='button'
+                  className='ghost'
+                  onClick={removeSelectedTextBox}
+                >
+                  Remove text box
+                </button>
+              </div>
+            ) : null}
 
             <h3>Row order (drag)</h3>
             <DndContext
@@ -615,10 +705,11 @@ export function ProjectInvoicePage() {
               </select>
             </label>
             <label>
-              Tax %
+              VAT &amp; Tax %
               <input
                 type='number'
                 min={0}
+                max={99.99}
                 step='0.01'
                 value={draft.taxRate}
                 onChange={(e) =>
@@ -641,22 +732,44 @@ export function ProjectInvoicePage() {
             <label>
               Percentage calculation
               <select
-                value={draft.percentMode === 'reverse' ? 'reverse' : 'flat'}
+                value={draft.percentMode === 'flat' ? 'flat' : 'reverse'}
                 onChange={(e) =>
                   patchDraft({
-                    percentMode:
-                      e.target.value === 'reverse' ? 'reverse' : 'flat',
+                    percentMode: e.target.value === 'flat' ? 'flat' : 'reverse',
                   })
                 }
               >
-                <option value='flat'>Flat percentage</option>
-                <option value='reverse'>Reverse percentage</option>
+                <option value='reverse'>Reverse percentage (gross-up)</option>
+                <option value='flat'>Flat percentage (VAT on top)</option>
               </select>
             </label>
-            <p className='muted'>
-              Grand total{" "}
-              {formatInvoiceMoney(totals?.grandTotal ?? 0, draft.currencyCode)}
-            </p>
+            {totals ? (
+              <dl className='inv-grossup-breakdown'>
+                <div>
+                  <dt>Net amount</dt>
+                  <dd>
+                    {formatInvoiceMoney(totals.taxableAmount, draft.currencyCode)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>VAT &amp; Tax ({draft.taxRate || 0}%)</dt>
+                  <dd>
+                    {formatInvoiceMoney(totals.taxAmount, draft.currencyCode)}
+                  </dd>
+                </div>
+                <div className='is-total'>
+                  <dt>Grand total</dt>
+                  <dd>
+                    {formatInvoiceMoney(totals.grandTotal, draft.currencyCode)}
+                  </dd>
+                </div>
+                <p className='muted'>
+                  {totals.percentMode === "reverse"
+                    ? `Gross-up: net ÷ ${((100 - (draft.taxRate || 0)) / 100).toFixed(4)} (same as quotations).`
+                    : "Flat: VAT added on top of the net amount."}
+                </p>
+              </dl>
+            ) : null}
 
             <h3>Company / payment</h3>
             <label>

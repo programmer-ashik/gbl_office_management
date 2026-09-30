@@ -12,6 +12,7 @@ import { fromMilliQty } from '../../common/utils/quantity';
 import { StockIssueModel } from '../procurement/stock-issue.model';
 import { ItemModel } from '../procurement/item.model';
 import { UserModel } from '../users/user.model';
+import { CustomerModel } from '../customers/customer.model';
 import type {
   CreateProjectDto,
   UpdateProjectDto,
@@ -63,6 +64,7 @@ export type PublicProject = {
   code: string;
   name: string;
   client: PublicClient;
+  customerId: string | null;
   startDate: string;
   endDate: string | null;
   contractValue: number;
@@ -96,6 +98,7 @@ export class ProjectsService {
         phone: project.client.phone ?? null,
         address: project.client.address ?? null,
       },
+      customerId: project.customerId ? project.customerId.toString() : null,
       startDate: project.startDate.toISOString(),
       endDate: project.endDate ? project.endDate.toISOString() : null,
       contractValue:
@@ -117,11 +120,15 @@ export class ProjectsService {
   async create(dto: CreateProjectDto, userId: string): Promise<PublicProject> {
     this.assertDateRange(dto.startDate, dto.endDate);
     await this.assertManager(dto.managerId);
+    const linked = dto.customerId
+      ? await this.clientFromCustomer(dto.customerId, dto.client)
+      : null;
 
     const project = await ProjectModel.create({
       code: await this.nextProjectCode(new Date(dto.startDate)),
       name: dto.name.trim(),
-      client: this.normalizeClient(dto.client),
+      client: linked?.client ?? this.normalizeClient(dto.client),
+      customerId: linked?.customerId,
       startDate: new Date(dto.startDate),
       endDate: dto.endDate ? new Date(dto.endDate) : undefined,
       contractValueMinor: toMinorUnits(dto.contractValue),
@@ -198,7 +205,14 @@ export class ProjectsService {
     await this.assertManager(dto.managerId);
 
     if (dto.name) project.name = dto.name.trim();
-    if (dto.client) {
+    if (dto.customerId) {
+      const linked = await this.clientFromCustomer(dto.customerId, {
+        ...project.client,
+        ...dto.client,
+      });
+      project.customerId = linked.customerId;
+      project.client = linked.client;
+    } else if (dto.client) {
       project.client = this.normalizeClient({
         name: dto.client.name,
         contactName: dto.client.contactName ?? project.client.contactName,
@@ -339,6 +353,34 @@ export class ProjectsService {
     if (!exists) {
       throw notFound('Project not found');
     }
+  }
+
+  /**
+   * Links a project to an active customer. Name and address always follow the
+   * customer; contact, email and phone fall back to the customer when the form
+   * leaves them blank.
+   */
+  private async clientFromCustomer(
+    customerId: string,
+    client?: Partial<CreateProjectDto['client']>,
+  ) {
+    const customer = await CustomerModel.findById(customerId).exec();
+    if (!customer) {
+      throw badRequest('Client not found — add the client first');
+    }
+    if (!customer.isActive) {
+      throw badRequest(`Client ${customer.name} is inactive`);
+    }
+    return {
+      customerId: customer._id,
+      client: this.normalizeClient({
+        name: customer.name,
+        contactName: client?.contactName || customer.contactName,
+        email: client?.email || customer.email,
+        phone: client?.phone || customer.phone,
+        address: customer.address ?? client?.address,
+      }),
+    };
   }
 
   private normalizeClient(client: CreateProjectDto['client']) {

@@ -1,7 +1,11 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -9,8 +13,16 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { AccountType } from '../../../common/enums/account-type.enum';
+import {
+  EMPLOYEE_EXPENSE_KIND_VALUES,
+  type EmployeeExpenseKind,
+} from '../account.model';
+
+const emptyToNull = ({ value }: { value: unknown }) =>
+  value === '' ? null : value;
 
 export class CreateAccountDto {
   @Transform(({ value }: { value: unknown }) =>
@@ -60,6 +72,45 @@ export class CreateAccountDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   openingBalance?: number;
+
+  /** Salary / conveyance heads show an employee picker on journal lines. */
+  @IsOptional()
+  @Transform(emptyToNull)
+  @IsIn(EMPLOYEE_EXPENSE_KIND_VALUES)
+  employeeExpenseKind?: EmployeeExpenseKind | null;
+}
+
+export class SplitAccountChildDto {
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  @IsString()
+  @Matches(/^[A-Z0-9-]{3,12}$/, {
+    message: 'code must be 3-12 letters, numbers, or hyphens',
+  })
+  code: string;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name: string;
+}
+
+export class SplitAccountDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => SplitAccountChildDto)
+  children: SplitAccountChildDto[];
+
+  /** Sub-account code that receives the balance already posted to the account. */
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && value.trim() ? value.trim().toUpperCase() : undefined,
+  )
+  @IsString()
+  historyTo?: string;
 }
 
 export class UpdateAccountDto {
@@ -81,4 +132,10 @@ export class UpdateAccountDto {
   @IsOptional()
   @IsBoolean()
   isPostable?: boolean;
+
+  /** `null` (or empty string) clears the flag. */
+  @IsOptional()
+  @Transform(emptyToNull)
+  @IsIn(EMPLOYEE_EXPENSE_KIND_VALUES)
+  employeeExpenseKind?: EmployeeExpenseKind | null;
 }

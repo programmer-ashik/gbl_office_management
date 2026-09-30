@@ -1,40 +1,36 @@
-import { Link } from 'react-router-dom'
-import { useAuth } from '../auth/AuthContext'
-import { MetricCard } from '../components/MetricCard'
-import { Select } from '../components/ui'
-import {
-  BUTTON_PRESETS,
-  useTheme,
-  type UiTheme,
-} from '../theme/ThemeContext'
-import { Role } from '../types/auth'
+import { Link } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import { MetricCard } from "../components/MetricCard";
+import { Select } from "../components/ui";
+import { BUTTON_PRESETS, useTheme, type UiTheme } from "../theme/ThemeContext";
+import { Role } from "../types/auth";
 
 const OPTIONS: Array<{
-  id: UiTheme
-  title: string
-  description: string
+  id: UiTheme;
+  title: string;
+  description: string;
 }> = [
   {
-    id: 'classic',
-    title: 'Classic',
+    id: "classic",
+    title: "Classic",
     description:
-      'Banking-style navy & paper surfaces. Calm borders, restrained accents.',
+      "Banking-style navy & paper surfaces. Calm borders, restrained accents.",
   },
   {
-    id: 'colorful',
-    title: 'Colorful',
+    id: "colorful",
+    title: "Colorful",
     description:
-      'Vibrant metric banners, solid table headers, and richer focus states across the app.',
+      "Vibrant metric banners, solid table headers, and richer focus states across the app.",
   },
-]
+];
 
 const FONT_SIZE_OPTIONS = [
-  { value: '12px', label: '12px · Compact' },
-  { value: '13px', label: '13px · Default' },
-  { value: '14px', label: '14px · Comfortable' },
-  { value: '15px', label: '15px · Large' },
-  { value: '16px', label: '16px · Extra large' },
-]
+  { value: "12px", label: "12px · Compact" },
+  { value: "13px", label: "13px · Default" },
+  { value: "14px", label: "14px · Comfortable" },
+  { value: "15px", label: "15px · Large" },
+  { value: "16px", label: "16px · Extra large" },
+];
 
 function AppearanceSettingsInner() {
   const {
@@ -49,31 +45,29 @@ function AppearanceSettingsInner() {
     primaryButton,
     setPrimaryButton,
     resetPrimaryButton,
-  } = useTheme()
-  const { user } = useAuth()
+  } = useTheme();
+  const { user } = useAuth();
 
   return (
     <>
-      <header className="workspace-header">
+      <header className='workspace-header'>
         <div>
           <h1>Appearance</h1>
-          <p className="muted">
+          <p className='muted'>
             Theme, sidebar, buttons, table headers, and form look.
           </p>
         </div>
       </header>
 
-      <section className="theme-picker-grid">
+      <section className='theme-picker-grid'>
         {OPTIONS.map((option) => {
-          const selected = theme === option.id
+          const selected = theme === option.id;
           return (
             <button
               key={option.id}
-              type="button"
+              type='button'
               className={
-                selected
-                  ? 'theme-picker-card is-selected'
-                  : 'theme-picker-card'
+                selected ? "theme-picker-card is-selected" : "theme-picker-card"
               }
               onClick={() => setTheme(option.id)}
             >
@@ -81,30 +75,30 @@ function AppearanceSettingsInner() {
                 className={`theme-picker-swatch theme-picker-swatch--${option.id}`}
                 aria-hidden
               />
-              <div className="theme-picker-copy">
+              <div className='theme-picker-copy'>
                 <strong>{option.title}</strong>
-                <span className="muted">{option.description}</span>
+                <span className='muted'>{option.description}</span>
                 {selected ? (
-                  <span className="theme-picker-active">Active</span>
+                  <span className='theme-picker-active'>Active</span>
                 ) : null}
               </div>
             </button>
-          )
+          );
         })}
       </section>
 
-      <section className="table-card theme-preview-block">
-        <div className="table-head">
+      <section className='table-card theme-preview-block'>
+        <div className='table-head'>
           <h2>Sidebar style</h2>
-          <p className="muted">
+          <p className='muted'>
             Background and text color for the left navigation rail
           </p>
         </div>
-        <div className="theme-table-controls">
+        <div className='theme-table-controls'>
           <label>
             Sidebar background
             <input
-              type="color"
+              type='color'
               value={sidebar.bg}
               onChange={(e) => setSidebar({ bg: e.target.value })}
             />
@@ -112,19 +106,19 @@ function AppearanceSettingsInner() {
           <label>
             Sidebar text color
             <input
-              type="color"
+              type='color'
               value={sidebar.color}
               onChange={(e) => setSidebar({ color: e.target.value })}
             />
           </label>
-          <div className="theme-table-controls-actions">
-            <button type="button" className="ghost" onClick={resetSidebar}>
+          <div className='theme-table-controls-actions'>
+            <button type='button' className='ghost' onClick={resetSidebar}>
               Reset sidebar
             </button>
           </div>
         </div>
         <div
-          className="theme-sidebar-preview"
+          className='theme-sidebar-preview'
           style={{
             background: sidebar.bg,
             color: sidebar.color,
@@ -136,23 +130,23 @@ function AppearanceSettingsInner() {
         </div>
       </section>
 
-      <section className="table-card theme-preview-block">
-        <div className="table-head">
+      <section className='table-card theme-preview-block'>
+        <div className='table-head'>
           <h2>Button style</h2>
-          <p className="muted">
+          <p className='muted'>
             Primary action buttons (Apply, Save, Post). Ghost buttons stay
             outline. Pick a named preset or fine-tune gradient and hover.
           </p>
         </div>
-        <div className="theme-button-presets">
+        <div className='theme-button-presets'>
           {BUTTON_PRESETS.map((preset) => (
             <button
               key={preset.name}
-              type="button"
+              type='button'
               className={
                 primaryButton.name === preset.name
-                  ? 'theme-btn-preset is-selected'
-                  : 'theme-btn-preset'
+                  ? "theme-btn-preset is-selected"
+                  : "theme-btn-preset"
               }
               style={{
                 background: `linear-gradient(90deg, ${preset.gradientFrom}, ${preset.gradientTo})`,
@@ -164,15 +158,15 @@ function AppearanceSettingsInner() {
             </button>
           ))}
         </div>
-        <div className="theme-table-controls theme-button-controls">
+        <div className='theme-table-controls theme-button-controls'>
           <label>
             Gradient start
             <input
-              type="color"
+              type='color'
               value={primaryButton.gradientFrom}
               onChange={(e) =>
                 setPrimaryButton({
-                  name: 'Custom',
+                  name: "Custom",
                   gradientFrom: e.target.value,
                 })
               }
@@ -181,11 +175,11 @@ function AppearanceSettingsInner() {
           <label>
             Gradient end
             <input
-              type="color"
+              type='color'
               value={primaryButton.gradientTo}
               onChange={(e) =>
                 setPrimaryButton({
-                  name: 'Custom',
+                  name: "Custom",
                   gradientTo: e.target.value,
                 })
               }
@@ -194,21 +188,21 @@ function AppearanceSettingsInner() {
           <label>
             Text color
             <input
-              type="color"
+              type='color'
               value={primaryButton.text}
               onChange={(e) =>
-                setPrimaryButton({ name: 'Custom', text: e.target.value })
+                setPrimaryButton({ name: "Custom", text: e.target.value })
               }
             />
           </label>
           <label>
             Hover start
             <input
-              type="color"
+              type='color'
               value={primaryButton.hoverFrom}
               onChange={(e) =>
                 setPrimaryButton({
-                  name: 'Custom',
+                  name: "Custom",
                   hoverFrom: e.target.value,
                 })
               }
@@ -217,39 +211,43 @@ function AppearanceSettingsInner() {
           <label>
             Hover end
             <input
-              type="color"
+              type='color'
               value={primaryButton.hoverTo}
               onChange={(e) =>
-                setPrimaryButton({ name: 'Custom', hoverTo: e.target.value })
+                setPrimaryButton({ name: "Custom", hoverTo: e.target.value })
               }
             />
           </label>
-          <div className="theme-table-controls-actions">
-            <button type="button" className="ghost" onClick={resetPrimaryButton}>
+          <div className='theme-table-controls-actions'>
+            <button
+              type='button'
+              className='ghost'
+              onClick={resetPrimaryButton}
+            >
               Reset buttons
             </button>
           </div>
         </div>
-        <div className="theme-button-preview form-actions">
-          <button type="button">Primary action</button>
-          <button type="button" className="ghost">
+        <div className='theme-button-preview form-actions'>
+          <button type='button'>Primary action</button>
+          <button type='button' className='ghost'>
             Ghost / secondary
           </button>
         </div>
       </section>
 
-      <section className="table-card theme-preview-block">
-        <div className="table-head">
+      <section className='table-card theme-preview-block'>
+        <div className='table-head'>
           <h2>Table header style</h2>
-          <p className="muted">
+          <p className='muted'>
             Applies to every data table across the app (Admin only)
           </p>
         </div>
-        <div className="theme-table-controls">
+        <div className='theme-table-controls'>
           <label>
             Header background
             <input
-              type="color"
+              type='color'
               value={tableHeader.bg}
               onChange={(e) => setTableHeader({ bg: e.target.value })}
             />
@@ -257,7 +255,7 @@ function AppearanceSettingsInner() {
           <label>
             Header text color
             <input
-              type="color"
+              type='color'
               value={tableHeader.color}
               onChange={(e) => setTableHeader({ color: e.target.value })}
             />
@@ -270,8 +268,8 @@ function AppearanceSettingsInner() {
               onChange={(value) => setTableHeader({ fontSize: value })}
             />
           </label>
-          <div className="theme-table-controls-actions">
-            <button type="button" className="ghost" onClick={resetTableHeader}>
+          <div className='theme-table-controls-actions'>
+            <button type='button' className='ghost' onClick={resetTableHeader}>
               Reset headers
             </button>
           </div>
@@ -299,48 +297,48 @@ function AppearanceSettingsInner() {
         </table>
       </section>
 
-      <section className="table-card theme-preview-block">
-        <div className="table-head">
+      <section className='table-card theme-preview-block'>
+        <div className='table-head'>
           <h2>Live preview</h2>
-          <p className="muted">Sample cards and form fields</p>
+          <p className='muted'>Sample cards and form fields</p>
         </div>
-        <div className="grid metric-card-grid theme-preview-cards">
-          <MetricCard variant="teal" title="Cash sample" value="৳ 1,50,000" />
+        <div className='grid metric-card-grid theme-preview-cards'>
+          <MetricCard variant='teal' title='Cash sample' value='৳ 1,50,000' />
           <MetricCard
-            variant="green"
-            title="Inflow sample"
-            value="৳ 85,000"
-            valueTone="up"
+            variant='green'
+            title='Inflow sample'
+            value='৳ 85,000'
+            valueTone='up'
           />
           <MetricCard
-            variant="red"
-            title="Outflow sample"
-            value="৳ 42,000"
-            valueTone="down"
+            variant='red'
+            title='Outflow sample'
+            value='৳ 42,000'
+            valueTone='down'
           />
         </div>
-        <div className="theme-preview-form">
+        <div className='theme-preview-form'>
           <label>
             Sample input
-            <input defaultValue="GBL Enterprise" readOnly />
+            <input defaultValue='GBL Enterprise' readOnly />
           </label>
           <label>
             Sample field
-            <input defaultValue="Theme preview" readOnly />
+            <input defaultValue='Theme preview' readOnly />
           </label>
         </div>
       </section>
 
       {user?.role === Role.ADMIN ? (
-        <p className="muted">
-          Preferences are stored in this browser. Open{' '}
-          <Link to="/settings/profile">Profile</Link> for account details.
+        <p className='muted'>
+          Preferences are stored in this browser. Open{" "}
+          <Link to='/settings/profile'>Profile</Link> for account details.
         </p>
       ) : null}
     </>
-  )
+  );
 }
 
 export function AppearanceSettingsPage() {
-  return <AppearanceSettingsInner />
+  return <AppearanceSettingsInner />;
 }

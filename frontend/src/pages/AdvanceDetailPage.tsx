@@ -37,7 +37,11 @@ export function AdvanceDetailPage() {
   const [saving, setSaving] = useState(false)
 
   const isFinance = user?.role === Role.ADMIN || user?.role === Role.ACCOUNTANT
-  const isOwner = Boolean(user && row && user.id === row.employeeId)
+  const isOwner = Boolean(
+    user &&
+      row &&
+      (row.employeeId === user.employeeId || row.employeeId === user.id),
+  )
 
   async function load() {
     if (!id) {
@@ -79,6 +83,20 @@ export function AdvanceDetailPage() {
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to disburse')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function onApprove() {
+    if (!id) return
+    setSaving(true)
+    setError(null)
+    try {
+      await api.approveAdvance(id)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to approve')
     } finally {
       setSaving(false)
     }
@@ -172,19 +190,21 @@ export function AdvanceDetailPage() {
     value: account.id,
     label: `${account.glAccountCode} · ${account.name}`,
   }))
-  const expenseOptions = expenses.map((account) => ({
-    value: account.code,
-    label: `${account.code} · ${account.name}`,
-  }))
+  const expenseOptions = expenses
+    .filter((account) => row.projectId || !account.projectOnly)
+    .map((account) => ({
+      value: account.code,
+      label: `${account.code} · ${account.name}`,
+    }))
 
   return (
     <>
       <header className="workspace-header">
         <div>
           <p className="eyebrow">{row.advanceNumber}</p>
-          <h1>{row.projectName}</h1>
+          <h1>{row.projectName ?? 'Office advance'}</h1>
           <p className="muted">
-            {row.employeeName} · {row.projectName}
+            {row.employeeName} · {row.projectName ?? 'No project'}
           </p>
         </div>
         <Link to="/advances" className="ghost-link">
@@ -219,7 +239,25 @@ export function AdvanceDetailPage() {
 
       {isFinance && row.status === 'pending' ? (
         <section className="table-card">
-          <h2>Step 2 · Disburse</h2>
+          <h2>Step 2 · Approve requisition</h2>
+          <p className="muted">
+            Accountant or admin reviews the request. After approval it can be
+            disbursed from treasury.
+          </p>
+          <div className="form-actions">
+            <button type="button" className="ghost" onClick={() => void onReject()}>
+              Reject
+            </button>
+            <button type="button" disabled={saving} onClick={() => void onApprove()}>
+              {saving ? 'Saving…' : 'Approve'}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {isFinance && row.status === 'approved' ? (
+        <section className="table-card">
+          <h2>Step 3 · Disburse</h2>
           <p className="muted">
             Pay from cash, bank, or mobile wallet. This debits Employee Advances
             (1300), not a project expense.
@@ -260,7 +298,7 @@ export function AdvanceDetailPage() {
 
       {(isOwner || isFinance) && row.status === 'disbursed' ? (
         <section className="table-card">
-          <h2>Step 3 · Submit vouchers</h2>
+          <h2>Step 4 · Submit vouchers</h2>
           <p className="muted">
             Equal spend closes the advance. Less spend returns cash. More spend
             credits Employee Payables (2100). Expense hits the project only after
@@ -285,7 +323,7 @@ export function AdvanceDetailPage() {
             </button>
           </div>
           <form className="stack-form" onSubmit={(event) => void onSubmit(event)}>
-            <table>
+            <table className="mobile-stack mobile-stack-form">
               <thead>
                 <tr>
                   <th>Expense account</th>
@@ -296,7 +334,7 @@ export function AdvanceDetailPage() {
               <tbody>
                 {vouchers.map((line, index) => (
                   <tr key={index}>
-                    <td>
+                    <td data-label={`Line ${index + 1} · Expense account`}>
                       <Select
                         value={line.accountCode}
                         onChange={(value) =>
@@ -310,9 +348,10 @@ export function AdvanceDetailPage() {
                         placeholder="Select"
                       />
                     </td>
-                    <td>
+                    <td data-label="Amount">
                       <input
                         inputMode="decimal"
+                        aria-label={`Line ${index + 1} amount`}
                         value={line.amount}
                         onChange={(e) =>
                           setVouchers((current) =>
@@ -323,8 +362,9 @@ export function AdvanceDetailPage() {
                         }
                       />
                     </td>
-                    <td>
+                    <td data-label="Description">
                       <input
+                        aria-label={`Line ${index + 1} description`}
                         value={line.description}
                         onChange={(e) =>
                           setVouchers((current) =>
@@ -372,7 +412,7 @@ export function AdvanceDetailPage() {
       {isFinance && row.status === 'submitted' ? (
         <section className="table-card">
           <h2>Confirm settlement</h2>
-          <table>
+          <table className="mobile-stack">
             <thead>
               <tr>
                 <th>Account</th>
@@ -383,11 +423,11 @@ export function AdvanceDetailPage() {
             <tbody>
               {row.vouchers.map((line, index) => (
                 <tr key={`${line.accountCode}-${index}`}>
-                  <td>
+                  <td className="mobile-stack-title">
                     {line.accountCode} · {line.accountName}
                   </td>
-                  <td>{money(line.amount)}</td>
-                  <td>{line.description ?? '—'}</td>
+                  <td data-label="Amount">{money(line.amount)}</td>
+                  <td data-label="Description">{line.description ?? '—'}</td>
                 </tr>
               ))}
             </tbody>

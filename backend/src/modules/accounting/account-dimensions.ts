@@ -3,6 +3,7 @@ import {
   JournalEntityType,
   type JournalEntityType as EntityType,
 } from './journal.enums';
+import { AccountModel } from './account.model';
 import { SystemAccountCode } from './system-account-codes';
 
 export type DimensionRule = {
@@ -35,7 +36,8 @@ const RULES_BY_CODE: Record<string, DimensionRule> = {
   [SystemAccountCode.EMPLOYEE_ADVANCES]: {
     entityType: JournalEntityType.EMPLOYEE,
     entityRequired: true,
-    projectRequired: true,
+    // Office / general staff advances are not tied to a project; tag one when relevant.
+    projectRequired: false,
     label: 'Employee Advances',
   },
   [SystemAccountCode.EMPLOYEE_PAYABLES]: {
@@ -72,7 +74,7 @@ const RULES_BY_CODE: Record<string, DimensionRule> = {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
-    label: 'Hand Cash',
+    label: 'Cash in Hand',
   },
   [SystemAccountCode.BANK]: {
     entityType: JournalEntityType.TREASURY,
@@ -86,11 +88,23 @@ const RULES_BY_CODE: Record<string, DimensionRule> = {
     projectRequired: false,
     label: 'DBBL Bank',
   },
+  [SystemAccountCode.CITY_BANK]: {
+    entityType: JournalEntityType.TREASURY,
+    entityRequired: false,
+    projectRequired: false,
+    label: 'City Bank',
+  },
   [SystemAccountCode.MOBILE_BANKING]: {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
-    label: 'Mobile Banking',
+    label: 'bKash',
+  },
+  [SystemAccountCode.NAGAD]: {
+    entityType: JournalEntityType.TREASURY,
+    entityRequired: false,
+    projectRequired: false,
+    label: 'Nagad',
   },
 };
 
@@ -106,14 +120,52 @@ export function dimensionRuleForAccount(accountCode: string): DimensionRule {
   );
 }
 
+/** Every head opened under this group is a direct project cost. */
+export const PROJECT_COST_GROUP_CODE = SystemAccountCode.DIRECT_PROJECT_COST;
+
+/** Codes whose parent chain reaches Direct Project Cost (COGS), at any depth. */
+export async function codesUnderProjectCost(codes: string[]): Promise<Set<string>> {
+  const wanted = new Set(codes.map((code) => code.trim().toUpperCase()));
+  const out = new Set<string>();
+  if (wanted.size === 0) return out;
+  const rows = await AccountModel.find({}, { code: 1, parentCode: 1 }).lean().exec();
+  const parentOf = new Map(rows.map((row) => [row.code, row.parentCode ?? null]));
+  for (const code of wanted) {
+    const seen = new Set<string>();
+    let parent = parentOf.get(code) ?? null;
+    while (parent && !seen.has(parent)) {
+      if (parent === PROJECT_COST_GROUP_CODE) {
+        out.add(code);
+        break;
+      }
+      seen.add(parent);
+      parent = parentOf.get(parent) ?? null;
+    }
+  }
+  return out;
+}
+
 export function assertManualLineDimensions(input: {
   accountCode: string;
   entityType?: string | null;
   entityId?: string | null;
   projectId?: string | null;
   headerProjectId?: string | null;
+  /** Opening balances carry old dues that are often not tied to a project. */
+  skipProjectRequirement?: boolean;
+  /** Head sits under 5100 Direct Project Cost (COGS). */
+  isProjectCost?: boolean;
+  accountName?: string;
 }): void {
-  const rule = dimensionRuleForAccount(input.accountCode);
+  const base = dimensionRuleForAccount(input.accountCode);
+  const rule: DimensionRule =
+    input.isProjectCost && !base.projectRequired
+      ? {
+          ...base,
+          projectRequired: true,
+          label: input.accountName || base.label,
+        }
+      : base;
   const projectId = input.projectId || input.headerProjectId || null;
 
   if (rule.entityRequired) {
@@ -129,7 +181,7 @@ export function assertManualLineDimensions(input: {
     }
   }
 
-  if (rule.projectRequired && !projectId) {
+  if (rule.projectRequired && !projectId && !input.skipProjectRequirement) {
     throw badRequest(`${rule.label} (${input.accountCode}) requires a project`);
   }
 }

@@ -4,6 +4,17 @@ import {
   type NormalBalance,
 } from '../../common/enums/account-type.enum';
 
+/** Expense heads whose journal lines are tagged with the employee they were paid to. */
+export const EmployeeExpenseKind = {
+  SALARY: 'salary',
+  CONVEYANCE: 'conveyance',
+} as const;
+
+export type EmployeeExpenseKind =
+  (typeof EmployeeExpenseKind)[keyof typeof EmployeeExpenseKind];
+
+export const EMPLOYEE_EXPENSE_KIND_VALUES = Object.values(EmployeeExpenseKind);
+
 export interface IAccount {
   code: string;
   name: string;
@@ -14,6 +25,8 @@ export interface IAccount {
   isSystem: boolean;
   isPostable: boolean;
   isActive: boolean;
+  /** Unset on most accounts; set on salary / conveyance expense heads. */
+  employeeExpenseKind?: EmployeeExpenseKind;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -40,6 +53,11 @@ const accountSchema = new Schema<IAccount>(
     isSystem: { type: Boolean, required: true, default: false },
     isPostable: { type: Boolean, required: true, default: true },
     isActive: { type: Boolean, required: true, default: true, index: true },
+    employeeExpenseKind: {
+      type: String,
+      enum: EMPLOYEE_EXPENSE_KIND_VALUES,
+      required: false,
+    },
   },
   { timestamps: true, collection: 'accounts' },
 );

@@ -427,28 +427,28 @@ export function sampleBalanceSheetReport(): BalanceSheetReport {
         total: 1_000_000,
         lines: [
           line('1100', 'Current Assets', 1_000_000, 0, true),
-          line('1121', 'Client Receivables', 200_000, 2, false),
-          line('1121:c1', 'Acme Ltd', 120_000, 3, false, {
+          line('1151', 'Client Receivables', 200_000, 2, false),
+          line('1151:c1', 'Acme Ltd', 120_000, 3, false, {
             isParty: true,
             entityType: 'customer',
             entityId: 'c1',
             isPostable: false,
           }),
-          line('1121:c2', 'Beta Traders', 80_000, 3, false, {
+          line('1151:c2', 'Beta Traders', 80_000, 3, false, {
             isParty: true,
             entityType: 'customer',
             entityId: 'c2',
             isPostable: false,
           }),
-          line('1131', 'Advance to Staff', 50_000, 2, false),
-          line('1131:e1', 'Rahim Uddin', 50_000, 3, false, {
+          line('1161', 'Advance to Staff', 50_000, 2, false),
+          line('1161:e1', 'Rahim Uddin', 50_000, 3, false, {
             isParty: true,
             entityType: 'employee',
             entityId: 'e1',
             isPostable: false,
           }),
           line('1111', 'Hand Cash', 150_000, 2, false),
-          line('1112', 'BRAC Bank', 600_000, 2, false),
+          line('1122', 'BRAC Bank', 600_000, 2, false),
         ],
       },
       fixed: {

@@ -5,14 +5,21 @@ import {
 } from '../../common/enums/account-type.enum';
 import { badRequest, conflict, notFound } from '../../common/errors/app-error';
 import { TreasuryAccountModel } from '../banking/treasury-account.model';
-import { AccountModel, type AccountDocument } from './account.model';
+import {
+  AccountModel,
+  type AccountDocument,
+  type EmployeeExpenseKind,
+} from './account.model';
 import {
   loadChartOfAccountsJson,
   normalizeChartOfAccounts,
   resolveChartOfAccountsPath,
 } from './coa-from-json';
 import type { CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
+import { assertAccountIsPostable } from './account-rollup';
+import { repairCashBankChart } from './cash-bank-repair';
 import { LedgerLineModel } from './ledger.model';
+import { ensurePdcAccounts } from './pdc-accounts';
 
 export type PublicAccount = {
   id: string;
@@ -25,6 +32,7 @@ export type PublicAccount = {
   isSystem: boolean;
   isPostable: boolean;
   isActive: boolean;
+  employeeExpenseKind: EmployeeExpenseKind | null;
 };
 
 export type CoaSeedResult = {
@@ -34,6 +42,17 @@ export type CoaSeedResult = {
   total: number;
   path: string;
 };
+
+function assertEmployeeExpenseHead(account: {
+  type: AccountType;
+  isPostable: boolean;
+}): void {
+  if (account.type !== AccountType.EXPENSE || !account.isPostable) {
+    throw badRequest(
+      'Employee tagging (salary / conveyance) applies only to postable expense accounts',
+    );
+  }
+}
 
 export class AccountsService {
   toPublic(account: AccountDocument): PublicAccount {
@@ -48,16 +67,18 @@ export class AccountsService {
       isSystem: account.isSystem,
       isPostable: account.isPostable,
       isActive: account.isActive,
+      employeeExpenseKind: account.employeeExpenseKind ?? null,
     };
   }
 
   /**
    * App bootstrap: ensure CoA from chart_of_accounts.json is present.
-   * Create-only for missing codes — never overwrites existing accounts
-   * (preserves historical GL / treasury links).
+   * Missing codes are created. Existing codes sync name and parent only
+   * (postable flag stays as stored so live ledger accounts are not flipped).
    */
   async seedDefaults(): Promise<void> {
     try {
+      await repairCashBankChart();
       const result = await this.seedFromChartOfAccountsJson({ forceUpdate: false });
       console.log(
         `Chart of Accounts: created=${result.created}, updated=${result.updated}, skipped=${result.skipped} (${result.path})`,
@@ -65,6 +86,20 @@ export class AccountsService {
     } catch (err) {
       console.warn(
         'Chart of Accounts JSON seed skipped:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+    try {
+      const pdc = await ensurePdcAccounts();
+      if (pdc.created.length > 0) {
+        console.log(`PDC clearing accounts created: ${pdc.created.join(', ')}`);
+      }
+      for (const conflict of pdc.conflicts) {
+        console.warn(`PDC clearing account conflict: ${conflict}`);
+      }
+    } catch (err) {
+      console.warn(
+        'PDC clearing accounts check skipped:',
         err instanceof Error ? err.message : err,
       );
     }
@@ -91,15 +126,39 @@ export class AccountsService {
     for (const row of normalized) {
       const existing = await AccountModel.findOne({ code: row.code }).exec();
       if (!existing) {
+        if (row.parentCode) {
+          const parent = await AccountModel.findOne({ code: row.parentCode })
+            .select({ isPostable: 1 })
+            .lean()
+            .exec();
+          // Children of a still-postable account would be left out of every
+          // rollup; that parent is converted by a migration first.
+          if (parent?.isPostable) {
+            console.warn(
+              `Chart of Accounts: skipped ${row.code} — parent ${row.parentCode} is still postable`,
+            );
+            skipped += 1;
+            continue;
+          }
+        }
         await AccountModel.create(row);
         created += 1;
         continue;
       }
 
       if (!forceUpdate) {
-        // Keep labels in sync with chart JSON (safe rename only).
+        // Rename and re-parent are safe. Do not flip postable on live accounts.
+        let dirty = false;
         if (existing.name !== row.name) {
           existing.name = row.name;
+          dirty = true;
+        }
+        const nextParent = row.parentCode ?? undefined;
+        if ((existing.parentCode ?? undefined) !== nextParent) {
+          existing.parentCode = nextParent;
+          dirty = true;
+        }
+        if (dirty) {
           await existing.save();
           updated += 1;
         } else {
@@ -136,7 +195,10 @@ export class AccountsService {
         existing.parentCode = nextParent;
         dirty = true;
       }
-      if (existing.isPostable !== row.isPostable) {
+      const hasChildren =
+        row.isPostable &&
+        Boolean(await AccountModel.exists({ parentCode: existing.code }));
+      if (existing.isPostable !== row.isPostable && !hasChildren) {
         existing.isPostable = row.isPostable;
         dirty = true;
       }
@@ -177,6 +239,16 @@ export class AccountsService {
       if (parent.type !== dto.type) {
         throw badRequest('Parent account must be the same type');
       }
+      if (parent.isPostable) {
+        throw badRequest(
+          'Parent must be a header account. Postable accounts cannot have children.',
+        );
+      }
+    }
+
+    const isPostable = dto.isPostable ?? true;
+    if (dto.employeeExpenseKind) {
+      assertEmployeeExpenseHead({ type: dto.type, isPostable });
     }
 
     const account = await AccountModel.create({
@@ -187,8 +259,11 @@ export class AccountsService {
       parentCode: dto.parentCode,
       description: dto.description?.trim(),
       isSystem: false,
-      isPostable: dto.isPostable ?? true,
+      isPostable,
       isActive: true,
+      ...(dto.employeeExpenseKind
+        ? { employeeExpenseKind: dto.employeeExpenseKind }
+        : {}),
     });
 
     return this.toPublic(account);
@@ -308,7 +383,7 @@ export class AccountsService {
         throw badRequest(`Account ${code} is inactive`);
       }
       if (!account.isPostable) {
-        throw badRequest(`Account ${code} is not postable`);
+        assertAccountIsPostable(account);
       }
     }
 
@@ -329,6 +404,14 @@ export class AccountsService {
     if (dto.description !== undefined) account.description = dto.description.trim();
     if (dto.isActive !== undefined) account.isActive = dto.isActive;
     if (dto.isPostable !== undefined) account.isPostable = dto.isPostable;
+    if (dto.employeeExpenseKind !== undefined) {
+      if (dto.employeeExpenseKind) {
+        assertEmployeeExpenseHead(account);
+        account.employeeExpenseKind = dto.employeeExpenseKind;
+      } else {
+        account.employeeExpenseKind = undefined;
+      }
+    }
     await account.save();
     return this.toPublic(account);
   }

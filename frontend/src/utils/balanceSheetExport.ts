@@ -7,6 +7,7 @@ import {
   type BalanceSheetSection,
 } from '../types/accounting'
 import {
+  DEFAULT_COMPANY_LOGO_URL,
   defaultBalanceSheetTemplate,
   hydrateClientTemplate,
   isBlockVisible,
@@ -14,6 +15,7 @@ import {
   type BalanceSheetTemplate,
   type TemplateBlock,
 } from '../types/report-template'
+import { fitImageSize, imageFormatFromDataUrl, loadPdfImage } from './pdfImage'
 
 type PdfRowKind = 'section' | 'header' | 'line' | 'subtotal' | 'total' | 'spacer'
 
@@ -75,33 +77,6 @@ function drawDoubleUnderline(
   doc.line(x, y, x + width, y)
   doc.setLineWidth(0.9)
   doc.line(x, y + 1.2, x + width, y + 1.2)
-}
-
-function imageFormatFromDataUrl(
-  dataUrl: string,
-): 'PNG' | 'JPEG' | 'WEBP' | null {
-  if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/jpg')) {
-    return 'JPEG'
-  }
-  if (dataUrl.startsWith('data:image/png')) return 'PNG'
-  if (dataUrl.startsWith('data:image/webp')) return 'WEBP'
-  return null
-}
-
-async function loadImageDataUrl(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, { credentials: 'include' })
-    if (!res.ok) return null
-    const blob = await res.blob()
-    return await new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result))
-      reader.onerror = () => resolve(null)
-      reader.readAsDataURL(blob)
-    })
-  } catch {
-    return null
-  }
 }
 
 function buildBodyFromTemplate(
@@ -211,23 +186,25 @@ export async function downloadBalanceSheetPdf(
 
   const logoBlock = blocks.find((b) => b.type === 'LOGO')
   if (logoBlock) {
-    const logoUrl = resolveAssetUrl(template.companyLogoUrl)
-    if (logoUrl) {
-      const dataUrl = await loadImageDataUrl(logoUrl)
-      const format = dataUrl ? imageFormatFromDataUrl(dataUrl) : null
-      if (dataUrl && format) {
-        const align = logoBlock.styles?.logoAlign ?? 'center'
-        const logoW = 28
-        const logoH = 14
-        let x = MARGIN
-        if (align === 'center') x = (pageWidth - logoW) / 2
-        if (align === 'right') x = pageWidth - MARGIN - logoW
-        try {
-          doc.addImage(dataUrl, format, x, cursorY, logoW, logoH)
-          cursorY += logoH + 4
-        } catch {
-          // Skip corrupt/unsupported logos — do not blank the PDF
-        }
+    const logoUrl =
+      resolveAssetUrl(template.companyLogoUrl) ?? DEFAULT_COMPANY_LOGO_URL
+    const dataUrl =
+      (await loadPdfImage(logoUrl)) ??
+      (logoUrl !== DEFAULT_COMPANY_LOGO_URL
+        ? await loadPdfImage(DEFAULT_COMPANY_LOGO_URL)
+        : null)
+    const format = dataUrl ? imageFormatFromDataUrl(dataUrl) : null
+    if (dataUrl && format) {
+      const align = logoBlock.styles?.logoAlign ?? 'center'
+      const { w: logoW, h: logoH } = fitImageSize(doc, dataUrl, 28, 14)
+      let x = MARGIN
+      if (align === 'center') x = (pageWidth - logoW) / 2
+      if (align === 'right') x = pageWidth - MARGIN - logoW
+      try {
+        doc.addImage(dataUrl, format, x, cursorY, logoW, logoH, undefined, 'FAST')
+        cursorY += logoH + 4
+      } catch {
+        // Skip corrupt/unsupported logos — do not blank the PDF
       }
     }
   }

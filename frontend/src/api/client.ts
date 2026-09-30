@@ -1,16 +1,28 @@
 import type {
   Account,
+  AccountSplitBody,
+  AccountSplitPlan,
+  AccountSplitResult,
+  EmployeeExpenseKind,
   AccountLedger,
+  ChequeActionResult,
+  ChequeBook,
+  ChequeLeaf,
+  ChequeRegisterRow,
+  CreateChequeBookBody,
   Customer,
   JournalEntry,
   JournalSummary,
   JournalWriteBody,
+  PostedJournalDetailsBody,
+  PostedJournalEditability,
   BalanceSheetReport,
   TrialBalance,
 } from '../types/accounting'
 import type {
   AgingReport,
   ClientInvoice,
+  CustomerOpeningDue,
   InvoiceCollection,
   OverdueNotice,
   SupplierBill,
@@ -34,6 +46,12 @@ import type {
   QuotationStatus,
 } from '../types/quotation'
 import type { ApiError, ApiSuccess, AuthResult, HealthStatus, PublicUser, Role } from '../types/auth'
+import type {
+  CreateEmployeeBody,
+  Employee,
+  EmployeeProfileBody,
+  GrantEmployeeAccessBody,
+} from '../types/employee'
 import type {
   FundTransfer,
   Reconciliation,
@@ -142,11 +160,12 @@ async function request<T>(
 
   const json = (await res.json()) as ApiSuccess<T> | ApiError
 
-  if (res.status === 401 && retry && !path.startsWith('/auth/login') && !path.startsWith('/auth/signup')) {
+  if (res.status === 401 && retry && !path.startsWith('/auth/login')) {
     const refreshed = await tryRefresh()
     if (refreshed) {
       return request<T>(path, options, false)
     }
+    setAccessToken(null)
   }
 
   if (!res.ok || json.success === false) {
@@ -199,16 +218,6 @@ async function downloadBlob(path: string, fallbackName: string): Promise<void> {
 
 export const api = {
   health: () => request<HealthStatus>('/health'),
-  signup: (body: {
-    email: string
-    password: string
-    firstName: string
-    lastName: string
-  }) =>
-    request<AuthResult>('/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
   login: (body: { email: string; password: string }) =>
     request<AuthResult>('/auth/login', {
       method: 'POST',
@@ -221,15 +230,63 @@ export const api = {
       body: JSON.stringify({}),
     }),
   users: () => request<PublicUser[]>('/users'),
-  employees: () => request<PublicUser[]>('/employees'),
-  createEmployee: (body: {
+  createUser: (body: {
     email: string
     password: string
     firstName: string
     lastName: string
     role?: Role
   }) =>
-    request<PublicUser>('/employees', {
+    request<PublicUser>('/users', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteUser: (id: string) =>
+    request<{ id: string; unlinkedEmployeeId: string | null }>(`/users/${id}`, {
+      method: 'DELETE',
+    }),
+  updateUserRole: (id: string, role: Role) =>
+    request<PublicUser>(`/users/${id}/role`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    }),
+  updateUserStatus: (id: string, isActive: boolean) =>
+    request<PublicUser>(`/users/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+    }),
+  updateUserPermissions: (id: string, allowedPermissions: string[]) =>
+    request<PublicUser>(`/users/${id}/permissions`, {
+      method: 'PATCH',
+      body: JSON.stringify({ allowedPermissions }),
+    }),
+  resetUserPassword: (id: string, newPassword: string) =>
+    request<PublicUser>(`/users/${id}/reset-password`, {
+      method: 'PUT',
+      body: JSON.stringify({ newPassword }),
+    }),
+  changeOwnPassword: (body: { oldPassword: string; newPassword: string }) =>
+    request<PublicUser>('/users/profile/change-password', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  employees: () => request<Employee[]>('/employees'),
+  employee: (id: string) => request<Employee>(`/employees/${id}`),
+  createEmployee: (body: CreateEmployeeBody) =>
+    request<Employee>('/employees', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateEmployee: (
+    id: string,
+    body: Partial<EmployeeProfileBody> & { isActive?: boolean },
+  ) =>
+    request<Employee>(`/employees/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  grantEmployeeAccess: (id: string, body: GrantEmployeeAccessBody) =>
+    request<Employee>(`/employees/${id}/grant-access`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -259,6 +316,7 @@ export const api = {
     parentCode?: string
     isPostable?: boolean
     openingBalance?: number
+    employeeExpenseKind?: EmployeeExpenseKind
   }) =>
     request<
       Account & {
@@ -276,10 +334,22 @@ export const api = {
       description?: string
       isActive?: boolean
       isPostable?: boolean
+      /** `null` clears the flag. */
+      employeeExpenseKind?: EmployeeExpenseKind | null
     },
   ) =>
     request<Account>(`/accounts/${id}`, {
       method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  previewAccountSplit: (id: string, body: AccountSplitBody) =>
+    request<AccountSplitPlan>(`/accounts/${id}/split/preview`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  splitAccount: (id: string, body: AccountSplitBody) =>
+    request<AccountSplitResult>(`/accounts/${id}/split`, {
+      method: 'POST',
       body: JSON.stringify(body),
     }),
   deleteAccount: (id: string) =>
@@ -336,10 +406,93 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
-  postDraftJournal: (id: string) =>
-    request<JournalEntry>(`/journals/${id}/post`, { method: 'POST' }),
+  postDraftJournal: (
+    id: string,
+    body?: { overrideSupplierPayable?: boolean; overrideReason?: string },
+  ) =>
+    request<JournalEntry>(`/journals/${id}/post`, {
+      method: 'POST',
+      body: body ? JSON.stringify(body) : undefined,
+    }),
   reverseJournal: (id: string) =>
     request<JournalEntry>(`/journals/${id}/reverse`, { method: 'POST' }),
+  journalEditability: (id: string) =>
+    request<PostedJournalEditability>(`/journals/${id}/editability`),
+  updatePostedJournal: (id: string, body: PostedJournalDetailsBody) =>
+    request<JournalEntry>(`/journals/${id}/details`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  chequeRegister: (params?: {
+    status?: string
+    direction?: string
+    fromDate?: string
+    toDate?: string
+    search?: string
+  }) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params ?? {})) {
+      if (value) query.set(key, value)
+    }
+    const qs = query.toString()
+    return request<ChequeRegisterRow[]>(
+      qs ? `/transactions/cheques?${qs}` : '/transactions/cheques',
+    )
+  },
+  chequeBooks: (treasuryId?: string) =>
+    request<ChequeBook[]>(
+      treasuryId
+        ? `/cheque-books?treasuryId=${encodeURIComponent(treasuryId)}`
+        : '/cheque-books',
+    ),
+  createChequeBook: (body: CreateChequeBookBody) =>
+    request<ChequeBook>('/cheque-books', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteChequeBook: (id: string) =>
+    request<{ id: string; deletedLeaves: number }>(`/cheque-books/${id}`, {
+      method: 'DELETE',
+    }),
+  chequeLeaves: (params: {
+    bookId?: string
+    treasuryId?: string
+    status?: string
+    search?: string
+  }) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) {
+      if (value) query.set(key, value)
+    }
+    return request<ChequeLeaf[]>(`/cheque-books/leaves?${query.toString()}`)
+  },
+  availableChequeLeaves: (treasuryId: string) =>
+    request<ChequeLeaf[]>(
+      `/cheque-books/leaves/available?treasuryId=${encodeURIComponent(treasuryId)}`,
+    ),
+  cancelChequeLeaf: (id: string, reason: string) =>
+    request<ChequeLeaf>(`/cheque-books/leaves/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  restoreChequeLeaf: (id: string) =>
+    request<ChequeLeaf>(`/cheque-books/leaves/${id}/restore`, {
+      method: 'POST',
+    }),
+  clearCheque: (id: string, body: { date?: string; memo?: string }) =>
+    request<ChequeActionResult>(`/transactions/${id}/clear-pdc`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  bounceCheque: (id: string, body: { reason?: string }) =>
+    request<ChequeActionResult>(`/transactions/${id}/bounce-pdc`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  undoChequeClearing: (id: string) =>
+    request<ChequeActionResult>(`/transactions/${id}/undo-clear-pdc`, {
+      method: 'POST',
+    }),
   deleteJournal: (id: string) =>
     request<{ id: string; entryNumber: string }>(`/journals/${id}`, {
       method: 'DELETE',
@@ -442,6 +595,7 @@ export const api = {
       toDate?: string
       entityType?: string
       entityId?: string
+      projectId?: string
     },
   ) => {
     const query = new URLSearchParams()
@@ -450,6 +604,7 @@ export const api = {
     if (params?.toDate) query.set('toDate', params.toDate)
     if (params?.entityType) query.set('entityType', params.entityType)
     if (params?.entityId) query.set('entityId', params.entityId)
+    if (params?.projectId) query.set('projectId', params.projectId)
     const qs = query.toString()
     return request<AccountLedger>(
       qs ? `/ledgers/${accountCode}?${qs}` : `/ledgers/${accountCode}`,
@@ -468,6 +623,21 @@ export const api = {
   }) =>
     request<Customer>('/customers', {
       method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateCustomer: (
+    id: string,
+    body: {
+      name?: string
+      contactName?: string
+      email?: string
+      phone?: string
+      address?: string
+      isActive?: boolean
+    },
+  ) =>
+    request<Customer>(`/customers/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(body),
     }),
   quotations: (params?: {
@@ -491,6 +661,15 @@ export const api = {
     request<Quotation>('/quotations', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  updateQuotation: (id: string, body: CreateQuotationBody) =>
+    request<Quotation>(`/quotations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteQuotation: (id: string) =>
+    request<{ deleted: boolean }>(`/quotations/${id}`, {
+      method: 'DELETE',
     }),
   updateQuotationStatus: (
     id: string,
@@ -694,7 +873,7 @@ export const api = {
   advanceProjects: () => request<AdvanceProjectOption[]>('/advances/projects'),
   expenseAccounts: () =>
     request<ExpenseAccountOption[]>('/advances/expense-accounts'),
-  createAdvance: (body: { projectId: string; amount: number; purpose: string }) =>
+  createAdvance: (body: { projectId?: string; amount: number; purpose: string }) =>
     request<Advance>('/advances', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -703,6 +882,11 @@ export const api = {
     request<Advance>(`/advances/${id}/reject`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    }),
+  approveAdvance: (id: string) =>
+    request<Advance>(`/advances/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({}),
     }),
   disburseAdvance: (id: string, body: { treasuryId: string; date: string; memo?: string }) =>
     request<Advance>(`/advances/${id}/disburse`, {
@@ -824,6 +1008,30 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateProductCategory: (
+    id: string,
+    body: { name?: string; code?: string; isActive?: boolean },
+  ) =>
+    request<ProductCategory>(`/product-categories/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  reassignCategoryItems: (
+    id: string,
+    body: {
+      itemIds: string[]
+      targetCategoryId: string
+      targetSubCategoryId?: string
+    },
+  ) =>
+    request<{ moved: number }>(`/product-categories/${id}/reassign-items`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteProductCategory: (id: string) =>
+    request<{ id: string }>(`/product-categories/${id}`, {
+      method: 'DELETE',
+    }),
   warehouses: () => request<Warehouse[]>('/warehouses'),
   purchaseOrders: () => request<PurchaseOrder[]>('/purchase-orders'),
   purchaseOrder: (id: string) => request<PurchaseOrder>(`/purchase-orders/${id}`),
@@ -887,6 +1095,19 @@ export const api = {
   invoices: () => request<ClientInvoice[]>('/receivables'),
   invoice: (id: string) => request<ClientInvoice>(`/receivables/${id}`),
   overdueInvoices: () => request<OverdueNotice[]>('/receivables/overdue'),
+  customerOpeningDues: () =>
+    request<CustomerOpeningDue[]>('/receivables/opening-dues'),
+  receiveCustomerOpeningDue: (
+    customerId: string,
+    body: { amount: number; treasuryId: string; date: string; memo?: string },
+  ) =>
+    request<CustomerOpeningDue>(
+      `/receivables/opening-dues/${customerId}/receive`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    ),
   arAging: (asOf?: string) =>
     request<AgingReport>(`/receivables/aging${asOf ? `?asOf=${asOf}` : ''}`),
   createInvoice: (body: {
@@ -935,12 +1156,21 @@ export const api = {
     treasuryId: string
     scheduledDate?: string
     memo?: string
+    overridePayable?: boolean
+    overrideReason?: string
   }) =>
     request<SupplierPayment>('/payables/payments', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  executeSupplierPayment: (id: string, body: { date: string }) =>
+  executeSupplierPayment: (
+    id: string,
+    body: {
+      date: string
+      overridePayable?: boolean
+      overrideReason?: string
+    },
+  ) =>
     request<SupplierPayment>(`/payables/payments/${id}/execute`, {
       method: 'POST',
       body: JSON.stringify(body),

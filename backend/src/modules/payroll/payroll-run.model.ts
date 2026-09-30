@@ -4,7 +4,7 @@ import { PayrollRunStatus } from '../../common/enums/payroll.enum';
 export interface IPayrollAdvanceDeduction {
   advanceId: Types.ObjectId;
   advanceNumber: string;
-  projectId: Types.ObjectId;
+  projectId?: Types.ObjectId;
   amountMinor: number;
 }
 
@@ -73,7 +73,7 @@ const advanceDeductionSchema = new Schema<IPayrollAdvanceDeduction>(
   {
     advanceId: { type: Schema.Types.ObjectId, ref: 'Advance', required: true },
     advanceNumber: { type: String, required: true },
-    projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true },
+    projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: false },
     amountMinor: { type: Number, required: true, min: 1 },
   },
   { _id: false },

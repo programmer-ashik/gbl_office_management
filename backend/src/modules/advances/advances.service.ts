@@ -15,6 +15,10 @@ import type { JournalService } from '../accounting/journal.service';
 import type { ApprovalService } from '../governance/approval.service';
 import type { BankingService } from '../banking/banking.service';
 import type { ProjectsService } from '../projects/projects.service';
+import {
+  employeeIdForUser,
+  findEmployeeOrFail,
+} from '../employees/employee-records';
 import type { UsersService } from '../users/users.service';
 import { AdvanceModel, type AdvanceDocument } from './advance.model';
 import {
@@ -29,6 +33,10 @@ import {
   buildSettlementJournalLines,
   classifySettlement,
 } from './settlement';
+import {
+  codesUnderProjectCost,
+  dimensionRuleForAccount,
+} from '../accounting/account-dimensions';
 import { JournalEntityType } from '../accounting/journal.enums';
 import { LedgerLineModel } from '../accounting/ledger.model';
 import type {
@@ -47,9 +55,9 @@ export type PublicAdvance = {
   status: AdvanceStatus;
   employeeId: string;
   employeeName: string;
-  projectId: string;
-  projectCode: string;
-  projectName: string;
+  projectId: string | null;
+  projectCode: string | null;
+  projectName: string | null;
   requestedAmount: number;
   purpose: string;
   requestedAt: string;
@@ -138,9 +146,9 @@ export class AdvancesService {
       status: row.status,
       employeeId: row.employeeId.toString(),
       employeeName: row.employeeName,
-      projectId: row.projectId.toString(),
-      projectCode: row.projectCode,
-      projectName: row.projectName,
+      projectId: row.projectId?.toString() ?? null,
+      projectCode: row.projectCode ?? null,
+      projectName: row.projectName ?? null,
       requestedAmount: fromMinorUnits(row.requestedMinor),
       purpose: row.purpose,
       requestedAt: row.requestedAt.toISOString(),
@@ -176,26 +184,34 @@ export class AdvancesService {
   }
 
   async expenseAccountOptions() {
-    const accounts = await this.accountsService.list(AccountType.EXPENSE);
-    return accounts
-      .filter((account) => account.isActive && account.isPostable)
-      .map((account) => ({
-        code: account.code,
-        name: account.name,
-      }));
+    const accounts = (await this.accountsService.list(AccountType.EXPENSE)).filter(
+      (account) => account.isActive && account.isPostable,
+    );
+    const projectCost = await codesUnderProjectCost(
+      accounts.map((account) => account.code),
+    );
+    return accounts.map((account) => ({
+      code: account.code,
+      name: account.name,
+      projectOnly:
+        projectCost.has(account.code) ||
+        dimensionRuleForAccount(account.code).projectRequired,
+    }));
   }
 
   async create(
     dto: CreateAdvanceDto,
     actor: AuthenticatedUser,
   ): Promise<PublicAdvance> {
-    const employeeId = this.resolveEmployeeId(dto.employeeId, actor);
-    const employee = await this.usersService.findByIdOrFail(employeeId);
+    const employeeId = await this.resolveEmployeeId(dto.employeeId, actor);
+    const employee = await findEmployeeOrFail(employeeId);
     if (!employee.isActive) {
       throw badRequest('Employee is inactive');
     }
-    const project = await this.projectsService.findByIdOrFail(dto.projectId);
-    if (actor.role === Role.PROJECT_MANAGER) {
+    const project = dto.projectId
+      ? await this.projectsService.findByIdOrFail(dto.projectId)
+      : null;
+    if (project && actor.role === Role.PROJECT_MANAGER) {
       this.projectsService.assertCanAccessProject(actor, project);
     }
     const requestedAt = new Date();
@@ -204,9 +220,13 @@ export class AdvancesService {
       status: AdvanceStatus.PENDING,
       employeeId: employee._id,
       employeeName: `${employee.firstName} ${employee.lastName}`,
-      projectId: project._id,
-      projectCode: project.code,
-      projectName: project.name,
+      ...(project
+        ? {
+            projectId: project._id,
+            projectCode: project.code,
+            projectName: project.name,
+          }
+        : {}),
       requestedMinor: toMinorUnits(dto.amount),
       purpose: dto.purpose.trim(),
       requestedAt,
@@ -240,12 +260,12 @@ export class AdvancesService {
       const projectIds = await this.projectsService.managedProjectIds(actor)
       and.push({
         $or: [
-          { employeeId: new Types.ObjectId(actor.userId) },
+          { employeeId: { $in: await this.selfEmployeeOids(actor) } },
           { projectId: { $in: projectIds } },
         ],
       })
     } else {
-      and.push({ employeeId: new Types.ObjectId(actor.userId) })
+      and.push({ employeeId: { $in: await this.selfEmployeeOids(actor) } })
     }
 
     if (filters?.projectId && Types.ObjectId.isValid(filters.projectId)) {
@@ -376,15 +396,16 @@ export class AdvancesService {
     employeeId: string,
     actor: AuthenticatedUser,
   ): Promise<{ employeeId: string; unsettledAdvanceBalance: number }> {
-    this.assertCanViewEmployeeLedger(employeeId, actor)
+    await this.assertCanViewEmployeeLedger(employeeId, actor)
     if (!Types.ObjectId.isValid(employeeId)) {
       throw notFound('Employee not found')
     }
+    const employee = await findEmployeeOrFail(employeeId)
     const rows = await LedgerLineModel.aggregate<{ balance: number }>([
       {
         $match: {
           entityType: JournalEntityType.EMPLOYEE,
-          entityId: new Types.ObjectId(employeeId),
+          entityId: employee._id,
           accountCode: ADVANCE_ASSET_CODE,
         },
       },
@@ -396,7 +417,7 @@ export class AdvancesService {
       },
     ])
     return {
-      employeeId,
+      employeeId: employee._id.toString(),
       unsettledAdvanceBalance: fromMinorUnits(rows[0]?.balance ?? 0),
     }
   }
@@ -412,11 +433,28 @@ export class AdvancesService {
   ): Promise<PublicAdvance> {
     this.assertFinance(actor);
     const row = await this.findByIdOrFail(id);
-    if (row.status !== AdvanceStatus.PENDING) {
-      throw badRequest('Only a pending requisition can be rejected');
+    if (
+      row.status !== AdvanceStatus.PENDING &&
+      row.status !== AdvanceStatus.APPROVED
+    ) {
+      throw badRequest('Only a pending or approved requisition can be rejected');
     }
     row.status = AdvanceStatus.REJECTED;
     row.rejectionReason = reason?.trim();
+    await row.save();
+    return this.toPublic(row);
+  }
+
+  async approve(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<PublicAdvance> {
+    this.assertFinance(actor);
+    const row = await this.findByIdOrFail(id);
+    if (row.status !== AdvanceStatus.PENDING) {
+      throw badRequest('Only a pending requisition can be approved');
+    }
+    row.status = AdvanceStatus.APPROVED;
     await row.save();
     return this.toPublic(row);
   }
@@ -428,8 +466,8 @@ export class AdvancesService {
   ): Promise<PublicAdvance | { requiresApproval: true; approval: unknown }> {
     this.assertFinance(actor);
     const row = await this.findByIdOrFail(id);
-    if (row.status !== AdvanceStatus.PENDING) {
-      throw badRequest('Only a pending requisition can be disbursed');
+    if (row.status !== AdvanceStatus.APPROVED) {
+      throw badRequest('Only an approved requisition can be disbursed');
     }
 
     const amount = fromMinorUnits(row.requestedMinor);
@@ -439,7 +477,7 @@ export class AdvancesService {
           entityType: ApprovalEntityType.ADVANCE_DISBURSE,
           amount,
           summary: `Disburse advance ${row.advanceNumber}`,
-          projectId: row.projectId.toString(),
+          projectId: row.projectId?.toString(),
           projectCode: row.projectCode,
           payload: {
             advanceId: row._id.toString(),
@@ -467,13 +505,13 @@ export class AdvancesService {
         date: date.toISOString(),
         memo: dto.memo?.trim() || `Advance ${row.advanceNumber} disbursed`,
         reference: row.advanceNumber,
-        projectId: row.projectId.toString(),
+        projectId: row.projectId?.toString(),
         lines: [
           {
             accountCode: ADVANCE_ASSET_CODE,
             debit: amount,
             description: `Advance to ${row.employeeName}`,
-            projectId: row.projectId.toString(),
+            projectId: row.projectId?.toString(),
             entityType: JournalEntityType.EMPLOYEE,
             entityId: row.employeeId.toString(),
           },
@@ -518,11 +556,14 @@ export class AdvancesService {
     if (row.status !== AdvanceStatus.DISBURSED) {
       throw badRequest('Vouchers can only be submitted against a disbursed advance');
     }
-    if (!this.isFinance(actor) && row.employeeId.toString() !== actor.userId) {
+    if (!this.isFinance(actor) && !(await this.isSelf(row.employeeId, actor))) {
       throw forbidden('You can only settle your own advance');
     }
 
     const vouchers = await this.prepareVouchers(dto.lines ?? []);
+    if (!row.projectId) {
+      await this.assertNoProjectCostVouchers(vouchers);
+    }
     const spentMinor = vouchers.reduce((sum, line) => sum + line.amountMinor, 0);
     classifySettlement(row.disbursedMinor ?? row.requestedMinor, spentMinor);
 
@@ -562,7 +603,7 @@ export class AdvancesService {
     }
 
     const { lines } = buildSettlementJournalLines({
-      projectId: row.projectId.toString(),
+      projectId: row.projectId?.toString(),
       employeeId: row.employeeId.toString(),
       advancedMinor,
       vouchers: row.vouchers,
@@ -580,7 +621,7 @@ export class AdvancesService {
         date: date.toISOString(),
         memo: `Advance ${row.advanceNumber} settlement (${settlementCase})`,
         reference: row.advanceNumber,
-        projectId: row.projectId.toString(),
+        projectId: row.projectId?.toString(),
         journalType:
           settlementCase === SettlementCase.MORE
             ? 'employee_settlement'
@@ -641,7 +682,7 @@ export class AdvancesService {
           dto.memo?.trim() ||
           `Reimburse excess on advance ${row.advanceNumber}`,
         reference: row.advanceNumber,
-        projectId: row.projectId.toString(),
+        projectId: row.projectId?.toString(),
         journalType: 'employee_settlement',
         lines: buildReimbursementJournalLines({
           employeeId: row.employeeId.toString(),
@@ -669,12 +710,12 @@ export class AdvancesService {
     employeeId: string,
     actor: AuthenticatedUser,
   ): Promise<EmployeeLedgerReport> {
-    this.assertCanViewEmployeeLedger(employeeId, actor);
+    await this.assertCanViewEmployeeLedger(employeeId, actor);
     if (!Types.ObjectId.isValid(employeeId)) {
       throw notFound('Employee not found');
     }
-    const employee = await this.usersService.findByIdOrFail(employeeId);
-    const employeeOid = new Types.ObjectId(employeeId);
+    const employee = await findEmployeeOrFail(employeeId);
+    const employeeOid = employee._id;
 
     const advances = await AdvanceModel.find({ employeeId: employeeOid })
       .sort({ requestedAt: 1 })
@@ -761,7 +802,7 @@ export class AdvancesService {
       .filter((row) => row.amount > 0);
 
     return {
-      employeeId,
+      employeeId: employee._id.toString(),
       employeeName: `${employee.firstName} ${employee.lastName}`.trim(),
       totalAdvancesGiven,
       totalExpenseSettled,
@@ -799,14 +840,31 @@ export class AdvancesService {
     return 'Employee ledger';
   }
 
-  private assertCanViewEmployeeLedger(
+  private async assertCanViewEmployeeLedger(
     employeeId: string,
     actor: AuthenticatedUser,
-  ): void {
-    if (this.isFinance(actor) || actor.userId === employeeId) {
+  ): Promise<void> {
+    if (this.isFinance(actor) || (await this.isSelf(employeeId, actor))) {
       return;
     }
     throw forbidden('You do not have access to this employee ledger');
+  }
+
+  /** Employee ids the logged-in user acts as (linked record, plus the legacy user id). */
+  private async selfEmployeeIds(actor: AuthenticatedUser): Promise<string[]> {
+    const linked = await employeeIdForUser(actor.userId);
+    return [...new Set([linked, actor.userId].filter((id): id is string => Boolean(id)))];
+  }
+
+  private async selfEmployeeOids(actor: AuthenticatedUser): Promise<Types.ObjectId[]> {
+    return (await this.selfEmployeeIds(actor)).map((id) => new Types.ObjectId(id));
+  }
+
+  private async isSelf(
+    employeeId: Types.ObjectId | string,
+    actor: AuthenticatedUser,
+  ): Promise<boolean> {
+    return (await this.selfEmployeeIds(actor)).includes(String(employeeId));
   }
 
   private async prepareVouchers(lines: SubmitSettlementDto['lines']) {
@@ -829,12 +887,33 @@ export class AdvancesService {
     });
   }
 
-  private resolveEmployeeId(
+  private async assertNoProjectCostVouchers(
+    vouchers: Array<{ accountCode: string; accountName: string }>,
+  ): Promise<void> {
+    const projectCost = await codesUnderProjectCost(
+      vouchers.map((line) => line.accountCode),
+    );
+    const blocked = vouchers.filter(
+      (line) =>
+        projectCost.has(line.accountCode) ||
+        dimensionRuleForAccount(line.accountCode).projectRequired,
+    );
+    if (blocked.length > 0) {
+      throw badRequest(
+        `This advance has no project, so project cost heads cannot be used: ${blocked
+          .map((line) => `${line.accountCode} ${line.accountName}`)
+          .join(', ')}. Choose an office expense head.`,
+      );
+    }
+  }
+
+  private async resolveEmployeeId(
     requestedId: string | undefined,
     actor: AuthenticatedUser,
-  ): string {
-    if (!requestedId || requestedId === actor.userId) {
-      return actor.userId;
+  ): Promise<string> {
+    const [selfId] = await this.selfEmployeeIds(actor);
+    if (!requestedId || (await this.isSelf(requestedId, actor))) {
+      return selfId;
     }
     if (!this.isFinance(actor) && actor.role !== Role.PROJECT_MANAGER) {
       throw forbidden('You can only request an advance for yourself');
@@ -871,10 +950,10 @@ export class AdvancesService {
     if (this.isFinance(actor)) {
       return row;
     }
-    if (row.employeeId.toString() === actor.userId) {
+    if (await this.isSelf(row.employeeId, actor)) {
       return row;
     }
-    if (actor.role === Role.PROJECT_MANAGER) {
+    if (actor.role === Role.PROJECT_MANAGER && row.projectId) {
       await this.projectsService.assertCanAccessProjectId(
         actor,
         row.projectId.toString(),

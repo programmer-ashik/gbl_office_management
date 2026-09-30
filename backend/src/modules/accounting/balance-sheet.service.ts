@@ -1,5 +1,6 @@
 import { AccountType } from '../../common/enums/account-type.enum';
 import { fromMinorUnits } from '../../common/utils/money';
+import { rollupBalances } from './account-rollup';
 import { AccountModel } from './account.model';
 import { LedgerLineModel } from './ledger.model';
 import { SystemAccountCode } from './system-account-codes';
@@ -131,20 +132,18 @@ function buildSection(
     )
     .sort((a, b) => a.code.localeCompare(b.code));
 
+  const rolled = rollupBalances(
+    members.map((account) => ({
+      code: account.code,
+      parentCode: account.parentCode,
+      isPostable: account.isPostable,
+    })),
+    balances,
+  );
+
   const lines: BalanceSheetLine[] = [];
   for (const account of members) {
-    const own = balances.get(account.code) ?? 0;
-    let balance = account.isPostable ? own : 0;
-    if (!account.isPostable) {
-      balance = members
-        .filter(
-          (child) =>
-            child.isPostable &&
-            (child.code === account.code ||
-              isUnderParent(child.code, account.code, byCode)),
-        )
-        .reduce((sum, child) => sum + (balances.get(child.code) ?? 0), 0);
-    }
+    const balance = rolled.get(account.code) ?? 0;
     const depth = depthOf(account.code, byCode);
     lines.push({
       code: account.code,
