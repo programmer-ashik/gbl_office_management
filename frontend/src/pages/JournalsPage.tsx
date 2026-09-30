@@ -475,10 +475,13 @@ export function JournalsPage() {
       }));
     }
     if (entityType === "employee") {
-      return employees.map((row) => ({
-        value: row.id,
-        label: `${row.firstName} ${row.lastName}`,
-      }));
+      return employees
+        .filter((row) => row.isActive)
+        .map((row) => ({
+          value: row.id,
+          label: `${row.firstName} ${row.lastName}`,
+          keywords: row.designation ?? undefined,
+        }));
     }
     if (entityType === "treasury") {
       return treasury.map((row) => ({

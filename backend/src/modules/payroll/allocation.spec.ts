@@ -129,7 +129,12 @@ describe('payroll allocation', () => {
     });
     expect(lines).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ accountCode: '5230', debit: 400 }),
+        expect.objectContaining({
+          accountCode: '5230',
+          debit: 400,
+          entityType: 'employee',
+          entityId: 'e1',
+        }),
         expect.objectContaining({ accountCode: '2121', credit: 400 }),
       ]),
     );

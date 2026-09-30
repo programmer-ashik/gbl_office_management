@@ -1,5 +1,9 @@
 import type {
   Account,
+  AccountSplitBody,
+  AccountSplitPlan,
+  AccountSplitResult,
+  EmployeeExpenseKind,
   AccountLedger,
   ChequeActionResult,
   ChequeBook,
@@ -312,6 +316,7 @@ export const api = {
     parentCode?: string
     isPostable?: boolean
     openingBalance?: number
+    employeeExpenseKind?: EmployeeExpenseKind
   }) =>
     request<
       Account & {
@@ -329,10 +334,22 @@ export const api = {
       description?: string
       isActive?: boolean
       isPostable?: boolean
+      /** `null` clears the flag. */
+      employeeExpenseKind?: EmployeeExpenseKind | null
     },
   ) =>
     request<Account>(`/accounts/${id}`, {
       method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  previewAccountSplit: (id: string, body: AccountSplitBody) =>
+    request<AccountSplitPlan>(`/accounts/${id}/split/preview`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  splitAccount: (id: string, body: AccountSplitBody) =>
+    request<AccountSplitResult>(`/accounts/${id}/split`, {
+      method: 'POST',
       body: JSON.stringify(body),
     }),
   deleteAccount: (id: string) =>

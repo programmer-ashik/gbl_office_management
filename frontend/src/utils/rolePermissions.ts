@@ -23,6 +23,46 @@ export function permissionCatalogForRole(role: Role): PermissionOption[] {
 }
 
 /**
+ * Sections split out of an older one. Journals & Ledgers used to live under
+ * Financial Reporting, so saved grants/denials of 'reporting' also cover it.
+ */
+const SPLIT_SECTIONS: Record<string, string[]> = {
+  reporting: ['journals'],
+}
+
+/** Saved as `-<id>` when a split-out section was explicitly unchecked. */
+const OPT_OUT_PREFIX = '-'
+
+function withSplitSections(ids: string[]): string[] {
+  const optedOut = new Set(
+    ids
+      .filter((id) => id.startsWith(OPT_OUT_PREFIX))
+      .map((id) => id.slice(OPT_OUT_PREFIX.length)),
+  )
+  const out = new Set(ids.filter((id) => !id.startsWith(OPT_OUT_PREFIX)))
+  for (const id of [...out]) {
+    for (const extra of SPLIT_SECTIONS[id] ?? []) {
+      if (!optedOut.has(extra)) out.add(extra)
+    }
+  }
+  return [...out]
+}
+
+/** Allowlist to persist, recording split-out sections the admin unchecked. */
+export function allowedIdsForSave(ids: Iterable<string>): string[] {
+  const selected = new Set(
+    [...ids].filter((id) => !id.startsWith(OPT_OUT_PREFIX)),
+  )
+  const out = [...selected]
+  for (const id of selected) {
+    for (const extra of SPLIT_SECTIONS[id] ?? []) {
+      if (!selected.has(extra)) out.push(`${OPT_OUT_PREFIX}${extra}`)
+    }
+  }
+  return out
+}
+
+/**
  * Effective allowed section ids.
  * - Explicit allowlist when configured
  * - Else role defaults minus legacy denials
@@ -33,10 +73,10 @@ export function effectiveAllowedIds(
   deniedPermissions: string[] = [],
 ): string[] | null {
   if (allowedPermissions != null) {
-    return [...allowedPermissions]
+    return withSplitSections(allowedPermissions)
   }
   if (deniedPermissions.length > 0) {
-    const denied = new Set(deniedPermissions)
+    const denied = new Set(withSplitSections(deniedPermissions))
     return permissionCatalogForRole(role)
       .map((item) => item.id)
       .filter((id) => !denied.has(id))

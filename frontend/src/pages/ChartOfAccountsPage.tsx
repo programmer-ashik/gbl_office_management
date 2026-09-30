@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
+import { AccountSplitModal } from '../components/AccountSplitModal'
+import { Role } from '../types/auth'
 import {
   AccountOpeningModal,
   type OpeningRequest,
@@ -9,11 +12,23 @@ import { ActionMenu, Modal, Select } from '../components/ui'
 import {
   ACCOUNT_TYPE_LABEL,
   AccountType,
+  EMPLOYEE_EXPENSE_KIND_LABELS,
   type Account,
   type Customer,
+  type EmployeeExpenseKind,
 } from '../types/accounting'
 import type { Employee } from '../types/employee'
 import type { Supplier } from '../types/procurement'
+
+const EMPLOYEE_KIND_OPTIONS = [
+  { value: '', label: 'None' },
+  ...(Object.keys(EMPLOYEE_EXPENSE_KIND_LABELS) as EmployeeExpenseKind[]).map(
+    (kind) => ({
+      value: kind,
+      label: `${EMPLOYEE_EXPENSE_KIND_LABELS[kind]} — pick an employee on journal lines`,
+    }),
+  ),
+]
 
 const PARTY_CONTROL_ACCOUNTS: Record<
   string,
@@ -59,6 +74,9 @@ function buildChildrenMap(accounts: Account[]): Map<string | null, Account[]> {
 }
 
 export function ChartOfAccountsPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === Role.ADMIN
+  const [splitting, setSplitting] = useState<Account | null>(null)
   const [accounts, setAccounts] = useState<Account[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -80,6 +98,8 @@ export function ChartOfAccountsPage() {
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editActive, setEditActive] = useState(true)
+  const [editEmployeeKind, setEditEmployeeKind] = useState<EmployeeExpenseKind | ''>('')
+  const [employeeKind, setEmployeeKind] = useState<EmployeeExpenseKind | ''>('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [opening, setOpening] = useState<OpeningRequest | null>(null)
 
@@ -234,6 +254,7 @@ export function ChartOfAccountsPage() {
     setDescription('')
     setParentCode('')
     setOpeningBalance('')
+    setEmployeeKind('')
     setType(AccountType.ASSET)
     setError(null)
     setMessage(null)
@@ -241,11 +262,19 @@ export function ChartOfAccountsPage() {
     void refreshSuggestedCode(AccountType.ASSET, '')
   }
 
+  function openCreateUnder(header: Account) {
+    openCreate()
+    setType(header.type)
+    setParentCode(header.code)
+    void refreshSuggestedCode(header.type, header.code)
+  }
+
   function openEdit(account: Account) {
     setEditing(account)
     setEditName(account.name)
     setEditDescription(account.description ?? '')
     setEditActive(account.isActive)
+    setEditEmployeeKind(account.employeeExpenseKind ?? '')
     setModalOpen(true)
   }
 
@@ -287,11 +316,15 @@ export function ChartOfAccountsPage() {
         description: description || undefined,
         parentCode: parentCode || undefined,
         openingBalance: amount,
+        ...(type === AccountType.EXPENSE && employeeKind
+          ? { employeeExpenseKind: employeeKind }
+          : {}),
       })
       setName('')
       setDescription('')
       setParentCode('')
       setOpeningBalance('')
+      setEmployeeKind('')
       setModalOpen(false)
       if (created.openingJournalNumber) {
         setMessage(
@@ -314,10 +347,16 @@ export function ChartOfAccountsPage() {
     setSaving(true)
     setError(null)
     try {
+      const canTagEmployee =
+        editing.type === AccountType.EXPENSE && editing.isPostable
       await api.updateAccount(editing.id, {
         name: editName,
         description: editDescription,
         isActive: editActive,
+        ...(canTagEmployee &&
+        editEmployeeKind !== (editing.employeeExpenseKind ?? '')
+          ? { employeeExpenseKind: editEmployeeKind || null }
+          : {}),
       })
       setModalOpen(false)
       setEditing(null)
@@ -584,6 +623,12 @@ export function ChartOfAccountsPage() {
                           · {PARTY_CONTROL_ACCOUNTS[account.code]?.label}
                         </span>
                       ) : null}
+                      {account.employeeExpenseKind ? (
+                        <span className="muted">
+                          {' '}
+                          · {EMPLOYEE_EXPENSE_KIND_LABELS[account.employeeExpenseKind]} by employee
+                        </span>
+                      ) : null}
                     </td>
                     <td>{ACCOUNT_TYPE_LABEL[account.type]}</td>
                     <td>
@@ -612,6 +657,18 @@ export function ChartOfAccountsPage() {
                               label: 'Edit',
                               onSelect: () => openEdit(account),
                             },
+                            account.isPostable
+                              ? {
+                                  label: 'Split into sub-accounts',
+                                  onSelect: () => {
+                                    setMessage(null)
+                                    setSplitting(account)
+                                  },
+                                }
+                              : {
+                                  label: 'Add sub-account',
+                                  onSelect: () => openCreateUnder(account),
+                                },
                             {
                               label: 'Ledger',
                               onSelect: () => {
@@ -688,6 +745,18 @@ export function ChartOfAccountsPage() {
                 ]}
               />
             </label>
+            {editing.type === AccountType.EXPENSE && editing.isPostable ? (
+              <label>
+                Employee tagging
+                <Select
+                  value={editEmployeeKind}
+                  onChange={(value) =>
+                    setEditEmployeeKind(value as EmployeeExpenseKind | '')
+                  }
+                  options={EMPLOYEE_KIND_OPTIONS}
+                />
+              </label>
+            ) : null}
             <div className="form-actions">
               <button type="submit" disabled={saving}>
                 {saving ? 'Saving…' : 'Save changes'}
@@ -749,6 +818,18 @@ export function ChartOfAccountsPage() {
                 onChange={(e) => setDescription(e.target.value)}
               />
             </label>
+            {type === AccountType.EXPENSE ? (
+              <label>
+                Employee tagging
+                <Select
+                  value={employeeKind}
+                  onChange={(value) =>
+                    setEmployeeKind(value as EmployeeExpenseKind | '')
+                  }
+                  options={EMPLOYEE_KIND_OPTIONS}
+                />
+              </label>
+            ) : null}
             <label>
               Opening balance (optional)
               <input
@@ -771,6 +852,18 @@ export function ChartOfAccountsPage() {
           </form>
         )}
       </Modal>
+
+      <AccountSplitModal
+        account={splitting}
+        accounts={accounts}
+        canApply={isAdmin}
+        onClose={() => setSplitting(null)}
+        onDone={(text) => {
+          setSplitting(null)
+          setMessage(text)
+          void load()
+        }}
+      />
 
       <AccountOpeningModal
         request={opening}

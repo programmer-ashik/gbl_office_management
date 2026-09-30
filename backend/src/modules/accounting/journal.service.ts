@@ -1350,7 +1350,16 @@ export class JournalService {
     isOpeningBalance = false,
   ): Promise<{
     lines: IJournalLine[];
-    byCode: Map<string, { _id: Types.ObjectId; code: string; name: string; type: string }>;
+    byCode: Map<
+      string,
+      {
+        _id: Types.ObjectId;
+        code: string;
+        name: string;
+        type: string;
+        employeeExpenseKind?: string;
+      }
+    >;
   }> {
     const accounts = await this.accountsService.findPostableByCodes(
       prepared.map((line) => line.accountCode),
@@ -1363,6 +1372,7 @@ export class JournalService {
           code: account.code,
           name: account.name,
           type: account.type,
+          employeeExpenseKind: account.employeeExpenseKind,
         },
       ]),
     );
@@ -1396,6 +1406,15 @@ export class JournalService {
       let entityType = line.entityType;
       let entityId = line.entityId;
       let entityName: string | undefined;
+
+      if (account.employeeExpenseKind && entityId) {
+        if (entityType && entityType !== JournalEntityType.EMPLOYEE) {
+          throw badRequest(
+            `${account.name} (${account.code}) can only be tagged with an employee`,
+          );
+        }
+        entityType = JournalEntityType.EMPLOYEE;
+      }
 
       if (entityId) {
         const resolved = await this.resolveEntity(

@@ -1,3 +1,4 @@
+import type { EmployeeExpenseKind } from './accounting'
 import type { Role } from './auth'
 
 export type EmployeeAccount = {
@@ -24,8 +25,22 @@ export type Employee = {
   account: EmployeeAccount | null
   /** Login role when the employee has an account. */
   role: Role | null
+  /** Posted salary / conveyance tagged to this employee. */
+  expenses?: EmployeeExpenseSummary
   createdAt?: string
   updatedAt?: string
+}
+
+export type EmployeeExpenseSummary = {
+  salary: number
+  conveyance: number
+  total: number
+  byAccount: Array<{
+    accountCode: string
+    accountName: string
+    kind: EmployeeExpenseKind
+    amount: number
+  }>
 }
 
 export type EmployeeProfileBody = {

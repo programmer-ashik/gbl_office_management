@@ -102,7 +102,7 @@ export function AdvanceSettlementsPage() {
             />
           </label>
         </div>
-        <table className='data-table'>
+        <table className='data-table mobile-stack'>
           <thead>
             <tr>
               <th>Number</th>
@@ -116,18 +116,16 @@ export function AdvanceSettlementsPage() {
           <tbody>
             {filtered.map((row) => (
               <tr key={row.id}>
-                <td>
+                <td className='mobile-stack-title'>
                   <Link to={`/advances/${row.id}`}>{row.advanceNumber}</Link>
                 </td>
-                <td>
-                  {row.projectName}
-                </td>
-                <td>{row.employeeName}</td>
-                <td>{money(row.requestedAmount)}</td>
-                <td>
+                <td data-label='Project'>{row.projectName}</td>
+                <td data-label='Employee'>{row.employeeName}</td>
+                <td data-label='Requested'>{money(row.requestedAmount)}</td>
+                <td data-label='Spent'>
                   {row.spentAmount === null ? "—" : money(row.spentAmount)}
                 </td>
-                <td>
+                <td data-label='Status'>
                   <span className={`status-pill status-${row.status}`}>
                     {ADVANCE_STATUS_LABEL[row.status]}
                   </span>

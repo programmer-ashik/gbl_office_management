@@ -37,6 +37,8 @@ export type NavIconName =
   | 'chevron'
   | 'panel'
   | 'logout'
+  | 'menu'
+  | 'close'
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number }
 
@@ -327,6 +329,19 @@ const ICONS: Record<NavIconName, (props: IconProps) => ReactNode> = {
       <path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" />
       <path d="M15 16l4-4-4-4" />
       <path d="M19 12H9" />
+    </Svg>
+  ),
+  menu: (p) => (
+    <Svg {...p}>
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h16" />
+    </Svg>
+  ),
+  close: (p) => (
+    <Svg {...p}>
+      <path d="M6 6l12 12" />
+      <path d="M18 6L6 18" />
     </Svg>
   ),
 }

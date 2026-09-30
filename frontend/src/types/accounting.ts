@@ -107,6 +107,48 @@ export type Account = {
   isSystem: boolean
   isPostable: boolean
   isActive: boolean
+  /** Salary / conveyance heads: journal lines are tagged with an employee. */
+  employeeExpenseKind?: EmployeeExpenseKind | null
+}
+
+export type AccountSplitBody = {
+  children: Array<{ code: string; name: string }>
+  /** Sub-account that receives the balance already posted to the account. */
+  historyTo?: string
+}
+
+export type AccountSplitPlan = {
+  account: { code: string; name: string; type: string; parentCode: string | null }
+  alreadyHeader: boolean
+  alreadyDone: boolean
+  errors: string[]
+  warnings: string[]
+  children: Array<{ code: string; name: string }>
+  childrenToCreate: string[]
+  historyTo: string | null
+  reclasses: Array<{
+    journalEntryId: string
+    entryNumber: string
+    date: string
+    projectId: string | null
+    employeeId: string | null
+    amount: number
+    reference: string
+  }>
+  totalToMove: number
+  unpostedJournals: Array<{ entryNumber: string; status: string }>
+}
+
+export type AccountSplitResult = AccountSplitPlan & {
+  postedReclasses: Array<{ reference: string; entryNumber: string }>
+  headerOwnBalanceAfter: number
+}
+
+export type EmployeeExpenseKind = 'salary' | 'conveyance'
+
+export const EMPLOYEE_EXPENSE_KIND_LABELS: Record<EmployeeExpenseKind, string> = {
+  salary: 'Salary',
+  conveyance: 'Conveyance',
 }
 
 export type JournalLine = {
@@ -456,19 +498,27 @@ const DIMENSION_RULES: Record<string, DimensionRule> = {
 /** Direct Project Cost (COGS). Every head opened under it needs a project. */
 export const PROJECT_COST_GROUP_CODE = '5100'
 
+type AccountTreeNode = Pick<Account, 'code' | 'parentCode'> &
+  Partial<Pick<Account, 'employeeExpenseKind'>>
+
 type AccountTree =
-  | ReadonlyMap<string, Pick<Account, 'code' | 'parentCode'>>
-  | ReadonlyArray<Pick<Account, 'code' | 'parentCode'>>
+  | ReadonlyMap<string, AccountTreeNode>
+  | ReadonlyArray<AccountTreeNode>
+
+function accountTreeMap(
+  accounts: AccountTree,
+): ReadonlyMap<string, AccountTreeNode> {
+  return 'get' in accounts
+    ? accounts
+    : new Map(accounts.map((row) => [row.code, row]))
+}
 
 /** True when the account's parent chain reaches 5100, at any depth. */
 export function isProjectCostAccount(
   accountCode: string,
   accounts: AccountTree,
 ): boolean {
-  const byCode: ReadonlyMap<string, Pick<Account, 'code' | 'parentCode'>> =
-    'get' in accounts
-      ? accounts
-      : new Map(accounts.map((row) => [row.code, row]))
+  const byCode = accountTreeMap(accounts)
   const seen = new Set<string>()
   let parent = byCode.get(accountCode)?.parentCode ?? null
   while (parent && !seen.has(parent)) {
@@ -483,20 +533,28 @@ export function dimensionRuleForAccount(
   accountCode: string,
   accounts?: AccountTree,
 ): DimensionRule {
-  const base = DIMENSION_RULES[accountCode] ?? {
+  let rule: DimensionRule = DIMENSION_RULES[accountCode] ?? {
     entityType: null,
     entityRequired: false,
     projectRequired: false,
     label: '',
   }
+  if (!accounts) return rule
   if (
-    !base.projectRequired &&
-    accounts &&
-    isProjectCostAccount(accountCode, accounts)
+    !rule.entityType &&
+    accountTreeMap(accounts).get(accountCode)?.employeeExpenseKind
   ) {
-    return { ...base, projectRequired: true, label: base.label || 'Project' }
+    rule = {
+      ...rule,
+      entityType: JournalEntityType.EMPLOYEE,
+      entityRequired: false,
+      label: 'Employee',
+    }
   }
-  return base
+  if (!rule.projectRequired && isProjectCostAccount(accountCode, accounts)) {
+    rule = { ...rule, projectRequired: true, label: rule.label || 'Project' }
+  }
+  return rule
 }
 
 export type JournalWriteBody = {

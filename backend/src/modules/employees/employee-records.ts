@@ -11,6 +11,7 @@ import { SalaryStructureModel } from '../payroll/salary-structure.model';
 import { TimeLogModel } from '../payroll/time-log.model';
 import { UserModel, type UserDocument } from '../users/user.model';
 import { EmployeeModel, type EmployeeDocument } from './employee.model';
+import type { EmployeeExpenseSummary } from './employee-expenses';
 
 /** Roles that were treated as staff before the User/Employee split. */
 export const LEGACY_STAFF_ROLES = [
@@ -43,6 +44,8 @@ export interface PublicEmployee {
   account: PublicEmployeeAccount | null;
   /** Login role when the employee has an account (kept for older screens). */
   role: Role | null;
+  /** Salary / conveyance drawn (list and detail endpoints only). */
+  expenses?: EmployeeExpenseSummary;
   createdAt?: Date;
   updatedAt?: Date;
 }

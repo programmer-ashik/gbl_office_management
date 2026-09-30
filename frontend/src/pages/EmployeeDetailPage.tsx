@@ -11,8 +11,9 @@ import {
   type EmployeeProfileValues,
   type LoginAccountValues,
 } from '../components/EmployeeForms'
+import { MetricCard } from '../components/MetricCard'
 import { Modal } from '../components/ui'
-import { money } from '../types/accounting'
+import { EMPLOYEE_EXPENSE_KIND_LABELS, money } from '../types/accounting'
 import { ROLE_LABEL, Role } from '../types/auth'
 import type { Employee } from '../types/employee'
 
@@ -112,6 +113,8 @@ export function EmployeeDetailPage() {
     return error ? <p className="form-error">{error}</p> : <p className="muted">Loading…</p>
   }
 
+  const expenses = employee.expenses
+
   return (
     <>
       <header className="workspace-header">
@@ -133,6 +136,63 @@ export function EmployeeDetailPage() {
           </Link>
         </div>
       </header>
+
+      <section className="grid metric-card-grid">
+        <MetricCard
+          variant="blue"
+          chart="none"
+          title="Salary drawn"
+          value={money(expenses?.salary ?? 0)}
+          meta="Posted to salary heads"
+        />
+        <MetricCard
+          variant="amber"
+          chart="none"
+          title="Conveyance"
+          value={money(expenses?.conveyance ?? 0)}
+          meta="Posted to conveyance heads"
+        />
+        <MetricCard
+          variant="teal"
+          chart="none"
+          title="Total"
+          value={money(expenses?.total ?? 0)}
+          meta="Salary + conveyance"
+        />
+      </section>
+
+      {expenses && expenses.byAccount.length > 0 ? (
+        <section className="table-card">
+          <div className="table-head">
+            <h2>Salary &amp; conveyance by account</h2>
+            <p className="muted">Posted journal lines tagged to {employee.name}</p>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Type</th>
+                <th className="num">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {expenses.byAccount.map((row) => (
+                <tr key={row.accountCode}>
+                  <td>
+                    <Link
+                      to={`/ledgers/${encodeURIComponent(row.accountCode)}?entityId=${employee.id}`}
+                    >
+                      {row.accountCode} · {row.accountName}
+                    </Link>
+                  </td>
+                  <td>{EMPLOYEE_EXPENSE_KIND_LABELS[row.kind]}</td>
+                  <td className="num">{money(row.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
 
       <section className="table-card">
         <div className="table-head">

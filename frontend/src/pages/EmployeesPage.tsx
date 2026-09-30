@@ -148,6 +148,12 @@ export function EmployeesPage() {
               <th>Designation</th>
               <th>Phone</th>
               <th className="num">Salary</th>
+              <th className="num" title="Posted to salary heads (e.g. 5230), tagged to this employee">
+                Salary drawn
+              </th>
+              <th className="num" title="Posted to conveyance heads (e.g. 5141), tagged to this employee">
+                Conveyance
+              </th>
               <th>Software access</th>
               <th>Status</th>
             </tr>
@@ -163,6 +169,12 @@ export function EmployeesPage() {
                 <td>{row.designation ?? '—'}</td>
                 <td>{row.phone ?? '—'}</td>
                 <td className="num">{row.salary != null ? money(row.salary) : '—'}</td>
+                <td className="num">
+                  {row.expenses?.salary ? money(row.expenses.salary) : '—'}
+                </td>
+                <td className="num">
+                  {row.expenses?.conveyance ? money(row.expenses.conveyance) : '—'}
+                </td>
                 <td>
                   {row.account ? (
                     <>
@@ -181,7 +193,7 @@ export function EmployeesPage() {
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={8} className="muted">
                   No employees yet.
                 </td>
               </tr>

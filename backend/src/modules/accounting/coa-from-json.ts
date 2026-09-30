@@ -4,6 +4,10 @@ import {
   AccountType,
   normalBalanceOf,
 } from '../../common/enums/account-type.enum';
+import {
+  EMPLOYEE_EXPENSE_KIND_VALUES,
+  type EmployeeExpenseKind,
+} from './account.model';
 
 export type ChartOfAccountsJsonRow = {
   code: string;
@@ -11,6 +15,7 @@ export type ChartOfAccountsJsonRow = {
   type: string;
   isHeader: boolean;
   parentCode: string | null;
+  employeeExpenseKind?: EmployeeExpenseKind;
 };
 
 export type NormalizedSeedAccount = {
@@ -23,6 +28,8 @@ export type NormalizedSeedAccount = {
   isPostable: boolean;
   isActive: boolean;
   normalBalance: 'debit' | 'credit';
+  /** Applied only when the account is created; never synced onto existing rows. */
+  employeeExpenseKind?: EmployeeExpenseKind;
 };
 
 function mapType(raw: string): AccountType {
@@ -133,6 +140,10 @@ export function normalizeChartOfAccounts(
         isPostable: !row.isHeader,
         isActive: true,
         normalBalance,
+        ...(row.employeeExpenseKind &&
+        EMPLOYEE_EXPENSE_KIND_VALUES.includes(row.employeeExpenseKind)
+          ? { employeeExpenseKind: row.employeeExpenseKind }
+          : {}),
       };
     });
 }

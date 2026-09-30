@@ -321,7 +321,7 @@ export function AdvanceDetailPage() {
             </button>
           </div>
           <form className="stack-form" onSubmit={(event) => void onSubmit(event)}>
-            <table>
+            <table className="mobile-stack mobile-stack-form">
               <thead>
                 <tr>
                   <th>Expense account</th>
@@ -332,7 +332,7 @@ export function AdvanceDetailPage() {
               <tbody>
                 {vouchers.map((line, index) => (
                   <tr key={index}>
-                    <td>
+                    <td data-label={`Line ${index + 1} · Expense account`}>
                       <Select
                         value={line.accountCode}
                         onChange={(value) =>
@@ -346,9 +346,10 @@ export function AdvanceDetailPage() {
                         placeholder="Select"
                       />
                     </td>
-                    <td>
+                    <td data-label="Amount">
                       <input
                         inputMode="decimal"
+                        aria-label={`Line ${index + 1} amount`}
                         value={line.amount}
                         onChange={(e) =>
                           setVouchers((current) =>
@@ -359,8 +360,9 @@ export function AdvanceDetailPage() {
                         }
                       />
                     </td>
-                    <td>
+                    <td data-label="Description">
                       <input
+                        aria-label={`Line ${index + 1} description`}
                         value={line.description}
                         onChange={(e) =>
                           setVouchers((current) =>
@@ -408,7 +410,7 @@ export function AdvanceDetailPage() {
       {isFinance && row.status === 'submitted' ? (
         <section className="table-card">
           <h2>Confirm settlement</h2>
-          <table>
+          <table className="mobile-stack">
             <thead>
               <tr>
                 <th>Account</th>
@@ -419,11 +421,11 @@ export function AdvanceDetailPage() {
             <tbody>
               {row.vouchers.map((line, index) => (
                 <tr key={`${line.accountCode}-${index}`}>
-                  <td>
+                  <td className="mobile-stack-title">
                     {line.accountCode} · {line.accountName}
                   </td>
-                  <td>{money(line.amount)}</td>
-                  <td>{line.description ?? '—'}</td>
+                  <td data-label="Amount">{money(line.amount)}</td>
+                  <td data-label="Description">{line.description ?? '—'}</td>
                 </tr>
               ))}
             </tbody>

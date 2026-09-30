@@ -6,6 +6,7 @@ import { ActionMenu, Modal, Select } from '../components/ui'
 import { ROLE_LABEL, Role, type PublicUser } from '../types/auth'
 import {
   allPermissionOptions,
+  allowedIdsForSave,
   effectiveAllowedIds,
   grantedPermissionLabels,
 } from '../utils/rolePermissions'
@@ -96,7 +97,7 @@ export function UsersPermissionsPage() {
     try {
       const updated = await api.updateUserPermissions(
         accessTarget.id,
-        [...allowedIds],
+        allowedIdsForSave(allowedIds),
       )
       setRows((current) =>
         current.map((row) => (row.id === updated.id ? updated : row)),

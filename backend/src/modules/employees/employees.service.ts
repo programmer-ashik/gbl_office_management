@@ -17,6 +17,10 @@ import {
 } from './dto/employee.dto';
 import { EmployeeModel, type EmployeeDocument } from './employee.model';
 import {
+  emptyEmployeeExpenseSummary,
+  employeeExpenseSummaries,
+} from './employee-expenses';
+import {
   employeeIdForUser,
   findEmployee,
   findEmployeeOrFail,
@@ -45,13 +49,13 @@ export class EmployeesService {
       .sort({ firstName: 1, lastName: 1 })
       .limit(1000)
       .exec();
-    return this.withAccounts(rows);
+    return this.withAccounts(rows, { expenses: true });
   }
 
   async get(id: string, actor: AuthenticatedUser): Promise<PublicEmployee> {
     this.assertManage(actor);
     const row = await findEmployeeOrFail(id);
-    const [publicRow] = await this.withAccounts([row]);
+    const [publicRow] = await this.withAccounts([row], { expenses: true });
     return publicRow;
   }
 
@@ -121,7 +125,7 @@ export class EmployeesService {
     if (dto.joinDate !== undefined) row.joinDate = new Date(dto.joinDate);
     if (dto.isActive !== undefined) row.isActive = dto.isActive;
     await row.save();
-    const [publicRow] = await this.withAccounts([row]);
+    const [publicRow] = await this.withAccounts([row], { expenses: true });
     return publicRow;
   }
 
@@ -170,19 +174,36 @@ export class EmployeesService {
     return toPublicEmployee(employee, user);
   }
 
-  private async withAccounts(rows: EmployeeDocument[]): Promise<PublicEmployee[]> {
+  private async withAccounts(
+    rows: EmployeeDocument[],
+    options: { expenses?: boolean } = {},
+  ): Promise<PublicEmployee[]> {
     const userIds = rows
       .map((row) => row.userId)
       .filter((id): id is Types.ObjectId => Boolean(id));
-    const users = userIds.length
-      ? await UserModel.find({ _id: { $in: userIds } }).exec()
-      : [];
+    const [users, expenses] = await Promise.all([
+      userIds.length
+        ? UserModel.find({ _id: { $in: userIds } }).exec()
+        : Promise.resolve([] as UserDocument[]),
+      options.expenses
+        ? employeeExpenseSummaries(rows.map((row) => row._id))
+        : Promise.resolve(null),
+    ]);
     const byId = new Map<string, UserDocument>(
       users.map((user) => [user._id.toString(), user]),
     );
-    return rows.map((row) =>
-      toPublicEmployee(row, row.userId ? byId.get(row.userId.toString()) : null),
-    );
+    return rows.map((row) => {
+      const publicRow = toPublicEmployee(
+        row,
+        row.userId ? byId.get(row.userId.toString()) : null,
+      );
+      if (!expenses) return publicRow;
+      return {
+        ...publicRow,
+        expenses:
+          expenses.get(row._id.toString()) ?? emptyEmployeeExpenseSummary(),
+      };
+    });
   }
 
   private assertStaffRole(role: Role | undefined): Role {

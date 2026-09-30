@@ -267,7 +267,7 @@ export function QuotationsPage() {
 
         {/* Table */}
         <div className='journal-lines-scroll'>
-          <table className='journal-lines-table'>
+          <table className='journal-lines-table mobile-stack'>
             <thead>
               <tr>
                 <th>Number</th>
@@ -284,25 +284,27 @@ export function QuotationsPage() {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id}>
-                  <td>
+                  <td className='mobile-stack-title'>
                     <Link to={`/quotations/${row.id}`}>
                       {row.quotationNumber}
                     </Link>
                   </td>
 
-                  <td>{row.clientInfo.name}</td>
+                  <td data-label='Client'>{row.clientInfo.name}</td>
 
-                  <td>{row.projectName ?? "—"}</td>
+                  <td data-label='Project'>{row.projectName ?? "—"}</td>
 
-                  <td>{row.createdByName}</td>
+                  <td data-label='Created by'>{row.createdByName}</td>
 
-                  <td>{row.createdAt.slice(0, 10)}</td>
+                  <td data-label='Date'>{row.createdAt.slice(0, 10)}</td>
 
-                  <td>{QUOTATION_STATUS_LABEL[row.status]}</td>
+                  <td data-label='Status'>{QUOTATION_STATUS_LABEL[row.status]}</td>
 
-                  <td className='num'>{money(row.grandTotal)}</td>
+                  <td className='num' data-label='Total'>
+                    {money(row.grandTotal)}
+                  </td>
 
-                  <td>
+                  <td className='mobile-stack-actions'>
                     <ActionMenu
                       items={[
                         {

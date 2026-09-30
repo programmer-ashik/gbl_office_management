@@ -279,12 +279,12 @@ export function AdvancesPage() {
             Clear
           </button>
         </form>
-        <table>
+        <table className="mobile-stack">
           <thead>
             <tr>
               <th>Number</th>
               <th>Project</th>
-              <th>Employee</th>
+              {isFinance ? <th>Employee</th> : null}
               <th>Requested</th>
               <th>Spent</th>
               <th>Status</th>
@@ -294,21 +294,23 @@ export function AdvancesPage() {
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
-                <td>
+                <td className="mobile-stack-title">
                   <Link to={`/advances/${row.id}`}>{row.advanceNumber}</Link>
                 </td>
-                <td>
-                  {row.projectName}
+                <td data-label="Project">{row.projectName}</td>
+                {isFinance ? (
+                  <td data-label="Employee">{row.employeeName}</td>
+                ) : null}
+                <td data-label="Requested">{money(row.requestedAmount)}</td>
+                <td data-label="Spent">
+                  {row.spentAmount === null ? '—' : money(row.spentAmount)}
                 </td>
-                <td>{row.employeeName}</td>
-                <td>{money(row.requestedAmount)}</td>
-                <td>{row.spentAmount === null ? '—' : money(row.spentAmount)}</td>
-                <td>
+                <td data-label="Status">
                   <span className={`status-pill status-${row.status}`}>
                     {ADVANCE_STATUS_LABEL[row.status]}
                   </span>
                 </td>
-                <td>
+                <td className="mobile-stack-actions">
                   <ActionMenu
                     items={[
                       {
@@ -334,7 +336,7 @@ export function AdvancesPage() {
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="muted">
+                <td colSpan={isFinance ? 7 : 6} className="muted">
                   No requisitions match the current filters.
                 </td>
               </tr>

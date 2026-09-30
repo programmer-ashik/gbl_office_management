@@ -1,56 +1,67 @@
-import { useEffect, useMemo, useState } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
-import { useAuth } from '../auth/AuthContext'
-import { NavIcon } from '../nav/icons'
+import { useEffect, useMemo, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import { NavIcon } from "../nav/icons";
 import {
   readOpenSectionId,
   readRailCollapsed,
   writeOpenSectionId,
   writeRailCollapsed,
   type NavSection,
-} from '../nav/navigation'
-import { ROLE_LABEL } from '../types/auth'
-import {
-  sectionsForUser,
-} from '../utils/rolePermissions'
+} from "../nav/navigation";
+import { ROLE_LABEL } from "../types/auth";
+import { sectionsForUser } from "../utils/rolePermissions";
 
 function groupKey(sectionId: string, label: string): string {
-  return `${sectionId}::${label}`
+  return `${sectionId}::${label}`;
 }
 
-function pathMatches(to: string, end: boolean | undefined, pathname: string): boolean {
-  return end ? pathname === to : pathname === to || pathname.startsWith(`${to}/`)
+function pathMatches(
+  to: string,
+  end: boolean | undefined,
+  pathname: string,
+): boolean {
+  return end
+    ? pathname === to
+    : pathname === to || pathname.startsWith(`${to}/`);
 }
 
 function sectionIdForPath(
   sections: NavSection[],
   pathname: string,
 ): string | null {
-  let best: { id: string; score: number } | null = null
+  let best: { id: string; score: number } | null = null;
   for (const section of sections) {
     for (const item of section.items) {
-      const candidates = item.children?.length ? item.children : [item]
+      const candidates = item.children?.length ? item.children : [item];
       for (const link of candidates) {
         const matches = link.end
           ? pathname === link.to
-          : pathname === link.to || pathname.startsWith(`${link.to}/`)
-        if (!matches) continue
-        const score = link.to.length
-        if (!best || score > best.score) best = { id: section.id, score }
+          : pathname === link.to || pathname.startsWith(`${link.to}/`);
+        if (!matches) continue;
+        const score = link.to.length;
+        if (!best || score > best.score) best = { id: section.id, score };
       }
     }
   }
-  return best?.id ?? null
+  return best?.id ?? null;
 }
 
-export function AppSidebar() {
-  const { user, logout } = useAuth()
-  const location = useLocation()
-  const [railCollapsed, setRailCollapsed] = useState(readRailCollapsed)
+export function AppSidebar({
+  isMobile = false,
+  onNavigate,
+}: {
+  isMobile?: boolean;
+  onNavigate?: () => void;
+}) {
+  const { user, logout } = useAuth();
+  const location = useLocation();
+  const [railPreference, setRailCollapsed] = useState(readRailCollapsed);
+  const railCollapsed = railPreference && !isMobile;
   const [openSectionId, setOpenSectionId] = useState<string | null>(() =>
     user ? readOpenSectionId(user.role) : null,
-  )
-  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set())
+  );
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
 
   const sections = useMemo(
     () =>
@@ -62,102 +73,119 @@ export function AppSidebar() {
           )
         : [],
     [user],
-  )
+  );
 
   useEffect(() => {
-    if (!user) return
-    const matched = sectionIdForPath(sections, location.pathname)
-    if (!matched) return
+    if (!user) return;
+    const matched = sectionIdForPath(sections, location.pathname);
+    if (!matched) return;
     setOpenSectionId((current) => {
-      if (current === matched) return current
-      writeOpenSectionId(matched)
-      return matched
-    })
-  }, [user, sections, location.pathname])
+      if (current === matched) return current;
+      writeOpenSectionId(matched);
+      return matched;
+    });
+  }, [user, sections, location.pathname]);
 
   useEffect(() => {
     setOpenGroups((current) => {
-      const next = new Set(current)
-      let changed = false
+      const next = new Set(current);
+      let changed = false;
       for (const section of sections) {
         for (const item of section.items) {
-          if (!item.children?.length) continue
+          if (!item.children?.length) continue;
           const active = item.children.some((child) =>
             pathMatches(child.to, child.end, location.pathname),
-          )
-          if (!active) continue
-          const key = groupKey(section.id, item.label)
+          );
+          if (!active) continue;
+          const key = groupKey(section.id, item.label);
           if (!next.has(key)) {
-            next.add(key)
-            changed = true
+            next.add(key);
+            changed = true;
           }
         }
       }
-      return changed ? next : current
-    })
-  }, [sections, location.pathname])
+      return changed ? next : current;
+    });
+  }, [sections, location.pathname]);
 
   const collapsedSections = useMemo(() => {
-    const seen = new Set<string>()
-    const list: NavSection[] = []
+    const seen = new Set<string>();
+    const list: NavSection[] = [];
     for (const section of sections) {
-      if (seen.has(section.id)) continue
-      seen.add(section.id)
-      list.push(section)
+      if (seen.has(section.id)) continue;
+      seen.add(section.id);
+      list.push(section);
     }
-    return list
-  }, [sections])
+    return list;
+  }, [sections]);
 
-  if (!user) return null
+  if (!user) return null;
 
   function toggleRail() {
+    if (isMobile) return;
     setRailCollapsed((current) => {
-      const next = !current
-      writeRailCollapsed(next)
-      return next
-    })
+      const next = !current;
+      writeRailCollapsed(next);
+      return next;
+    });
   }
 
   function toggleSection(id: string) {
     setOpenSectionId((current) => {
-      const next = current === id ? null : id
-      writeOpenSectionId(next)
-      return next
-    })
+      const next = current === id ? null : id;
+      writeOpenSectionId(next);
+      return next;
+    });
   }
 
   function toggleGroup(key: string) {
     setOpenGroups((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   return (
-    <aside className={railCollapsed ? 'sidebar is-collapsed' : 'sidebar'}>
-      <div className="sidebar-top">
-        <div className="brand-mark" title="GBL Office">
-          <span>GBL</span>
-          {!railCollapsed ? <strong>Office</strong> : null}
+    <aside
+      id='app-sidebar'
+      className={railCollapsed ? "sidebar is-collapsed" : "sidebar"}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest("a")) onNavigate?.();
+      }}
+    >
+      <div className='sidebar-brand flex justify-center items-center'>
+        <div
+          onClick={toggleRail}
+          className=' flex justify-around items-center gap-1'
+        >
+          <img
+            src='/gbl-logo.png'
+            alt='GBL Office'
+            className='w-8 h-8 rounded-full'
+          />
+          {!railCollapsed ? (
+            <strong className='text-sm'>GBL Enterprise</strong>
+          ) : null}
         </div>
-        <button
-          type="button"
-          className="ghost sidebar-toggle"
-          aria-label={railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={railCollapsed ? 'Expand menu' : 'Collapse menu'}
+
+        {/* <button
+          type='button'
+          className='ghost sidebar-toggle'
+          aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={railCollapsed ? "Expand menu" : "Collapse menu"}
           onClick={toggleRail}
         >
-          <NavIcon name="panel" size={15} />
-        </button>
+          <NavIcon name='panel' size={15} />
+        </button> */}
       </div>
 
-      <nav aria-label="Main">
+      <nav aria-label='Main'>
         {railCollapsed
           ? collapsedSections.map((section) => {
-              const primary = section.items[0]
-              if (!primary) return null
+              const primary = section.items[0];
+              if (!primary) return null;
               return (
                 <NavLink
                   key={`rail-${section.id}`}
@@ -165,54 +193,50 @@ export function AppSidebar() {
                   end={primary.end}
                   title={section.label}
                   className={({ isActive }) =>
-                    isActive ? 'nav-rail-link is-active' : 'nav-rail-link'
+                    isActive ? "nav-rail-link is-active" : "nav-rail-link"
                   }
                 >
                   <NavIcon name={section.icon} size={17} />
                 </NavLink>
-              )
+              );
             })
           : sections.map((section) => {
-              const isOpen = openSectionId === section.id
+              const isOpen = openSectionId === section.id;
               return (
-                <div key={section.id} className="nav-section">
+                <div key={section.id} className='nav-section'>
                   <button
-                    type="button"
-                    className="nav-section-toggle"
+                    type='button'
+                    className='nav-section-toggle'
                     aria-expanded={isOpen}
                     onClick={() => toggleSection(section.id)}
                   >
-                    <span className="nav-section-label">
+                    <span className='nav-section-label'>
                       <NavIcon name={section.icon} size={15} />
                       <span>{section.label}</span>
                     </span>
                     <span
-                      className={
-                        isOpen ? 'nav-chevron is-open' : 'nav-chevron'
-                      }
+                      className={isOpen ? "nav-chevron is-open" : "nav-chevron"}
                       aria-hidden
                     >
-                      <NavIcon name="chevron" size={12} />
+                      <NavIcon name='chevron' size={12} />
                     </span>
                   </button>
 
                   <div
                     className={
-                      isOpen
-                        ? 'nav-section-panel is-open'
-                        : 'nav-section-panel'
+                      isOpen ? "nav-section-panel is-open" : "nav-section-panel"
                     }
                   >
-                    <div className="nav-section-items">
+                    <div className='nav-section-items'>
                       {section.items.map((item) =>
                         item.children && item.children.length > 0 ? (
                           <div
                             key={`${section.id}-${item.label}-group`}
-                            className="nav-subgroup"
+                            className='nav-subgroup'
                           >
                             <button
-                              type="button"
-                              className="nav-subgroup-toggle"
+                              type='button'
+                              className='nav-subgroup-toggle'
                               aria-expanded={openGroups.has(
                                 groupKey(section.id, item.label),
                               )}
@@ -220,14 +244,14 @@ export function AppSidebar() {
                                 toggleGroup(groupKey(section.id, item.label))
                               }
                             >
-                              <span className="nav-link-main">
+                              <span className='nav-link-main'>
                                 <NavIcon name={item.icon} size={15} />
-                                <span className="nav-link-copy">
-                                  <span className="nav-link-label">
+                                <span className='nav-link-copy'>
+                                  <span className='nav-link-label'>
                                     {item.label}
                                   </span>
                                   {item.hint ? (
-                                    <span className="nav-link-hint">
+                                    <span className='nav-link-hint'>
                                       {item.hint}
                                     </span>
                                   ) : null}
@@ -238,22 +262,22 @@ export function AppSidebar() {
                                   openGroups.has(
                                     groupKey(section.id, item.label),
                                   )
-                                    ? 'nav-chevron is-open'
-                                    : 'nav-chevron'
+                                    ? "nav-chevron is-open"
+                                    : "nav-chevron"
                                 }
                                 aria-hidden
                               >
-                                <NavIcon name="chevron" size={12} />
+                                <NavIcon name='chevron' size={12} />
                               </span>
                             </button>
                             <div
                               className={
                                 openGroups.has(groupKey(section.id, item.label))
-                                  ? 'nav-subgroup-panel is-open'
-                                  : 'nav-subgroup-panel'
+                                  ? "nav-subgroup-panel is-open"
+                                  : "nav-subgroup-panel"
                               }
                             >
-                              <div className="nav-subgroup-items">
+                              <div className='nav-subgroup-items'>
                                 {item.children.map((child) => (
                                   <NavLink
                                     key={`${section.id}-${child.label}-${child.to}`}
@@ -262,18 +286,18 @@ export function AppSidebar() {
                                     title={child.hint}
                                     className={({ isActive }) =>
                                       isActive
-                                        ? 'nav-link nav-link-nested is-active'
-                                        : 'nav-link nav-link-nested'
+                                        ? "nav-link nav-link-nested is-active"
+                                        : "nav-link nav-link-nested"
                                     }
                                   >
-                                    <span className="nav-link-main">
+                                    <span className='nav-link-main'>
                                       <NavIcon name={child.icon} size={14} />
-                                      <span className="nav-link-copy">
-                                        <span className="nav-link-label">
+                                      <span className='nav-link-copy'>
+                                        <span className='nav-link-label'>
                                           {child.label}
                                         </span>
                                         {child.hint ? (
-                                          <span className="nav-link-hint">
+                                          <span className='nav-link-hint'>
                                             {child.hint}
                                           </span>
                                         ) : null}
@@ -291,17 +315,17 @@ export function AppSidebar() {
                             end={item.end}
                             title={item.hint}
                             className={({ isActive }) =>
-                              isActive ? 'nav-link is-active' : 'nav-link'
+                              isActive ? "nav-link is-active" : "nav-link"
                             }
                           >
-                            <span className="nav-link-main">
+                            <span className='nav-link-main'>
                               <NavIcon name={item.icon} size={15} />
-                              <span className="nav-link-copy">
-                                <span className="nav-link-label">
+                              <span className='nav-link-copy'>
+                                <span className='nav-link-label'>
                                   {item.label}
                                 </span>
                                 {item.hint ? (
-                                  <span className="nav-link-hint">
+                                  <span className='nav-link-hint'>
                                     {item.hint}
                                   </span>
                                 ) : null}
@@ -313,42 +337,44 @@ export function AppSidebar() {
                     </div>
                   </div>
                 </div>
-              )
+              );
             })}
       </nav>
 
-      <div className="sidebar-user">
+      <div className='sidebar-user'>
         {!railCollapsed ? (
           <>
             <p>
-              <NavLink to="/settings/profile" className="sidebar-user-link">
-                <NavIcon name="profile" size={14} />
+              <NavLink to='/settings/profile' className='sidebar-user-link'>
+                <NavIcon name='profile' size={14} />
                 <span>
                   {user.firstName} {user.lastName}
                 </span>
               </NavLink>
+              <span className='role-pill rounded-2xl ml-2'>
+                {ROLE_LABEL[user.role]}
+              </span>
             </p>
-            <span className="role-pill">{ROLE_LABEL[user.role]}</span>
           </>
         ) : (
           <NavLink
-            to="/settings/profile"
-            className="nav-rail-link"
+            to='/settings/profile'
+            className='nav-rail-link'
             title={`${user.firstName} ${user.lastName} · ${ROLE_LABEL[user.role]}`}
           >
-            <NavIcon name="profile" size={17} />
+            <NavIcon name='profile' size={17} />
           </NavLink>
         )}
         <button
-          type="button"
-          className="ghost sidebar-logout"
+          type='button'
+          className='ghost sidebar-logout'
           onClick={() => void logout()}
-          title="Sign out"
+          title='Sign out'
         >
-          <NavIcon name="logout" size={14} />
+          <NavIcon name='logout' size={14} />
           {railCollapsed ? null : <span>Sign out</span>}
         </button>
       </div>
     </aside>
-  )
+  );
 }

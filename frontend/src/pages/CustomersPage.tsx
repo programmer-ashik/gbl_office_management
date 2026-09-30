@@ -340,29 +340,54 @@ export function CustomersPage() {
         onClose={closeModal}
       >
         {selected ? (
-          <div className="stack-form">
-            <p>
-              <strong>Number:</strong> {selected.customerNumber}
-            </p>
-            <p>
-              <strong>Name:</strong> {selected.name}
-            </p>
-            <p>
-              <strong>Contact:</strong> {selected.contactName ?? '—'}
-            </p>
-            <p>
-              <strong>Phone:</strong> {selected.phone ?? '—'}
-            </p>
-            <p>
-              <strong>Email:</strong> {selected.email ?? '—'}
-            </p>
-            <p>
-              <strong>Billing address:</strong> {selected.address ?? '—'}
-            </p>
-            <p>
-              <strong>Status:</strong>{' '}
-              {selected.isActive ? 'Active' : 'Inactive'}
-            </p>
+          <div className="customer-detail">
+            <div className="customer-detail-head">
+              <div>
+                <strong className="customer-detail-name">{selected.name}</strong>
+                <span className="customer-detail-number">
+                  {selected.customerNumber}
+                </span>
+              </div>
+              <span
+                className={
+                  selected.isActive ? 'status-pill is-ok' : 'status-pill is-off'
+                }
+              >
+                {selected.isActive ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+
+            <dl className="customer-detail-grid">
+              <div>
+                <dt>Contact person</dt>
+                <dd>{selected.contactName || '—'}</dd>
+              </div>
+              <div>
+                <dt>Phone</dt>
+                <dd>
+                  {selected.phone ? (
+                    <a href={`tel:${selected.phone}`}>{selected.phone}</a>
+                  ) : (
+                    '—'
+                  )}
+                </dd>
+              </div>
+              <div className="is-full">
+                <dt>Email</dt>
+                <dd>
+                  {selected.email ? (
+                    <a href={`mailto:${selected.email}`}>{selected.email}</a>
+                  ) : (
+                    '—'
+                  )}
+                </dd>
+              </div>
+              <div className="is-full">
+                <dt>Billing address</dt>
+                <dd className="is-multiline">{selected.address || '—'}</dd>
+              </div>
+            </dl>
+
             <div className="form-actions">
               <button type="button" className="ghost" onClick={closeModal}>
                 Close

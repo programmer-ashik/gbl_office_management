@@ -139,7 +139,7 @@ describe('Journal type filter (e2e)', () => {
             entityId: employeeId,
             description: 'Staff advance',
           },
-          { accountCode: '5220', debit: 5000, description: 'Utility' },
+          { accountCode: '5221', debit: 5000, description: 'Utility' },
           { accountCode: '5210', debit: 6000, description: 'Rent' },
           { accountCode: '1111', credit: 21000 },
         ],

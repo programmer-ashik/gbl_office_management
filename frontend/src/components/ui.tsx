@@ -190,14 +190,14 @@ export function Select({
       placePopover()
     }
 
-    document.addEventListener('mousedown', onPointerDown, true)
+    document.addEventListener('pointerdown', onPointerDown, true)
     document.addEventListener('keydown', onKey, true)
     window.addEventListener('resize', onReposition)
     window.addEventListener('scroll', onReposition, true)
 
     return () => {
       window.clearTimeout(arm)
-      document.removeEventListener('mousedown', onPointerDown, true)
+      document.removeEventListener('pointerdown', onPointerDown, true)
       document.removeEventListener('keydown', onKey, true)
       window.removeEventListener('resize', onReposition)
       window.removeEventListener('scroll', onReposition, true)
@@ -451,12 +451,12 @@ export function ActionMenu({
       placeMenu()
     }
 
-    document.addEventListener('mousedown', onPointerDown, true)
+    document.addEventListener('pointerdown', onPointerDown, true)
     window.addEventListener('resize', onReposition)
     window.addEventListener('scroll', onReposition, true)
     return () => {
       window.clearTimeout(arm)
-      document.removeEventListener('mousedown', onPointerDown, true)
+      document.removeEventListener('pointerdown', onPointerDown, true)
       window.removeEventListener('resize', onReposition)
       window.removeEventListener('scroll', onReposition, true)
     }

@@ -63,8 +63,13 @@
 
   { "code": "5200", "name": "Operating & Office Overhead Expenses", "type": "Expense", "isHeader": true, "parentCode": "5000" },
   { "code": "5210", "name": "Office Rent", "type": "Expense", "isHeader": false, "parentCode": "5200" },
-  { "code": "5220", "name": "Utility Bills", "type": "Expense", "isHeader": false, "parentCode": "5200" },
-  { "code": "5230", "name": "Office Employee Salary", "type": "Expense", "isHeader": false, "parentCode": "5200" },
+  { "code": "5220", "name": "Utility Bills", "type": "Expense", "isHeader": true, "parentCode": "5200" },
+  { "code": "5221", "name": "Electricity Bill", "type": "Expense", "isHeader": false, "parentCode": "5220" },
+  { "code": "5222", "name": "Water Bill", "type": "Expense", "isHeader": false, "parentCode": "5220" },
+  { "code": "5223", "name": "Internet Bill", "type": "Expense", "isHeader": false, "parentCode": "5220" },
+  { "code": "5224", "name": "Gas Bill", "type": "Expense", "isHeader": false, "parentCode": "5220" },
+  { "code": "5229", "name": "Other Utility Bills", "type": "Expense", "isHeader": false, "parentCode": "5220" },
+  { "code": "5230", "name": "Office Employee Salary", "type": "Expense", "isHeader": false, "parentCode": "5200", "employeeExpenseKind": "salary" },
   { "code": "5240", "name": "Office Petty Cash Expenses", "type": "Expense", "isHeader": false, "parentCode": "5200" },
   { "code": "5250", "name": "Bank Charges & Transaction Fees", "type": "Expense", "isHeader": false, "parentCode": "5200" }
 ]

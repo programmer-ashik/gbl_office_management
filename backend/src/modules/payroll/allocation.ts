@@ -210,6 +210,8 @@ export function buildAccrualJournalLines(input: {
         accountCode: adminCode,
         debit: fromMinorUnits(remainder),
         description: `HQ salary · ${input.employeeName}`,
+        entityType: JournalEntityType.EMPLOYEE,
+        entityId: input.employeeId,
       });
     }
   } else {
@@ -217,6 +219,8 @@ export function buildAccrualJournalLines(input: {
       accountCode: adminCode,
       debit: fromMinorUnits(input.grossMinor),
       description: `Office / HQ salary · ${input.employeeName}`,
+      entityType: JournalEntityType.EMPLOYEE,
+      entityId: input.employeeId,
     });
   }
 

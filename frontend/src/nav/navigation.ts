@@ -66,6 +66,28 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    id: 'journals',
+    label: 'Journals & Ledgers',
+    icon: 'journal',
+    roles: FINANCE,
+    items: [
+      {
+        label: 'Journals',
+        to: '/journals',
+        icon: 'journal',
+        hint: 'Post · Draft · Reverse',
+        roles: FINANCE,
+      },
+      {
+        label: 'General Ledger',
+        to: '/ledgers',
+        icon: 'accounts',
+        hint: 'Account inquiry',
+        roles: FINANCE,
+      },
+    ],
+  },
+  {
     id: 'projects',
     label: 'Projects & Budgeting',
     icon: 'projects',
@@ -344,20 +366,6 @@ export const NAV_SECTIONS: NavSection[] = [
             roles: FINANCE,
           },
         ],
-      },
-      {
-        label: 'Journals',
-        to: '/journals',
-        icon: 'journal',
-        hint: 'Post · Draft · Reverse',
-        roles: FINANCE,
-      },
-      {
-        label: 'General Ledger',
-        to: '/ledgers',
-        icon: 'accounts',
-        hint: 'Account inquiry',
-        roles: FINANCE,
       },
       {
         label: 'Customers (AR)',

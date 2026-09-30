@@ -44,7 +44,9 @@ export const SystemAccountCode = {
   EQUIPMENT_RENTAL: '5130',
   SITE_TRANSPORT: '5140',
   OFFICE_RENT: '5210',
+  /** Utility Bills header. Post to a sub-ledger (5221–5229) instead. */
   UTILITIES: '5220',
+  OTHER_UTILITIES: '5229',
   ADMIN_SALARIES: '5230',
   OFFICE_EXPENSES: '5240',
   BANK_CHARGES: '5250',

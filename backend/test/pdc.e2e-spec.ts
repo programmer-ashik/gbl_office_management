@@ -302,7 +302,7 @@ describe('Post-dated cheques (e2e)', () => {
         chequeNumber: 'OUT-3002',
         chequeDate: future,
         lines: [
-          { accountCode: '5220', debit: 12_000 },
+          { accountCode: '5221', debit: 12_000 },
           { accountCode: BANK, credit: 12_000 },
         ],
       });
