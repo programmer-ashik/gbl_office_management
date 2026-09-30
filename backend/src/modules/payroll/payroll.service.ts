@@ -11,6 +11,9 @@ import type { JournalService } from '../accounting/journal.service';
 import { AdvanceModel } from '../advances/advance.model';
 import type { BankingService } from '../banking/banking.service';
 import type { ProjectsService } from '../projects/projects.service';
+import { EmployeeModel } from '../employees/employee.model';
+import { findEmployeeOrFail } from '../employees/employee-records';
+import { UserModel } from '../users/user.model';
 import type { UsersService } from '../users/users.service';
 import {
   ADMIN_SALARY_CODE,
@@ -194,15 +197,22 @@ export class PayrollService {
 
   async listEmployees(actor: AuthenticatedUser) {
     this.assertFinance(actor);
-    const users = await this.usersService.findAll(500);
-    return users
-      .filter((row) => row.isActive)
-      .map((row) => ({
-        id: row.id,
-        name: `${row.firstName} ${row.lastName}`,
-        email: row.email,
-        role: row.role,
-      }));
+    const rows = await EmployeeModel.find({ isActive: true })
+      .sort({ firstName: 1, lastName: 1 })
+      .limit(1000)
+      .exec();
+    const users = await UserModel.find({
+      _id: { $in: rows.map((row) => row.userId).filter(Boolean) },
+    }).exec();
+    return rows.map((row) => {
+      const user = users.find((item) => row.userId && item._id.equals(row.userId));
+      return {
+        id: row._id.toString(),
+        name: `${row.firstName} ${row.lastName}`.trim(),
+        email: row.email || user?.email || '',
+        role: user?.role ?? null,
+      };
+    });
   }
 
   async getPayrollSettings(
@@ -259,7 +269,7 @@ export class PayrollService {
     actor: AuthenticatedUser,
   ): Promise<PublicSalaryStructure> {
     this.assertFinance(actor);
-    const employee = await this.usersService.findByIdOrFail(dto.employeeId);
+    const employee = await findEmployeeOrFail(dto.employeeId);
     const employeeName = `${employee.firstName} ${employee.lastName}`;
     const config = await this.loadPayrollSettings();
 
@@ -441,7 +451,7 @@ export class PayrollService {
     actor: AuthenticatedUser,
   ): Promise<PublicTimeLog> {
     this.assertFinance(actor);
-    const employee = await this.usersService.findByIdOrFail(dto.employeeId);
+    const employee = await findEmployeeOrFail(dto.employeeId);
     const kind = dto.kind === 'administrative' ? 'administrative' : 'project';
     const quantityMilli = toMilliQty(dto.quantity);
 
@@ -498,7 +508,7 @@ export class PayrollService {
     actor: AuthenticatedUser,
   ): Promise<PublicSalaryFacility> {
     this.assertFinance(actor);
-    const employee = await this.usersService.findByIdOrFail(dto.employeeId);
+    const employee = await findEmployeeOrFail(dto.employeeId);
     if (!employee.isActive) {
       throw badRequest('Employee is inactive');
     }
@@ -666,7 +676,7 @@ export class PayrollService {
         advanceDeductions: line.advanceDeductions.map((row) => ({
           advanceId: row.advanceId.toString(),
           advanceNumber: row.advanceNumber,
-          projectId: row.projectId.toString(),
+          projectId: row.projectId?.toString(),
           amountMinor: row.amountMinor,
         })),
         facilityDeductions: (line.facilityDeductions ?? []).map((row) => ({
@@ -866,7 +876,7 @@ export class PayrollService {
         .map((row) => ({
           advanceId: row._id.toString(),
           advanceNumber: row.advanceNumber,
-          projectId: row.projectId.toString(),
+          projectId: row.projectId?.toString(),
           outstandingMinor:
             (row.disbursedMinor ?? 0) - (row.payrollDeductedMinor ?? 0),
         }))
@@ -906,7 +916,9 @@ export class PayrollService {
       advanceDeductions: advanceProposal.deductions.map((row) => ({
         advanceId: new Types.ObjectId(row.advanceId),
         advanceNumber: row.advanceNumber,
-        projectId: new Types.ObjectId(row.projectId),
+        ...(row.projectId
+          ? { projectId: new Types.ObjectId(row.projectId) }
+          : {}),
         amountMinor: row.amountMinor,
       })),
       facilityDeductions: facilityProposal.deductions.map((row) => ({

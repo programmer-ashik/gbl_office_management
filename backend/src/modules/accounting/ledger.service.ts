@@ -1,15 +1,21 @@
 import { Types } from 'mongoose';
 import { AccountType, normalBalanceOf } from '../../common/enums/account-type.enum';
-import { notFound } from '../../common/errors/app-error';
+import { badRequest, notFound } from '../../common/errors/app-error';
 import { fromMinorUnits } from '../../common/utils/money';
 import { SupplierBillModel } from '../ar-ap/supplier-bill.model';
 import { SupplierPaymentModel } from '../ar-ap/supplier-payment.model';
 import { GoodsMovementModel } from '../procurement/goods-movement.model';
+import { rollupBalances } from './account-rollup';
 import { AccountModel } from './account.model';
 import { JournalEntityType } from './journal.enums';
 import { JournalEntryModel } from './journal-entry.model';
 import { LedgerLineModel } from './ledger.model';
 import { SystemAccountCode } from './system-account-codes';
+import {
+  customersByProjectIds,
+  projectIdsForCustomer,
+  type CustomerRef,
+} from '../customers/customer-projects';
 
 export type LedgerEntry = {
   id: string;
@@ -18,6 +24,8 @@ export type LedgerEntry = {
   journalEntryId: string;
   memo: string;
   description: string;
+  /** Ledger heads on the other side of the journal, e.g. "1111 · Hand Cash". */
+  counterpart: string | null;
   reference: string | null;
   debit: number;
   credit: number;
@@ -55,6 +63,8 @@ export class LedgerService {
       fromDate?: Date;
       toDate?: Date;
       entity?: { entityType?: string; entityId?: string };
+      /** Only lines tagged with this project; opening/closing follow the same slice. */
+      projectId?: string;
     } = {},
   ): Promise<{
     account: AccountBalance;
@@ -159,6 +169,23 @@ export class LedgerService {
               : []),
           ],
         });
+      } else if (account.code === SystemAccountCode.ACCOUNTS_RECEIVABLE) {
+        // Invoices / collections posted from the AR screens were not tagged with
+        // a customer; they belong to the customer that owns the line's project.
+        const projectIds = await projectIdsForCustomer(entity.entityId);
+        andClauses.push({
+          $or: [
+            { entityId: entityOid },
+            ...(projectIds.length
+              ? [
+                  {
+                    $or: [{ entityId: { $exists: false } }, { entityId: null }],
+                    projectId: { $in: projectIds },
+                  },
+                ]
+              : []),
+          ],
+        });
       } else {
         if (entity.entityType) {
           andClauses.push({ entityType: entity.entityType });
@@ -167,6 +194,14 @@ export class LedgerService {
       }
     } else if (entity?.entityType) {
       andClauses.push({ entityType: entity.entityType });
+    }
+
+    const projectFilter = options.projectId?.trim();
+    if (projectFilter) {
+      if (!Types.ObjectId.isValid(projectFilter)) {
+        throw badRequest('Invalid project id');
+      }
+      andClauses.push({ projectId: new Types.ObjectId(projectFilter) });
     }
 
     const query =
@@ -281,32 +316,6 @@ export class LedgerService {
       }
     }
 
-    // Hydrate older ledger rows that only stored a single memo blob.
-    const needsHydration = lines.some(
-      (line) =>
-        !line.description || !line.reference || line.memo === line.description,
-    );
-    let journalById = new Map<
-      string,
-      { memo: string; reference?: string }
-    >();
-    if (needsHydration) {
-      const journalIds = [
-        ...new Set(lines.map((line) => line.journalEntryId.toString())),
-      ];
-      const journals = await JournalEntryModel.find({
-        _id: { $in: journalIds.map((id) => new Types.ObjectId(id)) },
-      })
-        .select({ memo: 1, reference: 1 })
-        .exec();
-      journalById = new Map(
-        journals.map((row) => [
-          row._id.toString(),
-          { memo: row.memo, reference: row.reference },
-        ]),
-      );
-    }
-
     const rangeStart = fromDate
       ? (() => {
           const d = new Date(fromDate);
@@ -341,12 +350,48 @@ export class LedgerService {
     const allDebitMinor = openingDebitMinor + periodDebitMinor;
     const allCreditMinor = openingCreditMinor + periodCreditMinor;
 
-    const openingBalance = fromMinorUnits(
+    let openingBalance = fromMinorUnits(
       netBalanceMinor(account.type, openingDebitMinor, openingCreditMinor),
     );
-    const closingBalance = fromMinorUnits(
+    let closingBalance = fromMinorUnits(
       netBalanceMinor(account.type, allDebitMinor, allCreditMinor),
     );
+
+    if (!account.isPostable) {
+      closingBalance = await rolledHeaderBalance(
+        account.code,
+        toDate ?? undefined,
+      );
+      if (rangeStart) {
+        const dayBefore = new Date(rangeStart);
+        dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
+        openingBalance = await rolledHeaderBalance(account.code, dayBefore);
+      }
+    }
+
+    const journalIds = [
+      ...new Set(periodLines.map((line) => line.journalEntryId.toString())),
+    ];
+    const journals = journalIds.length
+      ? await JournalEntryModel.find({
+          _id: { $in: journalIds.map((id) => new Types.ObjectId(id)) },
+        })
+          .select({ memo: 1, reference: 1, lines: 1 })
+          .lean()
+          .exec()
+      : [];
+    const journalById = new Map(
+      journals.map((row) => [row._id.toString(), row]),
+    );
+
+    const customerByProject: Map<string, CustomerRef> =
+      account.code === SystemAccountCode.ACCOUNTS_RECEIVABLE
+        ? await customersByProjectIds(
+            periodLines
+              .filter((line) => !line.entityId && line.projectId)
+              .map((line) => line.projectId!),
+          )
+        : new Map();
 
     const creditNormal = normalBalanceOf(account.type) === 'credit';
     let running = openingBalance;
@@ -355,11 +400,20 @@ export class LedgerService {
       const supplierMeta = supplierMetaByJournal.get(
         line.journalEntryId.toString(),
       );
+      const customerMeta =
+        !line.entityId && line.projectId
+          ? customerByProject.get(line.projectId.toString())
+          : undefined;
       const memo = journal?.memo || line.memo;
-      const description =
-        line.description?.trim() ||
-        (line.memo !== memo ? line.memo : undefined) ||
-        memo;
+      const narrative = ledgerLineNarrative(
+        {
+          accountCode: line.accountCode,
+          debitMinor: line.debitMinor,
+          description: line.description,
+        },
+        memo,
+        journal?.lines ?? [],
+      );
       const debit = fromMinorUnits(line.debitMinor);
       const credit = fromMinorUnits(line.creditMinor);
       running += creditNormal ? credit - debit : debit - credit;
@@ -369,17 +423,26 @@ export class LedgerService {
         entryNumber: line.journalEntryNumber,
         journalEntryId: line.journalEntryId.toString(),
         memo,
-        description,
+        description: narrative.description,
+        counterpart: narrative.counterpart,
         reference: line.reference ?? journal?.reference ?? null,
         debit,
         credit,
         entityType:
           line.entityType ??
-          (supplierMeta ? JournalEntityType.SUPPLIER : null),
+          (supplierMeta
+            ? JournalEntityType.SUPPLIER
+            : customerMeta
+              ? JournalEntityType.CUSTOMER
+              : null),
         entityId: line.entityId
           ? line.entityId.toString()
-          : (supplierMeta?.entityId ?? null),
-        entityName: line.entityName ?? supplierMeta?.entityName ?? null,
+          : (supplierMeta?.entityId ?? customerMeta?.id ?? null),
+        entityName:
+          line.entityName ??
+          supplierMeta?.entityName ??
+          customerMeta?.name ??
+          null,
         projectId: line.projectId ? line.projectId.toString() : null,
         runningBalance: Number(running.toFixed(2)),
       };
@@ -474,6 +537,81 @@ export class LedgerService {
   }
 }
 
+/** Header balance is the sum of postable descendant balances, not its own lines. */
+async function rolledHeaderBalance(
+  rootCode: string,
+  asOf?: Date,
+): Promise<number> {
+  const accounts = await AccountModel.find({ isActive: true })
+    .select({ code: 1, parentCode: 1, isPostable: 1, type: 1 })
+    .lean()
+    .exec();
+  const childrenOf = new Map<string, typeof accounts>();
+  for (const row of accounts) {
+    if (!row.parentCode) continue;
+    const list = childrenOf.get(row.parentCode) ?? [];
+    list.push(row);
+    childrenOf.set(row.parentCode, list);
+  }
+
+  const postableCodes: string[] = [];
+  const walk = (code: string, seen: Set<string>) => {
+    if (seen.has(code)) return;
+    seen.add(code);
+    for (const child of childrenOf.get(code) ?? []) {
+      if (child.isPostable) postableCodes.push(child.code);
+      else walk(child.code, seen);
+    }
+  };
+  walk(rootCode, new Set());
+
+  const match: Record<string, unknown> = {
+    accountCode: { $in: postableCodes },
+  };
+  if (asOf) {
+    const end = new Date(asOf);
+    end.setUTCHours(23, 59, 59, 999);
+    match.date = { $lte: end };
+  }
+  const grouped =
+    postableCodes.length === 0
+      ? []
+      : await LedgerLineModel.aggregate<{
+          _id: string;
+          debitMinor: number;
+          creditMinor: number;
+        }>([
+          { $match: match },
+          {
+            $group: {
+              _id: '$accountCode',
+              debitMinor: { $sum: '$debitMinor' },
+              creditMinor: { $sum: '$creditMinor' },
+            },
+          },
+        ]);
+
+  const typeByCode = new Map(accounts.map((row) => [row.code, row.type]));
+  const own = new Map<string, number>();
+  for (const row of grouped) {
+    const type = typeByCode.get(row._id) ?? AccountType.ASSET;
+    own.set(
+      row._id,
+      fromMinorUnits(netBalanceMinor(type, row.debitMinor, row.creditMinor)),
+    );
+  }
+  return (
+    rollupBalances(
+      accounts.map((row) => ({
+        code: row.code,
+        parentCode: row.parentCode,
+        isPostable: row.isPostable,
+      })),
+      own,
+    ).get(rootCode) ?? 0
+  );
+}
+
 function netBalanceMinor(
   type: AccountType,
   debitMinor: number,
@@ -504,4 +642,52 @@ function trialBalanceColumns(
 
 function round2(value: number): number {
   return Number(value.toFixed(2));
+}
+
+type NarrativeJournalLine = {
+  accountCode: string;
+  accountName: string;
+  debitMinor: number;
+  description?: string | null;
+};
+
+/** Auto memo numbers look like "gbl-260929-HandCash-Site". */
+function typedText(text: string | null | undefined, memo: string): string {
+  const value = text?.trim() ?? '';
+  if (!value || value === memo.trim() || /^gbl-\d{6}/i.test(value)) return '';
+  return value;
+}
+
+function uniqueJoin(values: string[]): string {
+  return [...new Set(values.filter(Boolean))].join('; ');
+}
+
+/**
+ * Description = the text typed on this line, else the text typed on the other
+ * lines of the same journal (a Hand Cash line inherits the expense line's
+ * description), else a non-auto memo. Counterpart = ledger heads on the
+ * opposite side of the journal.
+ */
+export function ledgerLineNarrative(
+  line: { accountCode: string; debitMinor: number; description?: string | null },
+  memo: string,
+  journalLines: NarrativeJournalLine[],
+): { description: string; counterpart: string | null } {
+  const isDebit = line.debitMinor > 0;
+  const opposite = journalLines.filter(
+    (row) => row.debitMinor > 0 !== isDebit,
+  );
+  const others = journalLines.filter(
+    (row) => !(row.accountCode === line.accountCode && row.debitMinor > 0 === isDebit),
+  );
+  const description =
+    typedText(line.description, memo) ||
+    uniqueJoin(opposite.map((row) => typedText(row.description, memo))) ||
+    uniqueJoin(others.map((row) => typedText(row.description, memo))) ||
+    typedText(memo, '') ||
+    memo;
+  const heads = (opposite.length ? opposite : others)
+    .filter((row) => row.accountCode !== line.accountCode)
+    .map((row) => row.accountName || row.accountCode);
+  return { description, counterpart: uniqueJoin(heads) || null };
 }

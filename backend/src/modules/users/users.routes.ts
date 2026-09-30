@@ -6,6 +6,12 @@ import { requireAuth } from '../../common/middleware/auth';
 import { requireRoles } from '../../common/middleware/roles';
 import { validateBody } from '../../common/middleware/validate';
 import type { AuthService } from '../auth/auth.service';
+import {
+  ChangeOwnPasswordDto,
+  ResetUserPasswordDto,
+} from './dto/password.dto';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserPermissionsDto } from './dto/update-user-permissions.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import type { UsersService } from './users.service';
@@ -27,6 +33,17 @@ export function createUsersRouter(
     }),
   );
 
+  router.post(
+    '/',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(CreateUserDto),
+    asyncHandler(async (req, res) => {
+      const user = await usersService.createStandalone(req.body);
+      sendSuccess(res, user, 'User created successfully', 201);
+    }),
+  );
+
   router.get(
     '/me',
     auth,
@@ -34,9 +51,24 @@ export function createUsersRouter(
       const user = await usersService.findByIdOrFail(req.user!.userId);
       sendSuccess(
         res,
-        usersService.toPublicUser(user),
+        await usersService.toPublicUserWithEmployee(user),
         'Current user retrieved successfully',
       );
+    }),
+  );
+
+  // Must be registered before /:id routes so "profile" is not treated as an id.
+  router.put(
+    '/profile/change-password',
+    auth,
+    validateBody(ChangeOwnPasswordDto),
+    asyncHandler(async (req, res) => {
+      const user = await usersService.changeOwnPassword(
+        req.user!.userId,
+        req.body.oldPassword,
+        req.body.newPassword,
+      );
+      sendSuccess(res, user, 'Password updated successfully');
     }),
   );
 
@@ -48,9 +80,22 @@ export function createUsersRouter(
       const user = await usersService.findByIdOrFail(String(req.params.id));
       sendSuccess(
         res,
-        usersService.toPublicUser(user),
+        await usersService.toPublicUserWithEmployee(user),
         'User retrieved successfully',
       );
+    }),
+  );
+
+  router.delete(
+    '/:id',
+    auth,
+    requireRoles(Role.ADMIN),
+    asyncHandler(async (req, res) => {
+      const result = await usersService.remove(
+        String(req.params.id),
+        req.user!.userId,
+      );
+      sendSuccess(res, result, 'User deleted successfully');
     }),
   );
 
@@ -79,6 +124,34 @@ export function createUsersRouter(
         req.body.isActive,
       );
       sendSuccess(res, user, 'User status updated successfully');
+    }),
+  );
+
+  router.patch(
+    '/:id/permissions',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(UpdateUserPermissionsDto),
+    asyncHandler(async (req, res) => {
+      const user = await usersService.updatePermissions(
+        String(req.params.id),
+        req.body.allowedPermissions,
+      );
+      sendSuccess(res, user, 'User permissions updated successfully');
+    }),
+  );
+
+  router.put(
+    '/:id/reset-password',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(ResetUserPasswordDto),
+    asyncHandler(async (req, res) => {
+      const user = await usersService.resetPassword(
+        String(req.params.id),
+        req.body.newPassword,
+      );
+      sendSuccess(res, user, 'Password reset successfully');
     }),
   );
 

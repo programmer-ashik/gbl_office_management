@@ -7,6 +7,24 @@ import { money } from "../types/accounting";
 import type { CashFlowForecast, FinancialStatements } from "../types/analytics";
 import { Role } from "../types/auth";
 import type { TreasuryAccount } from "../types/banking";
+import { NavIcon, type NavIconName } from "../nav/icons";
+import { isPathDenied } from "../utils/rolePermissions";
+
+type QuickLink = { to: string; label: string; hint: string; icon: NavIconName };
+
+const EMPLOYEE_LINKS: QuickLink[] = [
+  { to: "/advances", label: "Request advance", hint: "Submit and track requisitions", icon: "advance" },
+  { to: "/advances/settlements", label: "Settle expenses", hint: "Vouchers for disbursed advances", icon: "settlement" },
+  { to: "/quotations", label: "Quotations", hint: "Create and review quotes", icon: "invoice" },
+  { to: "/settings/profile", label: "My profile", hint: "Account and password", icon: "profile" },
+];
+
+const PROJECT_MANAGER_LINKS: QuickLink[] = [
+  { to: "/analytics/project-financials", label: "Project financials", hint: "Burn rate and budget KPIs", icon: "chart" },
+  { to: "/projects", label: "Projects", hint: "Status and budgets", icon: "projects" },
+  { to: "/approvals", label: "Approvals", hint: "Requests waiting on you", icon: "approval" },
+  { to: "/advances", label: "Advances", hint: "Requisitions and settlements", icon: "advance" },
+];
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -64,7 +82,9 @@ export function DashboardPage() {
     <>
       <header className='workspace-header'>
         <div>
-          <h1>Executive overview</h1>
+          <h1>
+            {isFinance ? "Executive overview" : `Welcome, ${user.firstName}`}
+          </h1>
         </div>
       </header>
 
@@ -236,14 +256,35 @@ export function DashboardPage() {
       ) : null}
 
       {!isFinance ? (
-        <section className='table-card'>
-          <h2>Workspace</h2>
+        <>
+          <nav className='quick-links' aria-label='Quick links'>
+            {(user.role === Role.PROJECT_MANAGER
+              ? PROJECT_MANAGER_LINKS
+              : EMPLOYEE_LINKS
+            )
+              .filter(
+                (link) =>
+                  !isPathDenied(
+                    user.role,
+                    link.to,
+                    user.allowedPermissions,
+                    user.deniedPermissions ?? [],
+                  ),
+              )
+              .map((link) => (
+              <Link key={link.to} to={link.to} className='quick-link'>
+                <NavIcon name={link.icon} size={20} />
+                <span>
+                  <strong>{link.label}</strong>
+                  <small>{link.hint}</small>
+                </span>
+              </Link>
+            ))}
+          </nav>
           <p className='muted'>
-            {user.role === Role.PROJECT_MANAGER
-              ? "Open Project Financials for burn rates and budget KPIs, or continue to Projects, Approvals, Advances, Procurement, or Inventory."
-              : "Request a project advance from Advances. Full financials stay with Admin and Accountant. Open Settings → Profile for your account details."}
+            Full financials stay with Admin and Accountant.
           </p>
-        </section>
+        </>
       ) : null}
     </>
   );

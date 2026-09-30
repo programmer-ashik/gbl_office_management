@@ -16,9 +16,10 @@ export interface IAdvance {
   status: AdvanceStatus;
   employeeId: Types.ObjectId;
   employeeName: string;
-  projectId: Types.ObjectId;
-  projectCode: string;
-  projectName: string;
+  /** Unset for office / general advances not tied to a project. */
+  projectId?: Types.ObjectId;
+  projectCode?: string;
+  projectName?: string;
   requestedMinor: number;
   purpose: string;
   requestedAt: Date;
@@ -84,11 +85,11 @@ const advanceSchema = new Schema<IAdvance>(
     projectId: {
       type: Schema.Types.ObjectId,
       ref: 'Project',
-      required: true,
+      required: false,
       index: true,
     },
-    projectCode: { type: String, required: true },
-    projectName: { type: String, required: true },
+    projectCode: { type: String, required: false },
+    projectName: { type: String, required: false },
     requestedMinor: { type: Number, required: true, min: 1 },
     purpose: { type: String, required: true, trim: true, maxlength: 500 },
     requestedAt: { type: Date, required: true },

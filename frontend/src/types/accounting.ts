@@ -107,6 +107,48 @@ export type Account = {
   isSystem: boolean
   isPostable: boolean
   isActive: boolean
+  /** Salary / conveyance heads: journal lines are tagged with an employee. */
+  employeeExpenseKind?: EmployeeExpenseKind | null
+}
+
+export type AccountSplitBody = {
+  children: Array<{ code: string; name: string }>
+  /** Sub-account that receives the balance already posted to the account. */
+  historyTo?: string
+}
+
+export type AccountSplitPlan = {
+  account: { code: string; name: string; type: string; parentCode: string | null }
+  alreadyHeader: boolean
+  alreadyDone: boolean
+  errors: string[]
+  warnings: string[]
+  children: Array<{ code: string; name: string }>
+  childrenToCreate: string[]
+  historyTo: string | null
+  reclasses: Array<{
+    journalEntryId: string
+    entryNumber: string
+    date: string
+    projectId: string | null
+    employeeId: string | null
+    amount: number
+    reference: string
+  }>
+  totalToMove: number
+  unpostedJournals: Array<{ entryNumber: string; status: string }>
+}
+
+export type AccountSplitResult = AccountSplitPlan & {
+  postedReclasses: Array<{ reference: string; entryNumber: string }>
+  headerOwnBalanceAfter: number
+}
+
+export type EmployeeExpenseKind = 'salary' | 'conveyance'
+
+export const EMPLOYEE_EXPENSE_KIND_LABELS: Record<EmployeeExpenseKind, string> = {
+  salary: 'Salary',
+  conveyance: 'Conveyance',
 }
 
 export type JournalLine = {
@@ -128,6 +170,10 @@ export type JournalEntry = {
   memo: string
   reference: string | null
   journalType: string
+  /** Stored type, or the category the API inferred for system/general journals. */
+  effectiveType?: string
+  /** Every Type-filter category the journal belongs to. */
+  typeTags?: string[]
   status: string
   source: string
   projectId: string | null
@@ -139,7 +185,94 @@ export type JournalEntry = {
   approvedAt: string | null
   reversedByEntryId: string | null
   reversesEntryId: string | null
+  chequeNumber?: string | null
+  /** YYYY-MM-DD */
+  chequeDate?: string | null
+  isPdc?: boolean
+  pdcStatus?: PdcStatus
+  intendedBankAccountId?: string | null
+  intendedBankAccountCode?: string | null
+  pdcDirection?: PdcDirection | null
+  pdcClearingEntryId?: string | null
+  pdcClearsEntryId?: string | null
+  pdcSettledAt?: string | null
+  pdcBounceReason?: string | null
   lines: JournalLine[]
+}
+
+export type PdcStatus = 'None' | 'Pending' | 'Cleared' | 'Bounced'
+export type PdcDirection = 'receipt' | 'payment'
+
+/** Cheque register row: journal + derived cheque summary. */
+export type ChequeRegisterRow = JournalEntry & {
+  chequeAmount: number
+  direction: PdcDirection | null
+  bankAccountCode: string | null
+  bankAccountName: string | null
+  partyName: string | null
+  partyType: string | null
+  clearingEntryNumber: string | null
+  reversalEntryNumber: string | null
+}
+
+export type ChequeActionResult = {
+  pdc: JournalEntry
+  clearingJournal?: JournalEntry
+  reversal?: JournalEntry
+}
+
+export type ChequeLeafStatus = 'available' | 'issued' | 'cancelled'
+
+/** A company chequebook registered for one of our own bank accounts. */
+export type ChequeBook = {
+  id: string
+  treasuryId: string
+  bankAccountCode: string
+  bankName: string
+  bookName: string
+  prefix: string
+  startNumber: string
+  endNumber: string
+  leafCount: number
+  receivedDate: string | null
+  notes: string | null
+  availableCount: number
+  issuedCount: number
+  cancelledCount: number
+  nextAvailable: string | null
+  createdAt: string | null
+}
+
+export type ChequeLeaf = {
+  id: string
+  bookId: string
+  bookName: string
+  treasuryId: string
+  bankAccountCode: string
+  bankName: string
+  chequeNumber: string
+  sequence: number
+  status: ChequeLeafStatus
+  journalId: string | null
+  journalNumber: string | null
+  journalStatus: string | null
+  pdcStatus: string | null
+  issuedAt: string | null
+  payeeName: string | null
+  amount: number | null
+  chequeDate: string | null
+  cancelReason: string | null
+  cancelledAt: string | null
+}
+
+export type CreateChequeBookBody = {
+  treasuryId: string
+  bookName?: string
+  prefix?: string
+  startNumber: string
+  leafCount: number
+  receivedDate?: string
+  notes?: string
 }
 
 export type JournalSummary = {
@@ -233,6 +366,7 @@ export type AccountLedger = {
     journalEntryId?: string
     memo: string
     description: string
+    counterpart?: string | null
     reference: string | null
     debit: number
     credit: number
@@ -259,32 +393,38 @@ export type DimensionRule = {
   entityType: JournalEntityType | null
   entityRequired: boolean
   projectRequired: boolean
+  /** Show the project picker (optional, "None" allowed) even when not required. */
+  projectOptional?: boolean
   label: string
 }
 
 const DIMENSION_RULES: Record<string, DimensionRule> = {
-  '1121': {
+  '1151': {
     entityType: JournalEntityType.CUSTOMER,
     entityRequired: true,
     projectRequired: false,
+    projectOptional: true,
     label: 'Customer',
   },
   '2111': {
     entityType: JournalEntityType.SUPPLIER,
     entityRequired: true,
     projectRequired: false,
+    projectOptional: true,
     label: 'Supplier',
   },
   '2113': {
     entityType: JournalEntityType.SUPPLIER,
     entityRequired: true,
     projectRequired: false,
+    projectOptional: true,
     label: 'Supplier',
   },
-  '1131': {
+  '1161': {
     entityType: JournalEntityType.EMPLOYEE,
     entityRequired: true,
-    projectRequired: true,
+    projectRequired: false,
+    projectOptional: true,
     label: 'Employee',
   },
   '2121': {
@@ -323,19 +463,31 @@ const DIMENSION_RULES: Record<string, DimensionRule> = {
     projectRequired: false,
     label: 'Treasury',
   },
-  '1112': {
+  '1121': {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
     label: 'Treasury',
   },
-  '1113': {
+  '1122': {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
     label: 'Treasury',
   },
-  '1114': {
+  '1123': {
+    entityType: JournalEntityType.TREASURY,
+    entityRequired: false,
+    projectRequired: false,
+    label: 'Treasury',
+  },
+  '1131': {
+    entityType: JournalEntityType.TREASURY,
+    entityRequired: false,
+    projectRequired: false,
+    label: 'Treasury',
+  },
+  '1132': {
     entityType: JournalEntityType.TREASURY,
     entityRequired: false,
     projectRequired: false,
@@ -343,15 +495,66 @@ const DIMENSION_RULES: Record<string, DimensionRule> = {
   },
 }
 
-export function dimensionRuleForAccount(accountCode: string): DimensionRule {
-  return (
-    DIMENSION_RULES[accountCode] ?? {
-      entityType: null,
+/** Direct Project Cost (COGS). Every head opened under it needs a project. */
+export const PROJECT_COST_GROUP_CODE = '5100'
+
+type AccountTreeNode = Pick<Account, 'code' | 'parentCode'> &
+  Partial<Pick<Account, 'employeeExpenseKind'>>
+
+type AccountTree =
+  | ReadonlyMap<string, AccountTreeNode>
+  | ReadonlyArray<AccountTreeNode>
+
+function accountTreeMap(
+  accounts: AccountTree,
+): ReadonlyMap<string, AccountTreeNode> {
+  return 'get' in accounts
+    ? accounts
+    : new Map(accounts.map((row) => [row.code, row]))
+}
+
+/** True when the account's parent chain reaches 5100, at any depth. */
+export function isProjectCostAccount(
+  accountCode: string,
+  accounts: AccountTree,
+): boolean {
+  const byCode = accountTreeMap(accounts)
+  const seen = new Set<string>()
+  let parent = byCode.get(accountCode)?.parentCode ?? null
+  while (parent && !seen.has(parent)) {
+    if (parent === PROJECT_COST_GROUP_CODE) return true
+    seen.add(parent)
+    parent = byCode.get(parent)?.parentCode ?? null
+  }
+  return false
+}
+
+export function dimensionRuleForAccount(
+  accountCode: string,
+  accounts?: AccountTree,
+): DimensionRule {
+  let rule: DimensionRule = DIMENSION_RULES[accountCode] ?? {
+    entityType: null,
+    entityRequired: false,
+    projectRequired: false,
+    label: '',
+  }
+  if (!accounts) return rule
+  if (
+    !rule.entityType &&
+    accountTreeMap(accounts).get(accountCode)?.employeeExpenseKind
+  ) {
+    rule = {
+      ...rule,
+      entityType: JournalEntityType.EMPLOYEE,
       entityRequired: false,
-      projectRequired: false,
-      label: '',
+      label: 'Employee',
     }
-  )
+  }
+  if (!rule.projectRequired && isProjectCostAccount(accountCode, accounts)) {
+    rule = { ...rule, projectRequired: true, label: rule.label || 'Project' }
+  }
+  return rule
 }
 
 export type JournalWriteBody = {
@@ -361,6 +564,14 @@ export type JournalWriteBody = {
   journalType?: string
   intent?: 'draft' | 'post'
   projectId?: string
+  approvalId?: string
+  overrideSupplierPayable?: boolean
+  overrideReason?: string
+  chequeNumber?: string
+  /** A date after today posts the bank side to PDC Receivable / Payable. */
+  chequeDate?: string
+  /** Company chequebook leaf being issued; the server marks it used on posting. */
+  chequeLeafId?: string
   lines: Array<{
     accountCode: string
     debit?: number
@@ -370,6 +581,20 @@ export type JournalWriteBody = {
     entityType?: string
     entityId?: string
   }>
+}
+
+export const JOURNAL_LINE_DESCRIPTION_MAX = 400
+
+/** Date and line notes are the only fields a posted journal can change. */
+export type PostedJournalDetailsBody = {
+  date?: string
+  lines?: Array<{ index: number; description?: string }>
+}
+
+export type PostedJournalEditability = {
+  id: string
+  editable: boolean
+  dateLockedReason: string | null
 }
 
 export function money(value: number): string {

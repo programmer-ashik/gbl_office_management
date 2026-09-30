@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, Fragment } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { JournalRegister } from "../components/JournalRegister";
-import { Select } from "../components/ui";
+import { MetricCard } from "../components/MetricCard";
+import { Modal, Select } from "../components/ui";
 import {
+  JOURNAL_LINE_DESCRIPTION_MAX,
   JOURNAL_TYPE_LABEL,
   JournalType,
   dimensionRuleForAccount,
@@ -14,12 +17,12 @@ import {
   type JournalSummary,
   type JournalWriteBody,
 } from "../types/accounting";
-import type { PublicUser } from "../types/auth";
+import { Role } from "../types/auth";
+import type { Employee } from "../types/employee";
 import type { TreasuryAccount } from "../types/banking";
 import type { Supplier } from "../types/procurement";
-import type { Project } from "../types/project";
+import { projectBelongsToCustomer, type Project } from "../types/project";
 import { buildJournalMemo } from "../utils/journalMemo";
-import { MetricCard } from '../components/MetricCard'
 
 type DraftLine = {
   accountCode: string;
@@ -45,7 +48,21 @@ const JOURNAL_TYPE_OPTIONS = Object.entries(JOURNAL_TYPE_LABEL).map(
   ([value, label]) => ({ value, label }),
 );
 
+const AP_PAYMENT_CODES = new Set(["2111", "2113"]);
+
+type PayableReviewRow = {
+  supplierId: string;
+  supplierName: string;
+  outstanding: number;
+  amount: number;
+  remaining: number;
+  warning: string | null;
+  needsOverride: boolean;
+};
+
 export function JournalsPage() {
+  const { user } = useAuth();
+  const canOverridePayable = user?.role === Role.ADMIN;
   const [searchParams, setSearchParams] = useSearchParams();
   const formRef = useRef<HTMLElement>(null);
 
@@ -53,7 +70,7 @@ export function JournalsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [employees, setEmployees] = useState<PublicUser[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [treasury, setTreasury] = useState<TreasuryAccount[]>([]);
   const [summary, setSummary] = useState<JournalSummary | null>(null);
 
@@ -71,6 +88,18 @@ export function JournalsPage() {
   const [advanceBalances, setAdvanceBalances] = useState<Record<string, number>>(
     {},
   );
+  const [payableReview, setPayableReview] = useState<PayableReviewRow[] | null>(
+    null,
+  );
+  const [pendingPostIntent, setPendingPostIntent] = useState<
+    "draft" | "post" | null
+  >(null);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [noteEditor, setNoteEditor] = useState<{
+    index: number;
+    text: string;
+  } | null>(null);
 
   const accountByCode = useMemo(() => {
     const map = new Map<string, Account>();
@@ -184,11 +213,24 @@ export function JournalsPage() {
         if (i !== index) return line;
         const next = { ...line, ...patch };
         if (patch.accountCode !== undefined) {
-          const rule = dimensionRuleForAccount(patch.accountCode);
+          const rule = dimensionRuleForAccount(
+            patch.accountCode,
+            accountByCode,
+          );
           next.entityType = rule.entityType ?? "";
           next.entityId = "";
           if (rule.projectRequired && !next.projectId && projectId) {
             next.projectId = projectId;
+          }
+        }
+        if (
+          patch.entityId !== undefined &&
+          next.entityType === "customer" &&
+          next.projectId
+        ) {
+          const own = customerProjects(next.entityId);
+          if (own && !own.some((project) => project.id === next.projectId)) {
+            next.projectId = "";
           }
         }
         return next;
@@ -202,7 +244,7 @@ export function JournalsPage() {
         lines
           .filter(
             (line) =>
-              line.accountCode === "1131" &&
+              line.accountCode === "1161" &&
               line.entityType === "employee" &&
               line.entityId,
           )
@@ -246,7 +288,7 @@ export function JournalsPage() {
       intent,
       projectId: projectId || undefined,
       lines: lines.map((line) => {
-        const rule = dimensionRuleForAccount(line.accountCode);
+        const rule = dimensionRuleForAccount(line.accountCode, accountByCode);
         return {
           accountCode: line.accountCode,
           debit: line.debit ? Number(line.debit) : undefined,
@@ -269,14 +311,107 @@ export function JournalsPage() {
       setFormError("Total debit must equal total credit before posting");
       return;
     }
+    if (journalType !== JournalType.OPENING_BALANCE) {
+      const missingProject = lines.find(
+        (line) =>
+          !line.projectId &&
+          !projectId &&
+          dimensionRuleForAccount(line.accountCode, accountByCode)
+            .projectRequired,
+      );
+      if (missingProject) {
+        const account = accountByCode.get(missingProject.accountCode);
+        setFormError(
+          `${account?.name ?? "This account"} (${missingProject.accountCode}) is a project cost head — select a project`,
+        );
+        return;
+      }
+    }
+
+    if (intent === "post" && journalType !== JournalType.OPENING_BALANCE) {
+      const bySupplier = new Map<string, number>();
+      for (const line of lines) {
+        const code = line.accountCode.trim().toUpperCase();
+        if (!AP_PAYMENT_CODES.has(code)) continue;
+        const debit = Number(line.debit || 0);
+        if (!(debit > 0)) continue;
+        if (line.entityType !== "supplier" || !line.entityId) continue;
+        bySupplier.set(
+          line.entityId,
+          (bySupplier.get(line.entityId) ?? 0) + debit,
+        );
+      }
+
+      if (bySupplier.size > 0) {
+        setSaving(true);
+        setFormError(null);
+        try {
+          const reviews: PayableReviewRow[] = [];
+          for (const [supplierId, amount] of bySupplier) {
+            const ledger = await api.vendorLedger(supplierId);
+            const outstanding = ledger.outstanding ?? 0;
+            const supplierName =
+              ledger.supplier?.name ||
+              suppliers.find((row) => row.id === supplierId)?.name ||
+              "Supplier";
+            let warning: string | null = null;
+            let needsOverride = false;
+            if (outstanding <= 0) {
+              warning =
+                "This supplier has no outstanding payable to us. Payment/journal entry cannot be made without an outstanding payable.";
+              needsOverride = true;
+            } else if (amount > outstanding) {
+              warning = `Supplier's outstanding payable is ${money(outstanding)}, but you are entering ${money(amount)}. You cannot pay more than the outstanding payable.`;
+              needsOverride = true;
+            }
+            reviews.push({
+              supplierId,
+              supplierName,
+              outstanding,
+              amount,
+              remaining: Math.max(0, outstanding - amount),
+              warning,
+              needsOverride,
+            });
+          }
+          setPayableReview(reviews);
+          setPendingPostIntent("post");
+          setOverrideReason("");
+          setConfirmError(null);
+        } catch (err) {
+          setFormError(
+            err instanceof Error
+              ? err.message
+              : "Unable to load supplier outstanding payable",
+          );
+        } finally {
+          setSaving(false);
+        }
+        return;
+      }
+    }
+
+    await saveJournal(intent);
+  }
+
+  async function saveJournal(
+    intent: "draft" | "post",
+    override?: { overrideSupplierPayable?: boolean; overrideReason?: string },
+  ) {
     setSaving(true);
     setFormError(null);
     try {
-      const body = buildBody(intent);
+      const body: JournalWriteBody = {
+        ...buildBody(intent),
+        ...override,
+      };
       if (editingId) {
         if (intent === "post" && editingId) {
           await api.updateJournal(editingId, { ...body, intent: "draft" });
-          await api.postDraftJournal(editingId);
+          await api.postDraftJournal(editingId, {
+            overrideSupplierPayable: override?.overrideSupplierPayable,
+            overrideReason: override?.overrideReason,
+          });
         } else {
           await api.updateJournal(editingId, body);
         }
@@ -284,35 +419,69 @@ export function JournalsPage() {
         await api.postJournal(body);
       }
       resetForm(true);
+      setPayableReview(null);
+      setPendingPostIntent(null);
+      setOverrideReason("");
       setRefreshKey((value) => value + 1);
       await loadSummary();
     } catch (err) {
-      setFormError(
-        err instanceof Error ? err.message : "Unable to save journal",
-      );
+      const message =
+        err instanceof Error ? err.message : "Unable to save journal";
+      if (payableReview) {
+        setConfirmError(message);
+      } else {
+        setFormError(message);
+      }
     } finally {
       setSaving(false);
     }
+  }
+
+  async function confirmJournalPayable() {
+    if (!payableReview || pendingPostIntent !== "post") return;
+    const needsOverride = payableReview.some((row) => row.needsOverride);
+    if (needsOverride && !canOverridePayable) {
+      setConfirmError(
+        payableReview.find((row) => row.warning)?.warning ??
+          "Only an Admin can override this block.",
+      );
+      return;
+    }
+    if (needsOverride && overrideReason.trim().length < 5) {
+      setConfirmError("Override reason is required (at least 5 characters).");
+      return;
+    }
+    await saveJournal("post", needsOverride
+      ? {
+          overrideSupplierPayable: true,
+          overrideReason: overrideReason.trim(),
+        }
+      : undefined);
   }
 
   function entityOptions(entityType: string) {
     if (entityType === "customer") {
       return customers.map((row) => ({
         value: row.id,
-        label: `${row.customerNumber} · ${row.name}`,
+        label: row.name,
+        keywords: row.customerNumber,
       }));
     }
     if (entityType === "supplier") {
       return suppliers.map((row) => ({
         value: row.id,
-        label: `${row.supplierNumber} · ${row.name}`,
+        label: row.name,
+        keywords: row.supplierNumber,
       }));
     }
     if (entityType === "employee") {
-      return employees.map((row) => ({
-        value: row.id,
-        label: `${row.firstName} ${row.lastName}`,
-      }));
+      return employees
+        .filter((row) => row.isActive)
+        .map((row) => ({
+          value: row.id,
+          label: `${row.firstName} ${row.lastName}`,
+          keywords: row.designation ?? undefined,
+        }));
     }
     if (entityType === "treasury") {
       return treasury.map((row) => ({
@@ -332,9 +501,34 @@ export function JournalsPage() {
     { value: "", label: "None" },
     ...projects.map((project) => ({
       value: project.id,
-      label: `${project.code} · ${project.name}`,
+      label: project.name,
+      keywords: project.code,
     })),
   ];
+
+  /** A customer line only offers that customer's projects (all, if it has none). */
+  function customerProjects(customerId: string): Project[] | null {
+    const customer = customers.find((row) => row.id === customerId);
+    if (!customer) return null;
+    const own = projects.filter((project) =>
+      projectBelongsToCustomer(project, customer),
+    );
+    return own.length > 0 ? own : null;
+  }
+
+  function projectOptionsForLine(line: DraftLine) {
+    if (line.entityType !== "customer" || !line.entityId) return projectOptions;
+    const own = customerProjects(line.entityId);
+    if (!own) return projectOptions;
+    return [
+      { value: "", label: "None" },
+      ...own.map((project) => ({
+        value: project.id,
+        label: project.name,
+        keywords: project.code,
+      })),
+    ];
+  }
 
   return (
     <>
@@ -350,7 +544,7 @@ export function JournalsPage() {
             Customers
           </Link>
           <Link to='/reports' className='action-link'>
-            Full register
+            All reports
           </Link>
         </div>
       </header>
@@ -437,7 +631,7 @@ export function JournalsPage() {
             </label>
           </div>
           <p className='muted'>
-            Posting <strong>1121 Client Receivables</strong> with a customer (+
+            Posting <strong>1151 Client Receivables</strong> with a customer (+
             project) also creates a Client Invoice (AR). Posting{' '}
             <strong>2111 Supplier Payables</strong> with a supplier also creates
             a Supplier Bill (AP). Reversing the journal voids that linked
@@ -459,16 +653,20 @@ export function JournalsPage() {
               </thead>
               <tbody>
                 {lines.map((line, index) => {
-                  const rule = dimensionRuleForAccount(line.accountCode);
+                  const rule = dimensionRuleForAccount(
+                    line.accountCode,
+                    accountByCode,
+                  );
                   const showEntity = Boolean(rule.entityType);
                   const showProject =
                     rule.projectRequired ||
+                    rule.projectOptional ||
                     journalType === JournalType.PROJECT_COST ||
                     journalType === JournalType.PROJECT_REVENUE ||
                     Boolean(line.projectId) ||
                     Boolean(projectId);
                   const unsettled =
-                    line.accountCode === "1131" && line.entityId
+                    line.accountCode === "1161" && line.entityId
                       ? advanceBalances[line.entityId]
                       : undefined;
                   return (
@@ -519,7 +717,7 @@ export function JournalsPage() {
                             onChange={(value) =>
                               updateLine(index, { projectId: value })
                             }
-                            options={projectOptions}
+                            options={projectOptionsForLine(line)}
                             searchable
                             required={rule.projectRequired}
                           />
@@ -528,13 +726,21 @@ export function JournalsPage() {
                         )}
                       </td>
                       <td>
-                        <input
-                          value={line.description}
-                          onChange={(e) =>
-                            updateLine(index, { description: e.target.value })
+                        <button
+                          type='button'
+                          className={
+                            line.description
+                              ? 'journal-line-note'
+                              : 'journal-line-note is-empty'
                           }
-                          placeholder='Line note'
-                        />
+                          title={line.description || 'Add line note'}
+                          aria-label={`Description line ${index + 1}`}
+                          onClick={() =>
+                            setNoteEditor({ index, text: line.description })
+                          }
+                        >
+                          {line.description || 'Line note'}
+                        </button>
                       </td>
                       <td className='num'>
                         <input
@@ -598,11 +804,11 @@ export function JournalsPage() {
                         ) : null}
                       </td>
                     </tr>
-                    {line.accountCode === "1131" ? (
+                    {line.accountCode === "1161" ? (
                       <tr className="journal-dimension-hint">
                         <td colSpan={7}>
                           <div className="callout callout-info">
-                            Account 1131 requires <strong>Employee</strong> and{" "}
+                            Account 1161 requires <strong>Employee</strong> and{" "}
                             <strong>Project</strong>.
                             {unsettled !== undefined
                               ? unsettled > 0
@@ -611,6 +817,19 @@ export function JournalsPage() {
                               : line.entityId
                                 ? " Loading unsettled balance…"
                                 : " Select an employee to see unsettled advance balance."}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {line.accountCode === "1151" &&
+                    line.debit &&
+                    !(line.projectId || projectId) ? (
+                      <tr className="journal-dimension-hint">
+                        <td colSpan={7}>
+                          <div className="callout callout-info">
+                            A <strong>1151 debit</strong> creates a client
+                            invoice, which needs a project. Pick one of the
+                            customer&apos;s projects before posting.
                           </div>
                         </td>
                       </tr>
@@ -673,6 +892,149 @@ export function JournalsPage() {
           {formError ? <p className='form-error'>{formError}</p> : null}
         </form>
       </section>
+
+      <Modal
+        open={Boolean(noteEditor)}
+        title={
+          noteEditor
+            ? `Line ${noteEditor.index + 1} description`
+            : 'Line description'
+        }
+        description={`Full note for this journal line (up to ${JOURNAL_LINE_DESCRIPTION_MAX} characters).`}
+        onClose={() => setNoteEditor(null)}
+        wide
+      >
+        {noteEditor ? (
+          <form
+            className='stack-form'
+            onSubmit={(e) => {
+              e.preventDefault();
+              updateLine(noteEditor.index, { description: noteEditor.text });
+              setNoteEditor(null);
+            }}
+          >
+            <label>
+              Description
+              <textarea
+                className='journal-line-note-editor'
+                value={noteEditor.text}
+                onChange={(e) =>
+                  setNoteEditor({ ...noteEditor, text: e.target.value })
+                }
+                rows={10}
+                maxLength={JOURNAL_LINE_DESCRIPTION_MAX}
+                autoFocus
+                placeholder='Line note'
+              />
+            </label>
+            <p className='field-hint'>
+              {noteEditor.text.length} / {JOURNAL_LINE_DESCRIPTION_MAX}
+            </p>
+            <div className='form-actions'>
+              <button
+                type='button'
+                className='ghost'
+                onClick={() => setNoteEditor(null)}
+              >
+                Cancel
+              </button>
+              <button type='submit'>Save description</button>
+            </div>
+          </form>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={Boolean(payableReview)}
+        title='Confirm supplier payable journal'
+        description='Review outstanding payable before posting AP payment lines.'
+        onClose={() => {
+          if (saving) return;
+          setPayableReview(null);
+          setPendingPostIntent(null);
+          setOverrideReason("");
+          setConfirmError(null);
+        }}
+        wide
+      >
+        {payableReview ? (
+          <div className='stack-form'>
+            {payableReview.map((row) => (
+              <div key={row.supplierId} className='callout callout-info'>
+                <p>
+                  <strong>Supplier:</strong> {row.supplierName}
+                </p>
+                <p>
+                  <strong>Current outstanding payable:</strong>{" "}
+                  {money(row.outstanding)}
+                </p>
+                <p>
+                  <strong>Entry amount:</strong> {money(row.amount)}
+                </p>
+                <p>
+                  <strong>Remaining payable after entry:</strong>{" "}
+                  {money(row.remaining)}
+                </p>
+                {row.warning ? (
+                  <p className='form-error'>{row.warning}</p>
+                ) : (
+                  <p className='muted'>Amount is within outstanding payable.</p>
+                )}
+              </div>
+            ))}
+            {payableReview.some((row) => row.needsOverride) &&
+            canOverridePayable ? (
+              <label>
+                Admin override reason
+                <textarea
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  rows={3}
+                  minLength={5}
+                  placeholder='Why is this journal allowed?'
+                />
+              </label>
+            ) : null}
+            {payableReview.some((row) => row.needsOverride) &&
+            !canOverridePayable ? (
+              <p className='form-error'>
+                Only an Admin can override this block.
+              </p>
+            ) : null}
+            {confirmError ? <p className='form-error'>{confirmError}</p> : null}
+            <div className='form-actions'>
+              <button
+                type='button'
+                className='ghost'
+                disabled={saving}
+                onClick={() => {
+                  setPayableReview(null);
+                  setPendingPostIntent(null);
+                  setOverrideReason("");
+                  setConfirmError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type='button'
+                disabled={
+                  saving ||
+                  (payableReview.some((row) => row.needsOverride) &&
+                    !canOverridePayable)
+                }
+                onClick={() => void confirmJournalPayable()}
+              >
+                {saving
+                  ? "Posting…"
+                  : payableReview.some((row) => row.needsOverride)
+                    ? "Override & post"
+                    : "Confirm & post"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <JournalRegister
         title='Journal register'
