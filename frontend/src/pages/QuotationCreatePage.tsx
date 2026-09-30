@@ -177,7 +177,7 @@ export function QuotationCreatePage() {
 
   function openPreview(row: Quotation) {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(quotationPdfPreviewUrl(row));
+    void quotationPdfPreviewUrl(row).then(setPreviewUrl);
   }
   function mergeSelectedProducts(
     products: QuotationSelectedProduct[],
@@ -478,7 +478,7 @@ export function QuotationCreatePage() {
                 Delete
               </button>
             ) : null}
-            <button type='button' onClick={() => downloadQuotationPdf(saved)}>
+            <button type='button' onClick={() => void downloadQuotationPdf(saved)}>
               Download Quotation PDF
             </button>
           </div>

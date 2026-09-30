@@ -1,6 +1,10 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { resolveAssetUrl } from '../types/report-template'
+import {
+  DEFAULT_COMPANY_LOGO_URL,
+  DEFAULT_COMPANY_NAME,
+  resolveAssetUrl,
+} from '../types/report-template'
 import {
   formatInvoiceMoneyForPdf,
   invoiceSummaryRows,
@@ -8,38 +12,18 @@ import {
   lineTotal,
   type ProjectInvoiceDraft,
 } from '../types/project-invoice'
+import {
+  PDF_SIGNATURE_MAX_PX,
+  fitImageSize,
+  imageFormatFromDataUrl,
+  loadPdfImage,
+  shrinkImageDataUrl,
+} from './pdfImage'
 
 const YELLOW: [number, number, number] = [235, 184, 45]
 const INK: [number, number, number] = [26, 26, 26]
 const MUTED: [number, number, number] = [120, 120, 120]
 const FOOTER_H = 18
-
-async function loadImageDataUrl(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return null
-    const blob = await res.blob()
-    return await new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result || ''))
-      reader.onerror = () => resolve(null)
-      reader.readAsDataURL(blob)
-    })
-  } catch {
-    return null
-  }
-}
-
-function imageFormatFromDataUrl(dataUrl: string): 'PNG' | 'JPEG' | null {
-  if (dataUrl.startsWith('data:image/png')) return 'PNG'
-  if (
-    dataUrl.startsWith('data:image/jpeg') ||
-    dataUrl.startsWith('data:image/jpg')
-  ) {
-    return 'JPEG'
-  }
-  return 'PNG'
-}
 
 function drawColoredNoteFooter(doc: jsPDF, note: string) {
   const pageWidth = doc.internal.pageSize.getWidth()
@@ -81,23 +65,26 @@ export async function downloadProjectInvoicePdf(
     y += 14
   }
 
-  const logoUrl = resolveAssetUrl(draft.logoUrl)
-  if (logoUrl) {
-    const dataUrl = await loadImageDataUrl(logoUrl)
-    const format = dataUrl ? imageFormatFromDataUrl(dataUrl) : null
-    if (dataUrl && format) {
-      try {
-        doc.addImage(dataUrl, format, margin, y, 22, 12)
-      } catch {
-        // ignore
-      }
+  const logoUrl = resolveAssetUrl(draft.logoUrl) ?? DEFAULT_COMPANY_LOGO_URL
+  const logoData =
+    (await loadPdfImage(logoUrl)) ??
+    (logoUrl !== DEFAULT_COMPANY_LOGO_URL
+      ? await loadPdfImage(DEFAULT_COMPANY_LOGO_URL)
+      : null)
+  const logoFormat = logoData ? imageFormatFromDataUrl(logoData) : null
+  if (logoData && logoFormat) {
+    try {
+      const { w, h } = fitImageSize(doc, logoData, 22, 12)
+      doc.addImage(logoData, logoFormat, margin, y, w, h, undefined, 'FAST')
+    } catch {
+      // ignore
     }
   }
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(14)
   doc.setTextColor(...INK)
-  doc.text(draft.companyName, margin + 26, y + 8)
+  doc.text(draft.companyName || DEFAULT_COMPANY_NAME, margin + 26, y + 8)
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
@@ -251,20 +238,25 @@ export async function downloadProjectInvoicePdf(
   doc.setFontSize(9)
   doc.text(draft.authorizedLabel || 'Authorized Signature', sigX, y)
 
-  if (
-    draft.useDigitalSignature &&
-    draft.digitalSignatureDataUrl &&
-    imageFormatFromDataUrl(draft.digitalSignatureDataUrl)
-  ) {
-    const format = imageFormatFromDataUrl(draft.digitalSignatureDataUrl)!
+  const signature =
+    draft.useDigitalSignature && draft.digitalSignatureDataUrl
+      ? await shrinkImageDataUrl(
+          draft.digitalSignatureDataUrl,
+          PDF_SIGNATURE_MAX_PX,
+        )
+      : null
+  if (signature && imageFormatFromDataUrl(signature)) {
+    const format = imageFormatFromDataUrl(signature)!
     try {
       doc.addImage(
-        draft.digitalSignatureDataUrl,
+        signature,
         format,
         sigX,
         y + 2,
         55,
         18,
+        undefined,
+        'FAST',
       )
       y += 22
     } catch {

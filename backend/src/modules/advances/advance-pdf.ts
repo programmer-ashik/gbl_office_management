@@ -126,7 +126,11 @@ export async function buildProjectAdvanceReportPdf(input: {
     doc
       .fontSize(16)
       .fillColor('#0f2744')
-      .text('Project Advance Summary Report', 40 + indent, 36)
+      .text(logo.companyName, 40 + indent, 32)
+    doc
+      .fontSize(12)
+      .fillColor('#0f2744')
+      .text('Project Advance Summary Report', 40 + indent)
     doc
       .fontSize(11)
       .fillColor('#5a6578')

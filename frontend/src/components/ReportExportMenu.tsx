@@ -1,14 +1,12 @@
-import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { useEffect } from 'react'
 import { ActionMenu } from './ui'
-import { resolveAssetUrl } from '../types/report-template'
 import {
   downloadReportCsv,
   downloadReportPdf,
   previewReportPdf,
-  type ReportBranding,
   type ReportExport,
 } from '../utils/reportExport'
+import { loadCompanyBranding } from '../utils/companyBranding'
 
 type Props = {
   payload: () => ReportExport
@@ -16,36 +14,12 @@ type Props = {
 }
 
 export function ReportExportMenu({ payload, disabled }: Props) {
-  const [branding, setBranding] = useState<ReportBranding>({
-    companyName: 'GBL Enterprise',
-    address: '',
-    logoDataUrl: null,
-  })
-
   useEffect(() => {
-    let active = true
-    api
-      .journalVoucherTemplate()
-      .then(async (template) => {
-        const logoUrl = resolveAssetUrl(template.companyLogoUrl)
-        const logoDataUrl = logoUrl ? await loadImageDataUrl(logoUrl) : null
-        if (!active) return
-        setBranding({
-          companyName: template.headerConfig?.companyName || 'GBL Enterprise',
-          address: template.headerConfig?.address || '',
-          logoDataUrl,
-        })
-      })
-      .catch(() => {
-        /* keep defaults */
-      })
-    return () => {
-      active = false
-    }
+    void loadCompanyBranding()
   }, [])
 
-  function withBranding(): ReportExport {
-    return { ...payload(), branding }
+  async function withBranding(): Promise<ReportExport> {
+    return { ...payload(), branding: await loadCompanyBranding() }
   }
 
   return (
@@ -55,33 +29,17 @@ export function ReportExportMenu({ payload, disabled }: Props) {
       items={[
         {
           label: 'Preview PDF',
-          onSelect: () => previewReportPdf(withBranding()),
+          onSelect: () => void withBranding().then(previewReportPdf),
         },
         {
           label: 'Download PDF',
-          onSelect: () => downloadReportPdf(withBranding()),
+          onSelect: () => void withBranding().then(downloadReportPdf),
         },
         {
           label: 'Export CSV',
-          onSelect: () => downloadReportCsv(withBranding()),
+          onSelect: () => void withBranding().then(downloadReportCsv),
         },
       ]}
     />
   )
-}
-
-async function loadImageDataUrl(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, { credentials: 'include' })
-    if (!res.ok) return null
-    const blob = await res.blob()
-    return await new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result))
-      reader.onerror = () => resolve(null)
-      reader.readAsDataURL(blob)
-    })
-  } catch {
-    return null
-  }
 }

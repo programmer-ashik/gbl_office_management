@@ -328,7 +328,7 @@ export function ProjectDetailPage() {
                   <button
                     type="button"
                     className="ghost"
-                    onClick={() => downloadQuotationPdf(row)}
+                    onClick={() => void downloadQuotationPdf(row)}
                   >
                     PDF
                   </button>

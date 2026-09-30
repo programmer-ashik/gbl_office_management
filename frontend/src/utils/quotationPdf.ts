@@ -2,26 +2,45 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { Quotation } from '../types/quotation'
 import { money } from '../types/accounting'
+import { DEFAULT_COMPANY_NAME } from '../types/report-template'
+import { loadCompanyBranding, type CompanyBranding } from './companyBranding'
+import { fitImageSize, imageFormatFromDataUrl } from './pdfImage'
 
 const INK: [number, number, number] = [26, 26, 26]
 const MUTED: [number, number, number] = [110, 110, 110]
 const ACCENT: [number, number, number] = [15, 76, 129]
 
-export function buildQuotationPdf(quotation: Quotation): jsPDF {
+export function buildQuotationPdf(
+  quotation: Quotation,
+  branding?: CompanyBranding,
+): jsPDF {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
   const margin = 14
   let y = margin
 
+  let textX = margin
+  const logo = branding?.logoDataUrl
+  const logoFormat = logo ? imageFormatFromDataUrl(logo) : null
+  if (logo && logoFormat) {
+    try {
+      const { w, h } = fitImageSize(doc, logo, 16, 16)
+      doc.addImage(logo, logoFormat, margin, margin - 6 + (16 - h) / 2, w, h, undefined, 'FAST')
+      textX = margin + w + 4
+    } catch {
+      /* ignore bad logo */
+    }
+  }
+
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(16)
   doc.setTextColor(...ACCENT)
-  doc.text('GBL Enterprise', margin, y)
+  doc.text(branding?.companyName || DEFAULT_COMPANY_NAME, textX, y)
   y += 6
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
   doc.setTextColor(...MUTED)
-  doc.text('Quotation', margin, y)
+  doc.text('Quotation', textX, y)
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(12)
@@ -157,12 +176,12 @@ export function buildQuotationPdf(quotation: Quotation): jsPDF {
   return doc
 }
 
-export function downloadQuotationPdf(quotation: Quotation): void {
-  const doc = buildQuotationPdf(quotation)
+export async function downloadQuotationPdf(quotation: Quotation): Promise<void> {
+  const doc = buildQuotationPdf(quotation, await loadCompanyBranding())
   doc.save(`${quotation.quotationNumber || 'quotation'}.pdf`)
 }
 
-export function quotationPdfPreviewUrl(quotation: Quotation): string {
-  const blob = buildQuotationPdf(quotation).output('blob')
+export async function quotationPdfPreviewUrl(quotation: Quotation): Promise<string> {
+  const blob = buildQuotationPdf(quotation, await loadCompanyBranding()).output('blob')
   return URL.createObjectURL(blob)
 }

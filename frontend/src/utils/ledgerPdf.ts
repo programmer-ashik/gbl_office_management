@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { money } from '../types/accounting' // forced sync
+import { fitImageSize, imageFormatFromDataUrl } from './pdfImage'
 
 export type LedgerPdfInput = {
   companyName: string
@@ -40,7 +41,17 @@ export function buildLedgerPdf(input: LedgerPdfInput): jsPDF {
 
   if (input.logoDataUrl) {
     try {
-      doc.addImage(input.logoDataUrl, 'PNG', 14, y, 16, 16)
+      const { w, h } = fitImageSize(doc, input.logoDataUrl, 16, 16)
+      doc.addImage(
+        input.logoDataUrl,
+        imageFormatFromDataUrl(input.logoDataUrl) ?? 'PNG',
+        14,
+        y + (16 - h) / 2,
+        w,
+        h,
+        undefined,
+        'FAST',
+      )
     } catch {
       /* ignore bad logo */
     }
@@ -61,7 +72,7 @@ export function buildLedgerPdf(input: LedgerPdfInput): jsPDF {
   y += 5
   const range =
     input.fromDate || input.toDate
-      ? `${input.fromDate || '…'} → ${input.toDate || '…'}`
+      ? `${input.fromDate || 'Start'} to ${input.toDate || 'Today'}`
       : 'All dates'
   doc.text(`Date range: ${range}`, 14, y)
   y += 5

@@ -29,6 +29,7 @@ import {
 } from "../components/DebitVoucher";
 import {
   BLOCK_LABELS,
+  DEFAULT_COMPANY_ADDRESS,
   defaultBalanceSheetTemplate,
   defaultJournalVoucherTemplate,
   defaultVoucherConfig,
@@ -39,14 +40,18 @@ import {
   type ReportTemplateBlockType,
   type TemplateBlock,
   type VoucherConfig,
+  voucherAddress,
+  voucherLogoUrl,
 } from "../types/report-template";
 import {
   clearJournalVoucherTemplateCache,
   amountInWords,
   voucherLineItems,
+  voucherPartyNames,
   voucherPaymentMethod,
 } from "../utils/journalVoucherPdf";
 import { type JournalEntry } from "../types/accounting";
+import { clearCompanyBrandingCache } from "../utils/companyBranding";
 
 function SortableBlockCard({
   block,
@@ -193,16 +198,14 @@ function JournalVoucherPreview({
         kind={previewKind}
         companyName={template.headerConfig.companyName}
         companySubtitle={vc.companySubtitle}
-        companyLogoUrl={template.companyLogoUrl}
+        companyAddress={voucherAddress(template)}
+        companyLogoUrl={voucherLogoUrl(template)}
         voucherNo={entry.entryNumber}
         day={d[2] ?? ""}
         month={d[1] ?? ""}
         year={d[0] ?? ""}
         paymentMethod={voucherPaymentMethod(entry, previewKind)}
-        partyName={
-          entry.lines.find((l) => l.entityName)?.entityName ??
-          "Sample Party Ltd."
-        }
+        partyName={voucherPartyNames(entry, previewKind) || "Sample Party Ltd."}
         currencyLabel={vc.currencyLabel}
         majorUnitLabel={vc.majorUnitLabel}
         minorUnitLabel={vc.minorUnitLabel}
@@ -424,7 +427,10 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
       );
       setDraft(saved);
       setSelectedId(saved.layoutStructure[0]?.id ?? selectedId);
-      if (kind === "journal-voucher") clearJournalVoucherTemplateCache();
+      if (kind === "journal-voucher") {
+        clearJournalVoucherTemplateCache();
+        clearCompanyBrandingCache();
+      }
       setMessage("Template saved");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -479,8 +485,18 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
               }
             />
           </label>
+          {kind === "journal-voucher" ? (
+            <div className='tpl-logo-current'>
+              <img src={voucherLogoUrl(draft)} alt='Current voucher logo' />
+              <span className='muted'>
+                {draft.companyLogoUrl
+                  ? "Uploaded logo"
+                  : "Default GBL logo — upload to change"}
+              </span>
+            </div>
+          ) : null}
           <FileUploadField
-            label='Company logo'
+            label={kind === "journal-voucher" ? "Change logo" : "Company logo"}
             accept='image/*'
             hint='Used on invoices, JV, salary slips, and other PDFs'
             onFile={(file) => void onUploadLogo(file)}
@@ -493,7 +509,7 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
                 setDraft((prev) => ({ ...prev, companyLogoUrl: null }))
               }
             >
-              Remove logo
+              {kind === "journal-voucher" ? "Use default logo" : "Remove logo"}
             </button>
           ) : null}
 
@@ -532,6 +548,9 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
             Address
             <input
               value={draft.headerConfig.address}
+              placeholder={
+                kind === "journal-voucher" ? DEFAULT_COMPANY_ADDRESS : undefined
+              }
               onChange={(e) =>
                 setDraft((prev) => ({
                   ...prev,

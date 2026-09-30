@@ -1,5 +1,9 @@
 import type { CSSProperties } from "react";
-import { resolveAssetUrl } from "../types/report-template";
+import {
+  DEFAULT_COMPANY_ADDRESS,
+  DEFAULT_COMPANY_LOGO_URL,
+  resolveAssetUrl,
+} from "../types/report-template";
 
 export type VoucherThemeId = "bw" | "color";
 
@@ -79,6 +83,7 @@ export type DebitCreditVoucherProps = {
   kind: "debit" | "credit";
   companyName: string;
   companySubtitle?: string;
+  companyAddress?: string;
   companyLogoUrl?: string | null;
   voucherNo: string;
   day: string;
@@ -141,6 +146,7 @@ export function DebitCreditVoucherView({
   kind,
   companyName,
   companySubtitle = "",
+  companyAddress = DEFAULT_COMPANY_ADDRESS,
   companyLogoUrl,
   voucherNo,
   day,
@@ -165,7 +171,9 @@ export function DebitCreditVoucherView({
   const title = kind === "debit" ? "DEBIT VOUCHER" : "CREDIT VOUCHER";
   const resolvedPartyLabel =
     partyLabel ?? (kind === "debit" ? "Paid to:" : "Received from:");
-  const logoSrc = resolveAssetUrl(companyLogoUrl ?? null);
+  const methodLabel = kind === "credit" ? "Receiving Method:" : "Payment Method:";
+  const logoSrc =
+    resolveAssetUrl(companyLogoUrl ?? null) ?? DEFAULT_COMPANY_LOGO_URL;
 
   const totalMajor = items.reduce(
     (sum, row) =>
@@ -218,13 +226,11 @@ export function DebitCreditVoucherView({
 
           <div className='relative z-10'>
             <div className='w-full text-center'>
-              {logoSrc ? (
-                <img
-                  src={logoSrc}
-                  alt=''
-                  className='mx-auto mb-2 h-12 w-12 object-contain'
-                />
-              ) : null}
+              <img
+                src={logoSrc}
+                alt=''
+                className='mx-auto mb-2 h-12 w-12 object-contain'
+              />
               <h2
                 className={`font-extrabold tracking-wider text-sm sm:text-base uppercase leading-tight ${theme.sidebarTextClass}`}
               >
@@ -235,6 +241,13 @@ export function DebitCreditVoucherView({
                   className={`text-[9px] tracking-widest font-light uppercase mt-0.5 ${theme.sidebarMutedClass}`}
                 >
                   {companySubtitle}
+                </p>
+              ) : null}
+              {companyAddress ? (
+                <p
+                  className={`text-[9px] leading-snug mt-1.5 ${theme.sidebarMutedClass}`}
+                >
+                  {companyAddress}
                 </p>
               ) : null}
             </div>
@@ -339,7 +352,7 @@ export function DebitCreditVoucherView({
               </div>
               <div className='flex items-baseline space-x-2 text-xs'>
                 <span className='font-semibold text-slate-800 whitespace-nowrap'>
-                  Payment Method:
+                  {methodLabel}
                 </span>
                 <div className='flex-1 border-b border-slate-400 pb-0.5 font-bold text-slate-800 min-h-[1.1rem]'>
                   {paymentMethod}

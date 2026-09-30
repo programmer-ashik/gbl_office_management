@@ -10,10 +10,13 @@ import {
   defaultJournalVoucherTemplate,
   defaultVoucherConfig,
   hydrateClientTemplate,
-  resolveAssetUrl,
+  DEFAULT_COMPANY_LOGO_URL,
+  voucherAddress,
+  voucherLogoUrl,
   type BalanceSheetTemplate,
   type VoucherConfig,
 } from '../types/report-template'
+import { imageFormatFromDataUrl, loadPdfImage } from './pdfImage'
 
 const MUTED: [number, number, number] = [90, 101, 120]
 const INK: [number, number, number] = [33, 37, 41]
@@ -136,36 +139,6 @@ export function amountInWords(amount: number): string {
   let text = `${parts.join(' ')} Taka`
   if (paisa) text += ` and ${twoDigits(paisa)} Paisa`
   return `${text} Only`
-}
-
-function imageFormatFromDataUrl(
-  dataUrl: string,
-): 'PNG' | 'JPEG' | 'WEBP' | null {
-  if (
-    dataUrl.startsWith('data:image/jpeg') ||
-    dataUrl.startsWith('data:image/jpg')
-  ) {
-    return 'JPEG'
-  }
-  if (dataUrl.startsWith('data:image/png')) return 'PNG'
-  if (dataUrl.startsWith('data:image/webp')) return 'WEBP'
-  return null
-}
-
-async function loadImageDataUrl(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, { credentials: 'include' })
-    if (!res.ok) return null
-    const blob = await res.blob()
-    return await new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result))
-      reader.onerror = () => resolve(null)
-      reader.readAsDataURL(blob)
-    })
-  } catch {
-    return null
-  }
 }
 
 function parseVoucherDate(iso: string): { day: string; month: string; year: string } {
@@ -302,10 +275,8 @@ function lineNarrative(
   return extras.length ? `${detail} (${extras.join(' · ')})` : detail
 }
 
-export function voucherLineItems(
-  entry: JournalEntry,
-  kind: 'debit' | 'credit',
-): Array<{ description: string; major: string; minor: string }> {
+/** Lines printed as voucher rows: the non-cash/bank side of the payment or receipt. */
+function voucherRows(entry: JournalEntry, kind: 'debit' | 'credit'): JournalLine[] {
   const lines: JournalLine[] =
     kind === 'debit'
       ? entry.lines.filter((l) => l.debit > 0)
@@ -313,7 +284,33 @@ export function voucherLineItems(
   const source = (lines.length > 0 ? lines : entry.lines).filter(
     (line) => !isTreasuryLine(line),
   )
-  const rows = source.length > 0 ? source : lines.length > 0 ? lines : entry.lines
+  return source.length > 0 ? source : lines.length > 0 ? lines : entry.lines
+}
+
+/** "Paid to" / "Received from": every printed head (party name, else account name), comma-separated. */
+export function voucherPartyNames(
+  entry: JournalEntry,
+  kind: 'debit' | 'credit',
+): string {
+  const names = [
+    ...new Set(
+      voucherRows(entry, kind)
+        .map((line) => line.entityName?.trim() || line.accountName.trim())
+        .filter(Boolean),
+    ),
+  ]
+  return names.length > 0 ? names.join(', ') : partyLabel(entry, kind)
+}
+
+export function voucherMethodLabel(kind: 'debit' | 'credit'): string {
+  return kind === 'credit' ? 'Receiving Method:' : 'Payment Method:'
+}
+
+export function voucherLineItems(
+  entry: JournalEntry,
+  kind: 'debit' | 'credit',
+): Array<{ description: string; major: string; minor: string }> {
+  const rows = voucherRows(entry, kind)
   const channels = paymentChannels(entry, kind)
   const chequeNo = entry.chequeNumber?.trim()
   const vide = chequeNo ? ` vide cheque no. ${chequeNo}` : ''
@@ -370,7 +367,7 @@ async function buildDebitCreditVoucherPdf(
   const company = header.companyName || 'GBL Enterprise'
   const { day, month, year } = parseVoucherDate(entry.date)
   const amount = entry.totalDebit
-  const party = partyLabel(entry, kind)
+  const party = voucherPartyNames(entry, kind)
   const items = voucherLineItems(entry, kind)
   const title =
     options?.forceTitle ??
@@ -390,19 +387,20 @@ async function buildDebitCreditVoucherPdf(
   // Logo only — no background box (matches DebitVoucher.tsx preview)
   // h-12 w-12 ≈ 12.7mm square
   const logoSize = 12.7
-  const logoUrl = resolveAssetUrl(template.companyLogoUrl)
   let logoDrawn = false
-  if (logoUrl) {
-    const dataUrl = await loadImageDataUrl(logoUrl)
-    const format = dataUrl ? imageFormatFromDataUrl(dataUrl) : null
-    if (dataUrl && format) {
-      try {
-        const logoX = (SIDEBAR_W - logoSize) / 2
-        doc.addImage(dataUrl, format, logoX, 10, logoSize, logoSize)
-        logoDrawn = true
-      } catch {
-        logoDrawn = false
-      }
+  const logoData =
+    (await loadPdfImage(voucherLogoUrl(template))) ??
+    (template.companyLogoUrl
+      ? await loadPdfImage(DEFAULT_COMPANY_LOGO_URL)
+      : null)
+  const logoFormat = logoData ? imageFormatFromDataUrl(logoData) : null
+  if (logoData && logoFormat) {
+    try {
+      const logoX = (SIDEBAR_W - logoSize) / 2
+      doc.addImage(logoData, logoFormat, logoX, 10, logoSize, logoSize, undefined, 'FAST')
+      logoDrawn = true
+    } catch {
+      logoDrawn = false
     }
   }
   doc.setFont('helvetica', 'bold')
@@ -410,17 +408,32 @@ async function buildDebitCreditVoucherPdf(
   doc.setTextColor(...sidebarText)
   const nameY = logoDrawn ? 10 + logoSize + 5 : 16
   doc.text(company.toUpperCase(), SIDEBAR_W / 2, nameY, { align: 'center' })
+  let headY = nameY
   if (vc.companySubtitle) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(6)
     doc.setTextColor(...sidebarText)
-    doc.text(vc.companySubtitle.toUpperCase(), SIDEBAR_W / 2, nameY + 4, {
+    headY += 4
+    doc.text(vc.companySubtitle.toUpperCase(), SIDEBAR_W / 2, headY, {
       align: 'center',
     })
   }
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(6.5)
+  doc.setTextColor(...sidebarText)
+  const addressLines = doc.splitTextToSize(
+    voucherAddress(template),
+    SIDEBAR_W - 12,
+  ) as string[]
+  headY += 4
+  doc.text(addressLines, SIDEBAR_W / 2, headY, {
+    align: 'center',
+    lineHeightFactor: 1.3,
+  })
+  headY += (addressLines.length - 1) * 3
 
   // Signatories
-  let sigY = Math.max(nameY + (vc.companySubtitle ? 12 : 8), 42)
+  let sigY = Math.max(headY + 8, 42)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(8)
   doc.setTextColor(...sidebarText)
@@ -487,7 +500,7 @@ async function buildDebitCreditVoucherPdf(
   y = 46
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
-  const methodLabel = 'Payment Method:'
+  const methodLabel = voucherMethodLabel(kind)
   doc.text(methodLabel, contentX, y)
   const methodX = contentX + doc.getTextWidth(methodLabel) + 3
   const method = voucherPaymentMethod(entry, kind)
@@ -509,7 +522,14 @@ async function buildDebitCreditVoucherPdf(
   const amountColW = 52
   const amtX = contentRight - amountColW
   const descW = amtX - contentX
-  const headerH = 14
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(9)
+  const partyX = contentX + 2 + doc.getTextWidth(partyField) + 2
+  doc.setFont('helvetica', 'normal')
+  const partyLines = party
+    ? (doc.splitTextToSize(party, amtX - partyX - 2) as string[]).slice(0, 4)
+    : []
+  const headerH = Math.max(14, 6 + partyLines.length * 4)
   const totalH = 14
   const LINE_H = 4
   const ROW_GAP = 3
@@ -543,9 +563,9 @@ async function buildDebitCreditVoucherPdf(
   doc.setFontSize(9)
   doc.setTextColor(...INK)
   doc.text(partyField, contentX + 2, tableTop + 6)
-  if (party) {
+  if (partyLines.length > 0) {
     doc.setFont('helvetica', 'normal')
-    doc.text(party, contentX + 22, tableTop + 6, { maxWidth: descW - 24 })
+    doc.text(partyLines, partyX, tableTop + 6, { lineHeightFactor: 1.25 })
   }
   doc.setFillColor(248, 248, 248)
   doc.rect(amtX, tableTop, amountColW, 7, 'F')

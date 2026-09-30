@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf'
 import autoTable, { type CellHookData } from 'jspdf-autotable'
+import { fitImageSize } from './pdfImage'
 
 export type ReportBranding = {
   companyName: string
@@ -70,8 +71,9 @@ export function buildReportPdf(input: ReportExport): jsPDF {
 
   if (input.branding?.logoDataUrl) {
     try {
-      const format = imageFormat(input.branding.logoDataUrl)
-      doc.addImage(input.branding.logoDataUrl, format, 14, 10, 18, 18)
+      const logo = input.branding.logoDataUrl
+      const { w, h } = fitImageSize(doc, logo, 18, 18)
+      doc.addImage(logo, imageFormat(logo), 14, 10 + (18 - h) / 2, w, h, undefined, 'FAST')
     } catch {
       /* skip broken logo */
     }

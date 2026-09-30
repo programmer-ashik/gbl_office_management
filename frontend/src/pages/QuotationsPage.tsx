@@ -87,7 +87,7 @@ export function QuotationsPage() {
   function openPreview(row: Quotation) {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewTitle(row.quotationNumber);
-    setPreviewUrl(quotationPdfPreviewUrl(row));
+    void quotationPdfPreviewUrl(row).then(setPreviewUrl);
   }
 
   async function onDelete(row: Quotation) {
@@ -328,7 +328,7 @@ export function QuotationsPage() {
                           : []),
                         {
                           label: "Download PDF",
-                          onSelect: () => downloadQuotationPdf(row),
+                          onSelect: () => void downloadQuotationPdf(row),
                         },
                         ...(canDeleteQuotation(
                           user?.role,

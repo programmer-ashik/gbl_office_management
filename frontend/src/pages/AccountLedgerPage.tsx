@@ -29,6 +29,7 @@ import {
   ledgerPdfPreviewUrl,
   type LedgerPdfInput,
 } from "../utils/ledgerPdf";
+import { loadCompanyBranding } from "../utils/companyBranding";
 
 type EntityOption = { value: string; label: string };
 
@@ -461,11 +462,17 @@ export function AccountLedgerPage() {
     };
   }
 
-  function onPdf(action: "preview" | "download") {
-    const input = ledgerPdfInput();
-    if (!input) return;
+  async function onPdf(action: "preview" | "download") {
+    const base = ledgerPdfInput();
+    if (!base) return;
     setExporting(true);
     try {
+      const branding = await loadCompanyBranding();
+      const input = {
+        ...base,
+        companyName: branding.companyName,
+        logoDataUrl: branding.logoDataUrl,
+      };
       if (action === "download") {
         downloadLedgerPdf(input);
         return;
@@ -540,14 +547,14 @@ export function AccountLedgerPage() {
             type='button'
             className='ghost'
             disabled={!ledger || exporting || loading}
-            onClick={() => onPdf("preview")}
+            onClick={() => void onPdf("preview")}
           >
             Preview PDF
           </button>
           <button
             type='button'
             disabled={!ledger || exporting || loading}
-            onClick={() => onPdf("download")}
+            onClick={() => void onPdf("download")}
           >
             {exporting ? "Exporting…" : "Download PDF"}
           </button>
