@@ -14,6 +14,7 @@ import {
   GeneratePayrollDto,
   PostPayrollDto,
   PreviewSalaryBreakdownDto,
+  SetPayrollAdvanceDeductionsDto,
   UpdatePayrollSettingsDto,
   UpsertSalaryStructureDto,
 } from './dto/payroll.dto';
@@ -174,6 +175,34 @@ export function createPayrollRouter(
     asyncHandler(async (req, res) => {
       const row = await payrollService.getRun(String(req.params.id), req.user!);
       sendSuccess(res, row, 'Payroll run retrieved successfully');
+    }),
+  );
+
+  router.get(
+    '/runs/:id/open-advances',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const rows = await payrollService.listOpenAdvances(
+        String(req.params.id),
+        req.user!,
+      );
+      sendSuccess(res, rows, 'Open advances retrieved successfully');
+    }),
+  );
+
+  router.put(
+    '/runs/:id/advance-deductions',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(SetPayrollAdvanceDeductionsDto),
+    asyncHandler(async (req, res) => {
+      const row = await payrollService.setAdvanceDeductions(
+        String(req.params.id),
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Advance deductions updated successfully');
     }),
   );
 

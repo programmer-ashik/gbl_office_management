@@ -153,7 +153,7 @@ export function createJournalsRouter(
       const entry = await journalService.findByIdOrFail(String(req.params.id));
       sendSuccess(
         res,
-        journalService.toPublic(entry),
+        await journalService.toDisplay(entry),
         'Journal entry retrieved successfully',
       );
     }),

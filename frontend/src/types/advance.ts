@@ -32,6 +32,11 @@ export const SETTLEMENT_CASE_LABEL: Record<SettlementCase, string> = {
   more: 'More spend',
 }
 
+/** What vouchers must settle: disbursed less any salary recovery. */
+export function advanceToSettle(row: Advance): number {
+  return row.balanceToSettle ?? row.disbursedAmount ?? row.requestedAmount
+}
+
 export type Advance = {
   id: string
   advanceNumber: string
@@ -49,6 +54,10 @@ export type Advance = {
   disbursedAt: string | null
   treasuryAccountCode: string | null
   disbursementJournalNumber: string | null
+  /** Recovered from salary through payroll. */
+  payrollRecovered?: number
+  /** Disbursed less salary recovery — what vouchers must settle. */
+  balanceToSettle?: number | null
   vouchers: Array<{
     accountCode: string
     accountName: string

@@ -21,6 +21,7 @@ import {
 } from '../employees/employee-records';
 import type { UsersService } from '../users/users.service';
 import { AdvanceModel, type AdvanceDocument } from './advance.model';
+import { isAutoAdvanceLineText } from './advance-narrative';
 import {
   buildAdvanceVoucherPdf,
   buildProjectAdvanceReportPdf,
@@ -28,6 +29,7 @@ import {
 import {
   ADVANCE_ASSET_CODE,
   EMPLOYEE_PAYABLE_CODE,
+  advanceBalanceMinor,
   assertExpenseAccount,
   buildReimbursementJournalLines,
   buildSettlementJournalLines,
@@ -65,6 +67,10 @@ export type PublicAdvance = {
   disbursedAt: string | null;
   treasuryAccountCode: string | null;
   disbursementJournalNumber: string | null;
+  /** Recovered from salary through payroll. */
+  payrollRecovered: number;
+  /** Disbursed less salary recovery — what vouchers must settle. */
+  balanceToSettle: number | null;
   vouchers: Array<{
     accountCode: string;
     accountName: string;
@@ -131,12 +137,12 @@ export class AdvancesService {
   ) {}
 
   toPublic(row: AdvanceDocument): PublicAdvance {
-    const disbursedMinor = row.disbursedMinor ?? 0;
+    const balanceMinor = advanceBalanceMinor(row);
     const spentMinor = row.spentMinor ?? 0;
     const reimbursedMinor = row.reimbursedMinor ?? 0;
     const excessMinor =
-      row.settlementCase === SettlementCase.MORE && spentMinor > disbursedMinor
-        ? spentMinor - disbursedMinor
+      row.settlementCase === SettlementCase.MORE && spentMinor > balanceMinor
+        ? spentMinor - balanceMinor
         : 0;
     const reimbursementDue = Math.max(0, excessMinor - reimbursedMinor);
 
@@ -159,6 +165,9 @@ export class AdvancesService {
       disbursedAt: row.disbursedAt ? row.disbursedAt.toISOString() : null,
       treasuryAccountCode: row.treasuryAccountCode ?? null,
       disbursementJournalNumber: row.disbursementJournalNumber ?? null,
+      payrollRecovered: fromMinorUnits(row.payrollDeductedMinor ?? 0),
+      balanceToSettle:
+        row.disbursedMinor !== undefined ? fromMinorUnits(balanceMinor) : null,
       vouchers: row.vouchers.map((line) => ({
         accountCode: line.accountCode,
         accountName: line.accountName,
@@ -476,7 +485,9 @@ export class AdvancesService {
         {
           entityType: ApprovalEntityType.ADVANCE_DISBURSE,
           amount,
-          summary: `Disburse advance ${row.advanceNumber}`,
+          summary: row.purpose?.trim()
+            ? `Disburse advance ${row.advanceNumber} · ${row.purpose.trim()}`
+            : `Disburse advance ${row.advanceNumber}`,
           projectId: row.projectId?.toString(),
           projectCode: row.projectCode,
           payload: {
@@ -500,6 +511,7 @@ export class AdvancesService {
       throw badRequest('Invalid disbursement date');
     }
 
+    const purpose = row.purpose?.trim();
     const journal = await this.journalService.post(
       {
         date: date.toISOString(),
@@ -510,7 +522,7 @@ export class AdvancesService {
           {
             accountCode: ADVANCE_ASSET_CODE,
             debit: amount,
-            description: `Advance to ${row.employeeName}`,
+            description: purpose || `Advance to ${row.employeeName}`,
             projectId: row.projectId?.toString(),
             entityType: JournalEntityType.EMPLOYEE,
             entityId: row.employeeId.toString(),
@@ -518,7 +530,7 @@ export class AdvancesService {
           {
             accountCode: treasury.glAccountCode,
             credit: amount,
-            description: `Disburse ${row.advanceNumber}`,
+            description: purpose || `Disburse ${row.advanceNumber}`,
           },
         ],
       },
@@ -565,7 +577,7 @@ export class AdvancesService {
       await this.assertNoProjectCostVouchers(vouchers);
     }
     const spentMinor = vouchers.reduce((sum, line) => sum + line.amountMinor, 0);
-    classifySettlement(row.disbursedMinor ?? row.requestedMinor, spentMinor);
+    classifySettlement(advanceBalanceMinor(row), spentMinor);
 
     row.vouchers = vouchers;
     row.spentMinor = spentMinor;
@@ -586,7 +598,7 @@ export class AdvancesService {
       throw badRequest('Only a submitted settlement can be confirmed');
     }
 
-    const advancedMinor = row.disbursedMinor ?? row.requestedMinor;
+    const advancedMinor = advanceBalanceMinor(row);
     const spentMinor = row.spentMinor ?? 0;
     const settlementCase = classifySettlement(advancedMinor, spentMinor);
 
@@ -609,6 +621,7 @@ export class AdvancesService {
       vouchers: row.vouchers,
       returnAccountCode:
         settlementCase === SettlementCase.LESS ? returnAccountCode : undefined,
+      purpose: row.purpose,
     });
 
     const date = dto.date ? new Date(dto.date) : new Date();
@@ -660,7 +673,7 @@ export class AdvancesService {
       throw badRequest('Reimbursement applies only when spend exceeded the advance');
     }
 
-    const advancedMinor = row.disbursedMinor ?? row.requestedMinor;
+    const advancedMinor = advanceBalanceMinor(row);
     const spentMinor = row.spentMinor ?? 0;
     const excessMinor = Math.max(0, spentMinor - advancedMinor);
     const already = row.reimbursedMinor ?? 0;
@@ -688,7 +701,9 @@ export class AdvancesService {
           employeeId: row.employeeId.toString(),
           amountMinor: dueMinor,
           treasuryAccountCode: treasury.glAccountCode,
-          description: `Reimburse ${row.employeeName} · ${row.advanceNumber}`,
+          description:
+            row.purpose?.trim() ||
+            `Reimburse ${row.employeeName} · ${row.advanceNumber}`,
         }),
       },
       actor.userId,
@@ -755,7 +770,7 @@ export class AdvancesService {
       const openDue =
         linked &&
         linked.settlementCase === SettlementCase.MORE &&
-        (linked.spentMinor ?? 0) - (linked.disbursedMinor ?? 0) -
+        (linked.spentMinor ?? 0) - advanceBalanceMinor(linked) -
           (linked.reimbursedMinor ?? 0) >
           0;
 
@@ -765,7 +780,11 @@ export class AdvancesService {
         journalEntryNumber: row.journalEntryNumber,
         accountCode: row.accountCode,
         accountName: row.accountName,
-        description: row.memo,
+        description:
+          linked?.purpose?.trim() &&
+          isAutoAdvanceLineText(row.description, row.accountName)
+            ? linked.purpose.trim()
+            : row.description?.trim() || row.memo,
         debit: fromMinorUnits(row.debitMinor),
         credit: fromMinorUnits(row.creditMinor),
         runningBalance: fromMinorUnits(runningMinor),
@@ -791,7 +810,7 @@ export class AdvancesService {
       .map((row) => {
         const due =
           (row.spentMinor ?? 0) -
-          (row.disbursedMinor ?? 0) -
+          advanceBalanceMinor(row) -
           (row.reimbursedMinor ?? 0);
         return {
           advanceId: row._id.toString(),

@@ -18,6 +18,7 @@ import { OtherPartyModel } from '../other-parties/other-party.model';
 import { SupplierModel } from '../procurement/supplier.model';
 import type { ProjectsService } from '../projects/projects.service';
 import { findEmployee } from '../employees/employee-records';
+import { withAdvancePurposeJournals } from '../advances/advance-narrative';
 import type { UsersService } from '../users/users.service';
 import {
   assertManualLineDimensions,
@@ -807,14 +808,24 @@ export class JournalService {
     });
     if (!filters.journalType) {
       const entries = await query.limit(limit).exec();
-      return entries.map((entry) => this.toPublic(entry));
+      return withAdvancePurposeJournals(
+        entries.map((entry) => this.toPublic(entry)),
+      );
     }
     // A journal can carry several categories, so match after loading.
     const entries = await query.exec();
-    return entries
-      .filter((entry) => journalMatchesType(entry, filters.journalType!))
-      .slice(0, limit)
-      .map((entry) => this.toPublic(entry));
+    return withAdvancePurposeJournals(
+      entries
+        .filter((entry) => journalMatchesType(entry, filters.journalType!))
+        .slice(0, limit)
+        .map((entry) => this.toPublic(entry)),
+    );
+  }
+
+  /** Public view for display: advance journals read with the employee's purpose. */
+  async toDisplay(entry: JournalEntryDocument): Promise<PublicJournal> {
+    const [row] = await withAdvancePurposeJournals([this.toPublic(entry)]);
+    return row;
   }
 
   async summary(filters: JournalListFilters = {}): Promise<JournalSummary> {

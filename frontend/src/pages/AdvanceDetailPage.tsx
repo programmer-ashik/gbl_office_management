@@ -7,6 +7,7 @@ import { money } from '../types/accounting'
 import {
   ADVANCE_STATUS_LABEL,
   SETTLEMENT_CASE_LABEL,
+  advanceToSettle,
   type Advance,
   type ExpenseAccountOption,
 } from '../types/advance'
@@ -146,7 +147,7 @@ export function AdvanceDetailPage() {
     setError(null)
     try {
       const spentAmount = row?.spentAmount ?? 0
-      const advanced = row?.disbursedAmount ?? row?.requestedAmount ?? 0
+      const advanced = row ? advanceToSettle(row) : 0
       await api.confirmSettlement(id, {
         returnTreasuryId:
           spentAmount < advanced ? returnTreasuryId || undefined : undefined,
@@ -383,12 +384,15 @@ export function AdvanceDetailPage() {
             </table>
             <p className="muted">
               Voucher total {money(spent)} vs advance{' '}
-              {money(row.disbursedAmount ?? row.requestedAmount)}
+              {money(advanceToSettle(row))}
+              {(row.payrollRecovered ?? 0) > 0
+                ? ` (after ${money(row.payrollRecovered ?? 0)} recovered from salary)`
+                : ''}
             </p>
-            {spent > (row.disbursedAmount ?? row.requestedAmount) ? (
+            {spent > advanceToSettle(row) ? (
               <div className="callout callout-info">
                 Actual spent exceeds advance by{' '}
-                {money(spent - (row.disbursedAmount ?? row.requestedAmount))}.
+                {money(spent - advanceToSettle(row))}.
                 This excess amount will be credited to Employee Payable as
                 Reimbursement Due.
               </div>
@@ -432,7 +436,7 @@ export function AdvanceDetailPage() {
               ))}
             </tbody>
           </table>
-          {(row.spentAmount ?? 0) < (row.disbursedAmount ?? row.requestedAmount) ? (
+          {(row.spentAmount ?? 0) < advanceToSettle(row) ? (
             <label>
               Return unspent to
               <Select
@@ -443,13 +447,10 @@ export function AdvanceDetailPage() {
               />
             </label>
           ) : null}
-          {(row.spentAmount ?? 0) > (row.disbursedAmount ?? row.requestedAmount) ? (
+          {(row.spentAmount ?? 0) > advanceToSettle(row) ? (
             <div className="callout callout-info">
               Actual spent exceeds advance by{' '}
-              {money(
-                (row.spentAmount ?? 0) -
-                  (row.disbursedAmount ?? row.requestedAmount),
-              )}
+              {money((row.spentAmount ?? 0) - advanceToSettle(row))}
               . Confirming will credit Employee Payable (2121) for the excess.
             </div>
           ) : null}

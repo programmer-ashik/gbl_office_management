@@ -106,6 +106,35 @@ describe('buildSettlementJournalLines', () => {
     expect(EMPLOYEE_PAYABLE_CODE).toBe('2121');
   });
 
+  it('carries the employee purpose on generated lines, keeping voucher text', () => {
+    const purpose = 'Site visit to Gazipur for slab casting';
+    const result = buildSettlementJournalLines({
+      employeeId,
+      advancedMinor: toMinorUnits(10000),
+      vouchers: [
+        {
+          accountCode: '5110',
+          accountName: 'Project Materials',
+          amountMinor: toMinorUnits(4000),
+          description: 'Cement 10 bags',
+        },
+        {
+          accountCode: '5120',
+          accountName: 'Site Transport',
+          amountMinor: toMinorUnits(3000),
+        },
+      ],
+      returnAccountCode: '1111',
+      purpose,
+    });
+    expect(result.lines).toEqual([
+      expect.objectContaining({ accountCode: '5110', description: 'Cement 10 bags' }),
+      expect.objectContaining({ accountCode: '5120', description: purpose }),
+      expect.objectContaining({ accountCode: '1111', description: purpose }),
+      expect.objectContaining({ accountCode: ADVANCE_ASSET_CODE, description: purpose }),
+    ]);
+  });
+
   it('builds reimbursement payout clearing employee payable', () => {
     const lines = buildReimbursementJournalLines({
       employeeId,

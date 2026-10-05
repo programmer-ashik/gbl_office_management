@@ -63,6 +63,7 @@ import type {
 import type { CreateProjectBody, Project, ProjectStatus } from '../types/project'
 import type {
   PayrollEmployee,
+  PayrollOpenAdvance,
   PayrollRun,
   PayrollSettings,
   SalaryBreakdownPreview,
@@ -1306,6 +1307,19 @@ export const api = {
   generatePayroll: (body: { periodYear: number; periodMonth: number }) =>
     request<PayrollRun>('/payroll/runs', {
       method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  payrollOpenAdvances: (id: string) =>
+    request<PayrollOpenAdvance[]>(`/payroll/runs/${id}/open-advances`),
+  setPayrollAdvanceDeductions: (
+    id: string,
+    body: {
+      employeeId: string
+      deductions: Array<{ advanceId: string; amount: number }>
+    },
+  ) =>
+    request<PayrollRun>(`/payroll/runs/${id}/advance-deductions`, {
+      method: 'PUT',
       body: JSON.stringify(body),
     }),
   postPayroll: (

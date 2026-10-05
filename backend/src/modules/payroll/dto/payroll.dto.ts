@@ -255,6 +255,26 @@ export class GeneratePayrollDto {
   periodMonth: number;
 }
 
+export class PayrollAdvanceDeductionDto {
+  @IsMongoId()
+  advanceId: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  amount: number;
+}
+
+/** Replaces one employee's project-advance recovery on a draft payroll run. */
+export class SetPayrollAdvanceDeductionsDto {
+  @IsMongoId()
+  employeeId: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PayrollAdvanceDeductionDto)
+  deductions: PayrollAdvanceDeductionDto[];
+}
+
 export class PostPayrollDto {
   /**
    * Chart-of-accounts expense leaf for HQ / office salary (default 5230).

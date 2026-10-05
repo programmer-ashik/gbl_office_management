@@ -16,6 +16,7 @@ export type CompanyBranding = {
   companyName: string
   address: string
   logoDataUrl: string | null
+  taxId?: string
 }
 
 let cached: Promise<CompanyBranding> | null = null
@@ -34,6 +35,7 @@ async function resolveBranding(): Promise<CompanyBranding> {
     companyName: template.headerConfig.companyName?.trim() || DEFAULT_COMPANY_NAME,
     address: voucherAddress(template) || DEFAULT_COMPANY_ADDRESS,
     logoDataUrl,
+    taxId: template.headerConfig.taxId?.trim() || undefined,
   }
 }
 

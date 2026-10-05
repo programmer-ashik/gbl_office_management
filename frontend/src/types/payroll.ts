@@ -145,6 +145,21 @@ export type PayrollLine = {
   }>
 }
 
+/** A disbursed project advance that can be recovered from this run's salary. */
+export type PayrollOpenAdvance = {
+  employeeId: string
+  advanceId: string
+  advanceNumber: string
+  purpose: string
+  projectCode: string | null
+  projectName: string | null
+  disbursedAt: string | null
+  disbursed: number
+  recovered: number
+  outstanding: number
+  deducting: number
+}
+
 export type PayrollRun = {
   id: string
   sheetNumber: string

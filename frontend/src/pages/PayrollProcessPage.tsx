@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { Select } from "../components/ui";
+import { Modal, Select } from "../components/ui";
 import { AccountType, money, type Account } from "../types/accounting";
-import { PAYROLL_STATUS_LABEL, type PayrollRun } from "../types/payroll";
+import {
+  PAYROLL_STATUS_LABEL,
+  type PayrollOpenAdvance,
+  type PayrollRun,
+} from "../types/payroll";
 import type { TreasuryAccount } from "../types/banking";
 import { MetricCard } from "../components/MetricCard";
 import { SalarySlipDocument } from "../components/SalarySlipDocument";
@@ -83,6 +87,86 @@ export function PayrollProcessPage() {
   const periodRun = runs.find(
     (row) => row.periodYear === periodYear && row.periodMonth === periodMonth,
   );
+  const draftRunId = periodRun?.status === "draft" ? periodRun.id : null;
+
+  const [openAdvances, setOpenAdvances] = useState<PayrollOpenAdvance[]>([]);
+  const [adjustEmployeeId, setAdjustEmployeeId] = useState<string | null>(null);
+  const [adjustAmounts, setAdjustAmounts] = useState<Record<string, string>>({});
+  const [adjustError, setAdjustError] = useState<string | null>(null);
+
+  async function loadOpenAdvances(runId: string) {
+    setOpenAdvances(await api.payrollOpenAdvances(runId));
+  }
+
+  useEffect(() => {
+    if (!draftRunId) {
+      setOpenAdvances([]);
+      return;
+    }
+    loadOpenAdvances(draftRunId).catch(() => setOpenAdvances([]));
+  }, [draftRunId]);
+
+  const advancesByEmployee = useMemo(() => {
+    const map = new Map<string, PayrollOpenAdvance[]>();
+    for (const row of openAdvances) {
+      map.set(row.employeeId, [...(map.get(row.employeeId) ?? []), row]);
+    }
+    return map;
+  }, [openAdvances]);
+
+  const adjustLine = periodRun?.lines.find(
+    (line) => line.employeeId === adjustEmployeeId,
+  );
+  const adjustRows = adjustEmployeeId
+    ? (advancesByEmployee.get(adjustEmployeeId) ?? [])
+    : [];
+  const adjustAvailable = adjustLine
+    ? adjustLine.gross -
+      adjustLine.structuralDeductions -
+      (adjustLine.totalFacilityDeductions ?? 0)
+    : 0;
+  const adjustTotal = adjustRows.reduce(
+    (sum, row) => sum + (Number(adjustAmounts[row.advanceId]) || 0),
+    0,
+  );
+  const adjustOver =
+    Math.round(adjustTotal * 100) > Math.round(adjustAvailable * 100);
+
+  function openAdjust(employeeId: string) {
+    const rows = advancesByEmployee.get(employeeId) ?? [];
+    setAdjustAmounts(
+      Object.fromEntries(
+        rows.map((row) => [row.advanceId, row.deducting ? String(row.deducting) : ""]),
+      ),
+    );
+    setAdjustError(null);
+    setAdjustEmployeeId(employeeId);
+  }
+
+  async function onSaveAdjust() {
+    if (!draftRunId || !adjustEmployeeId) return;
+    setSaving(true);
+    setAdjustError(null);
+    try {
+      await api.setPayrollAdvanceDeductions(draftRunId, {
+        employeeId: adjustEmployeeId,
+        deductions: adjustRows
+          .map((row) => ({
+            advanceId: row.advanceId,
+            amount: Number(adjustAmounts[row.advanceId]) || 0,
+          }))
+          .filter((row) => row.amount > 0),
+      });
+      await Promise.all([load(), loadOpenAdvances(draftRunId)]);
+      setAdjustEmployeeId(null);
+    } catch (err) {
+      setAdjustError(
+        err instanceof Error ? err.message : "Unable to update advance deduction",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const salaryExpenseOptions = useMemo(() => {
     const byCode = new Map(accounts.map((row) => [row.code, row]));
@@ -250,28 +334,52 @@ export function PayrollProcessPage() {
                     <th>Employee</th>
                     <th className='num'>Gross</th>
                     <th className='num'>PF / Tax / Adv</th>
-                    <th className='num'>Open advances</th>
+                    <th className='num'>Advance recovery</th>
                     <th className='num'>Net</th>
+                    {draftRunId ? <th>Open project advances</th> : null}
                   </tr>
                 </thead>
                 <tbody>
-                  {periodRun.lines.map((line) => (
-                    <tr key={line.employeeId}>
-                      <td>{line.employeeName}</td>
-                      <td className='num'>{money(line.gross)}</td>
-                      <td className='num'>
-                        {money(
-                          (line.providentFund ?? 0) +
-                            (line.taxDeduction ?? 0) +
-                            (line.structureAdvance ?? 0),
-                        )}
-                      </td>
-                      <td className='num'>
-                        {money(line.totalAdvanceDeductions)}
-                      </td>
-                      <td className='num'>{money(line.netPay)}</td>
-                    </tr>
-                  ))}
+                  {periodRun.lines.map((line) => {
+                    const open = advancesByEmployee.get(line.employeeId) ?? [];
+                    const openTotal = open.reduce(
+                      (sum, row) => sum + row.outstanding,
+                      0,
+                    );
+                    return (
+                      <tr key={line.employeeId}>
+                        <td>{line.employeeName}</td>
+                        <td className='num'>{money(line.gross)}</td>
+                        <td className='num'>
+                          {money(
+                            (line.providentFund ?? 0) +
+                              (line.taxDeduction ?? 0) +
+                              (line.structureAdvance ?? 0),
+                          )}
+                        </td>
+                        <td className='num'>
+                          {money(line.totalAdvanceDeductions)}
+                        </td>
+                        <td className='num'>{money(line.netPay)}</td>
+                        {draftRunId ? (
+                          <td>
+                            {open.length > 0 ? (
+                              <button
+                                type='button'
+                                className='ghost'
+                                disabled={saving}
+                                onClick={() => openAdjust(line.employeeId)}
+                              >
+                                Adjust · {open.length} open ({money(openTotal)})
+                              </button>
+                            ) : (
+                              <span className='muted'>None</span>
+                            )}
+                          </td>
+                        ) : null}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -290,6 +398,11 @@ export function PayrollProcessPage() {
                     />
                   </label>
                 </div>
+                <p className='muted'>
+                  Project advances are not cut from salary automatically. Use
+                  Adjust on an employee to recover an open advance in this
+                  payroll before posting.
+                </p>
                 <p className='muted'>
                   Accrual posts Dr this head for HQ / office salary (default{" "}
                   {DEFAULT_SALARY_EXPENSE} Office Employee Salary). Project time
@@ -430,6 +543,104 @@ export function PayrollProcessPage() {
       </section>
 
       {error ? <p className='form-error'>{error}</p> : null}
+
+      <Modal
+        open={adjustEmployeeId != null && adjustLine != null}
+        title={`Advance recovery · ${adjustLine?.employeeName ?? ""}`}
+        description='Choose how much of each open project advance to cut from this salary. Leave blank to skip.'
+        onClose={() => setAdjustEmployeeId(null)}
+        wide
+      >
+        <div className='table-wrap'>
+          <table>
+            <thead>
+              <tr>
+                <th>Advance</th>
+                <th>Purpose</th>
+                <th className='num'>Disbursed</th>
+                <th className='num'>Recovered</th>
+                <th className='num'>Outstanding</th>
+                <th className='num'>Deduct now</th>
+              </tr>
+            </thead>
+            <tbody>
+              {adjustRows.map((row) => (
+                <tr key={row.advanceId}>
+                  <td>
+                    <Link to={`/advances/${row.advanceId}`}>{row.advanceNumber}</Link>
+                    {row.projectCode ? (
+                      <span className='muted'> · {row.projectCode}</span>
+                    ) : null}
+                  </td>
+                  <td>{row.purpose}</td>
+                  <td className='num'>{money(row.disbursed)}</td>
+                  <td className='num'>{money(row.recovered)}</td>
+                  <td className='num'>{money(row.outstanding)}</td>
+                  <td className='num'>
+                    <div className='form-actions'>
+                      <input
+                        inputMode='decimal'
+                        value={adjustAmounts[row.advanceId] ?? ""}
+                        placeholder='0.00'
+                        style={{ maxWidth: 120 }}
+                        onChange={(e) =>
+                          setAdjustAmounts((current) => ({
+                            ...current,
+                            [row.advanceId]: e.target.value,
+                          }))
+                        }
+                      />
+                      <button
+                        type='button'
+                        className='ghost'
+                        onClick={() =>
+                          setAdjustAmounts((current) => ({
+                            ...current,
+                            [row.advanceId]: String(row.outstanding),
+                          }))
+                        }
+                      >
+                        Full
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className='muted'>
+          Salary available after PF, tax and installments{" "}
+          {money(adjustAvailable)} · Recovering {money(adjustTotal)} · Net pay
+          becomes {money(adjustAvailable - adjustTotal)}
+        </p>
+        {adjustOver ? (
+          <p className='form-error'>
+            Recovery is more than the salary available this month.
+          </p>
+        ) : null}
+        {adjustError ? <p className='form-error'>{adjustError}</p> : null}
+        <div className='form-actions'>
+          <button
+            type='button'
+            className='ghost'
+            onClick={() =>
+              setAdjustAmounts(
+                Object.fromEntries(adjustRows.map((row) => [row.advanceId, ""])),
+              )
+            }
+          >
+            Clear all
+          </button>
+          <button
+            type='button'
+            disabled={saving || adjustOver}
+            onClick={() => void onSaveAdjust()}
+          >
+            {saving ? "Saving…" : "Save recovery"}
+          </button>
+        </div>
+      </Modal>
     </>
   );
 }

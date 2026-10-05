@@ -1,13 +1,16 @@
+import type { ReactNode } from 'react'
 import { Modal } from './ui'
 
 export function VoucherPdfPreview({
   url,
   title,
   onClose,
+  actions,
 }: {
   url: string | null
   title: string
   onClose: () => void
+  actions?: ReactNode
 }) {
   return (
     <Modal open={url != null} title={title} onClose={onClose} wide>
@@ -24,6 +27,7 @@ export function VoucherPdfPreview({
           }}
         />
       ) : null}
+      {url && actions ? <div className="form-actions">{actions}</div> : null}
     </Modal>
   )
 }

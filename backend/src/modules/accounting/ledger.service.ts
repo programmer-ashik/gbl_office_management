@@ -4,6 +4,12 @@ import { badRequest, notFound } from '../../common/errors/app-error';
 import { fromMinorUnits } from '../../common/utils/money';
 import { SupplierBillModel } from '../ar-ap/supplier-bill.model';
 import { SupplierPaymentModel } from '../ar-ap/supplier-payment.model';
+import {
+  advancePurposesByNumber,
+  isAutoAdvanceLineText,
+  purposeFor,
+  withAdvancePurpose,
+} from '../advances/advance-narrative';
 import { GoodsMovementModel } from '../procurement/goods-movement.model';
 import { rollupBalances } from './account-rollup';
 import { AccountModel } from './account.model';
@@ -380,8 +386,19 @@ export class LedgerService {
           .lean()
           .exec()
       : [];
+    const purposes = await advancePurposesByNumber(
+      journals.map((row) => row.reference),
+    );
     const journalById = new Map(
-      journals.map((row) => [row._id.toString(), row]),
+      journals.map((row) => {
+        const purpose = purposeFor(purposes, row.reference);
+        return [
+          row._id.toString(),
+          purpose
+            ? { ...row, lines: withAdvancePurpose(row.lines, purpose) }
+            : row,
+        ];
+      }),
     );
 
     const customerByProject: Map<string, CustomerRef> =
@@ -405,11 +422,16 @@ export class LedgerService {
           ? customerByProject.get(line.projectId.toString())
           : undefined;
       const memo = journal?.memo || line.memo;
+      const purpose = purposeFor(purposes, journal?.reference);
       const narrative = ledgerLineNarrative(
         {
           accountCode: line.accountCode,
           debitMinor: line.debitMinor,
-          description: line.description,
+          description:
+            purpose &&
+            isAutoAdvanceLineText(line.description, line.accountName)
+              ? purpose
+              : line.description,
         },
         memo,
         journal?.lines ?? [],
