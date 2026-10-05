@@ -58,6 +58,7 @@ import { BalanceSheetTemplateBuilderPage } from "./pages/BalanceSheetTemplateBui
 import { JournalVoucherTemplateBuilderPage } from "./pages/ReportTemplateBuilderPage";
 import { AccountLedgerPage } from "./pages/AccountLedgerPage";
 import { CustomersPage } from "./pages/CustomersPage";
+import { OtherPartiesPage } from "./pages/OtherPartiesPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { VendorsPage } from "./pages/VendorsPage";
 import { AppearanceSettingsPage } from "./pages/AppearanceSettingsPage";
@@ -188,6 +189,10 @@ export default function App() {
               element={<ProcurementCatalogPage />}
             />
             <Route path='/procurement/vendors' element={<VendorsPage />} />
+            <Route
+              path='/procurement/other-parties'
+              element={<OtherPartiesPage />}
+            />
             <Route
               path='/procurement/:id'
               element={<PurchaseOrderDetailPage />}

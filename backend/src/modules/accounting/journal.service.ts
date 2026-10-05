@@ -14,6 +14,7 @@ import { withTransaction } from '../../database/connection';
 import type { AuditService } from '../governance/audit.service';
 import type { CustomersService } from '../customers/customers.service';
 import { TreasuryAccountModel } from '../banking/treasury-account.model';
+import { OtherPartyModel } from '../other-parties/other-party.model';
 import { SupplierModel } from '../procurement/supplier.model';
 import type { ProjectsService } from '../projects/projects.service';
 import { findEmployee } from '../employees/employee-records';
@@ -452,7 +453,7 @@ export class JournalService {
    */
   async postPartyOpeningBalance(input: {
     accountCode: string;
-    entityType: 'customer' | 'supplier' | 'employee';
+    entityType: 'customer' | 'supplier' | 'employee' | 'other';
     entityId: string;
     amount: number;
     userId: string;
@@ -466,16 +467,19 @@ export class JournalService {
 
     const code = input.accountCode.trim().toUpperCase();
     const capitalCode = SystemAccountCode.OWNER_CAPITAL;
-    await this.accountsService.findByCodeOrFail(code);
+    const account = await this.accountsService.findByCodeOrFail(code);
     await this.accountsService.findByCodeOrFail(capitalCode);
 
+    const partyAccount = account.partyType === input.entityType;
     const isReceivableLike =
       code === SystemAccountCode.ACCOUNTS_RECEIVABLE ||
-      code === SystemAccountCode.EMPLOYEE_ADVANCES;
+      code === SystemAccountCode.EMPLOYEE_ADVANCES ||
+      (partyAccount && account.normalBalance === 'debit');
     const isPayableLike =
       code === SystemAccountCode.ACCOUNTS_PAYABLE ||
       code === SystemAccountCode.SUBCONTRACTOR_PAYABLE ||
-      code === SystemAccountCode.EMPLOYEE_PAYABLES;
+      code === SystemAccountCode.EMPLOYEE_PAYABLES ||
+      (partyAccount && account.normalBalance === 'credit');
 
     if (!isReceivableLike && !isPayableLike) {
       throw badRequest(
@@ -1358,6 +1362,7 @@ export class JournalService {
         name: string;
         type: string;
         employeeExpenseKind?: string;
+        partyType?: string;
       }
     >;
   }> {
@@ -1373,6 +1378,7 @@ export class JournalService {
           name: account.name,
           type: account.type,
           employeeExpenseKind: account.employeeExpenseKind,
+          partyType: account.partyType,
         },
       ]),
     );
@@ -1414,6 +1420,16 @@ export class JournalService {
           );
         }
         entityType = JournalEntityType.EMPLOYEE;
+      }
+
+      // System postings keep the party they were built with.
+      if (account.partyType && entityId && (source === 'manual' || !entityType)) {
+        if (entityType && entityType !== account.partyType) {
+          throw badRequest(
+            `${account.name} (${account.code}) can only be tagged with a ${account.partyType}`,
+          );
+        }
+        entityType = account.partyType as EntityType;
       }
 
       if (entityId) {
@@ -1511,6 +1527,14 @@ export class JournalService {
         entityId: employee._id.toString(),
         entityName: `${employee.firstName} ${employee.lastName}`.trim(),
       };
+    }
+
+    if (type === JournalEntityType.OTHER) {
+      const party = await OtherPartyModel.findById(entityId).exec();
+      if (!party || !party.isActive) {
+        throw notFound('Party not found');
+      }
+      return { entityType: type, entityId, entityName: party.name };
     }
 
     if (type === JournalEntityType.TREASURY) {

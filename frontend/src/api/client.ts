@@ -1,5 +1,6 @@
 import type {
   Account,
+  AccountPartyType,
   AccountSplitBody,
   AccountSplitPlan,
   AccountSplitResult,
@@ -19,6 +20,7 @@ import type {
   BalanceSheetReport,
   TrialBalance,
 } from '../types/accounting'
+import type { OtherParty, OtherPartyKind } from '../types/otherParty'
 import type {
   AgingReport,
   ClientInvoice,
@@ -298,7 +300,7 @@ export const api = {
   },
   postPartyOpeningBalance: (body: {
     accountCode: string
-    entityType: 'customer' | 'supplier' | 'employee'
+    entityType: 'customer' | 'supplier' | 'employee' | 'other'
     entityId: string
     amount: number
     projectId?: string
@@ -317,6 +319,7 @@ export const api = {
     isPostable?: boolean
     openingBalance?: number
     employeeExpenseKind?: EmployeeExpenseKind
+    partyType?: AccountPartyType
   }) =>
     request<
       Account & {
@@ -336,6 +339,9 @@ export const api = {
       isPostable?: boolean
       /** `null` clears the flag. */
       employeeExpenseKind?: EmployeeExpenseKind | null
+      /** `null` clears the party list. */
+      partyType?: AccountPartyType | null
+      journalPicker?: boolean
     },
   ) =>
     request<Account>(`/accounts/${id}`, {
@@ -614,6 +620,31 @@ export const api = {
     request<Customer[]>(
       activeOnly ? '/customers?active=1' : '/customers',
     ),
+  otherParties: (filters: { kind?: OtherPartyKind; activeOnly?: boolean } = {}) => {
+    const query = new URLSearchParams()
+    if (filters.kind) query.set('kind', filters.kind)
+    if (filters.activeOnly) query.set('active', '1')
+    const qs = query.toString()
+    return request<OtherParty[]>(qs ? `/other-parties?${qs}` : '/other-parties')
+  },
+  createOtherParty: (body: {
+    name: string
+    kind: OtherPartyKind
+    phone?: string
+    note?: string
+  }) =>
+    request<OtherParty>('/other-parties', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateOtherParty: (
+    id: string,
+    body: { name?: string; phone?: string; note?: string; isActive?: boolean },
+  ) =>
+    request<OtherParty>(`/other-parties/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   createCustomer: (body: {
     name: string
     contactName?: string

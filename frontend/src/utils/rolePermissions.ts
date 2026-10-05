@@ -30,6 +30,11 @@ const SPLIT_SECTIONS: Record<string, string[]> = {
   reporting: ['journals'],
 }
 
+/** Pages moved to another section stay open to users granted their old one. */
+const MOVED_PATHS: Record<string, string> = {
+  '/customers': 'reporting',
+}
+
 /** Saved as `-<id>` when a split-out section was explicitly unchecked. */
 const OPT_OUT_PREFIX = '-'
 
@@ -121,13 +126,27 @@ export function sectionsForUser(
   return NAV_SECTIONS.filter((section) => allowed.has(section.id)).map(
     (section) => ({
       ...section,
-      items: section.items.map((item) =>
-        item.children
-          ? { ...item, children: [...item.children], roles: item.roles }
-          : { ...item },
-      ),
+      items: [
+        ...section.items.map((item) =>
+          item.children
+            ? { ...item, children: [...item.children], roles: item.roles }
+            : { ...item },
+        ),
+        ...movedItemsFor(section.id, allowed),
+      ],
     }),
   )
+}
+
+function movedItemsFor(sectionId: string, allowed: Set<string>) {
+  return Object.entries(MOVED_PATHS)
+    .filter(([, legacy]) => legacy === sectionId)
+    .flatMap(([path]) =>
+      NAV_SECTIONS.filter((section) => !allowed.has(section.id)).flatMap(
+        (section) =>
+          section.items.filter((item) => item.to === path).map((item) => ({ ...item })),
+      ),
+    )
 }
 
 export function isPathDenied(
@@ -169,5 +188,8 @@ export function isPathDenied(
   }
 
   if (!best) return false
-  return !allowed.has(best.id)
+  const legacy = Object.entries(MOVED_PATHS).find(
+    ([path]) => pathname === path || pathname.startsWith(`${path}/`),
+  )?.[1]
+  return !allowed.has(best.id) && !(legacy && allowed.has(legacy))
 }

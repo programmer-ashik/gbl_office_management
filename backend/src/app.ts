@@ -65,6 +65,8 @@ import {
 } from './modules/procurement/procurement.routes';
 import { CustomersService } from './modules/customers/customers.service';
 import { createCustomersRouter } from './modules/customers/customers.routes';
+import { createOtherPartiesRouter } from './modules/other-parties/other-parties.routes';
+import { OtherPartiesService } from './modules/other-parties/other-parties.service';
 import { QuotationsService } from './modules/quotations/quotations.service';
 import { createQuotationsRouter } from './modules/quotations/quotations.routes';
 import { ReportTemplatesService } from './modules/templates/report-templates.service';
@@ -94,6 +96,7 @@ export async function createApp(): Promise<Express> {
   const approvalService = new ApprovalService(projectsService, auditService);
   const ocrService = new OcrService();
   const customersService = new CustomersService();
+  const otherPartiesService = new OtherPartiesService();
   const journalService = new JournalService(
     accountsService,
     projectsService,
@@ -200,6 +203,10 @@ export async function createApp(): Promise<Express> {
   app.use(
     '/api/v1/customers',
     createCustomersRouter(customersService, authService, usersService),
+  );
+  app.use(
+    '/api/v1/other-parties',
+    createOtherPartiesRouter(otherPartiesService, authService, usersService),
   );
   app.use(
     '/api/v1/quotations',

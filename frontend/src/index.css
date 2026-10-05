@@ -3156,6 +3156,52 @@ td .ui-action-menu {
   background: rgba(235, 184, 45, 0.06);
 }
 
+.party-list-heading {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+}
+
+.party-list-names {
+  margin: 0;
+  padding: 8px 12px;
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid rgba(15, 39, 68, 0.12);
+  border-radius: var(--radius);
+}
+
+.party-list-names li {
+  padding: 4px 0;
+}
+
+.party-list-names li + li {
+  border-top: 1px solid rgba(15, 39, 68, 0.06);
+}
+
+/* Actions sits in a fixed slot at the right edge; Opening balance goes to its left. */
+.coa-row-actions {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.coa-row-actions > .ui-action-menu,
+.coa-actions-slot {
+  flex: 0 0 76px;
+}
+
+.coa-row-actions > .ui-action-menu .ui-action-trigger {
+  width: 100%;
+}
+
+.coa-row-actions > button {
+  white-space: nowrap;
+}
+
+.coa-table thead th:last-child {
+  text-align: right;
+}
+
 .coa-party-name {
   font-weight: 500;
 }

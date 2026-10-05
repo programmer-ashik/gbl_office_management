@@ -271,6 +271,20 @@ export const NAV_SECTIONS: NavSection[] = [
         hint: 'Suppliers · Ledgers',
         roles: PROJECT_VIEW,
       },
+      {
+        label: 'Customers (AR)',
+        to: '/customers',
+        icon: 'invoice',
+        hint: 'Receivable parties',
+        roles: FINANCE,
+      },
+      {
+        label: 'Other Receivable & Payable',
+        to: '/procurement/other-parties',
+        icon: 'arap',
+        hint: 'Other party lists',
+        roles: FINANCE,
+      },
     ],
   },
   {
@@ -366,13 +380,6 @@ export const NAV_SECTIONS: NavSection[] = [
             roles: FINANCE,
           },
         ],
-      },
-      {
-        label: 'Customers (AR)',
-        to: '/customers',
-        icon: 'invoice',
-        hint: 'Receivable parties',
-        roles: FINANCE,
       },
       {
         label: 'Trial Balance',

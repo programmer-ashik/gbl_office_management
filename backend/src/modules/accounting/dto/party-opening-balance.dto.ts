@@ -19,8 +19,8 @@ export class PartyOpeningBalanceDto {
   @MaxLength(12)
   accountCode: string;
 
-  @IsIn(['customer', 'supplier', 'employee'])
-  entityType: 'customer' | 'supplier' | 'employee';
+  @IsIn(['customer', 'supplier', 'employee', 'other'])
+  entityType: 'customer' | 'supplier' | 'employee' | 'other';
 
   @IsMongoId()
   entityId: string;

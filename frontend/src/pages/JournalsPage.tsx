@@ -20,11 +20,14 @@ import {
 import { Role } from "../types/auth";
 import type { Employee } from "../types/employee";
 import type { TreasuryAccount } from "../types/banking";
+import { otherPartyKindFor, type OtherParty } from "../types/otherParty";
 import type { Supplier } from "../types/procurement";
 import { projectBelongsToCustomer, type Project } from "../types/project";
 import { buildJournalMemo } from "../utils/journalMemo";
 
 type DraftLine = {
+  /** Header picked in the account column while its sub-account is still unset. */
+  groupCode?: string;
   accountCode: string;
   debit: string;
   credit: string;
@@ -67,11 +70,13 @@ export function JournalsPage() {
   const formRef = useRef<HTMLElement>(null);
 
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [pickerGroups, setPickerGroups] = useState<Account[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [treasury, setTreasury] = useState<TreasuryAccount[]>([]);
+  const [otherParties, setOtherParties] = useState<OtherParty[]>([]);
   const [summary, setSummary] = useState<JournalSummary | null>(null);
 
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -174,6 +179,7 @@ export function JournalsPage() {
         supplierRows,
         employeeRows,
         treasuryRows,
+        otherPartyRows,
       ] = await Promise.all([
         api.accounts(),
         api.projects(),
@@ -181,9 +187,17 @@ export function JournalsPage() {
         api.suppliers(),
         api.employees(),
         api.treasury(),
+        api.otherParties({ activeOnly: true }).catch(() => [] as OtherParty[]),
       ]);
+      setOtherParties(otherPartyRows);
       setAccounts(
         coa.filter((account) => account.isPostable && account.isActive),
+      );
+      setPickerGroups(
+        coa.filter(
+          (account) =>
+            account.journalPicker && !account.isPostable && account.isActive,
+        ),
       );
       setProjects(projectRows);
       setCustomers(customerRows);
@@ -303,6 +317,14 @@ export function JournalsPage() {
   }
 
   async function submit(intent: "draft" | "post") {
+    const unpicked = lines.find((line) => line.groupCode && !line.accountCode);
+    if (unpicked) {
+      const group = pickerGroupByCode.get(unpicked.groupCode ?? "");
+      setFormError(
+        `Choose which ${group?.name ?? "sub-account"} (${unpicked.groupCode}) each line is for`,
+      );
+      return;
+    }
     if (lines.some((line) => !line.accountCode)) {
       setFormError("Every line needs an account");
       return;
@@ -459,7 +481,18 @@ export function JournalsPage() {
       : undefined);
   }
 
-  function entityOptions(entityType: string) {
+  function entityOptions(entityType: string, accountCode: string) {
+    if (entityType === "other") {
+      const account = accountByCode.get(accountCode);
+      const kind = account ? otherPartyKindFor(account.normalBalance) : null;
+      return otherParties
+        .filter((row) => !kind || row.kind === kind)
+        .map((row) => ({
+          value: row.id,
+          label: row.name,
+          keywords: row.phone ?? undefined,
+        }));
+    }
     if (entityType === "customer") {
       return customers.map((row) => ({
         value: row.id,
@@ -492,10 +525,47 @@ export function JournalsPage() {
     return [];
   }
 
-  const accountOptions = accounts.map((account) => ({
-    value: account.code,
-    label: `${account.code} · ${account.name}`,
-  }));
+  const pickerGroupByCode = new Map(
+    pickerGroups.map((group) => [group.code, group]),
+  );
+
+  function subAccountsOf(groupCode: string) {
+    return accounts.filter((account) => account.parentCode === groupCode);
+  }
+
+  /** Picker header shown for this line, if its account sits under one. */
+  function lineGroupCode(line: DraftLine): string {
+    if (line.groupCode) return line.groupCode;
+    const parent = accountByCode.get(line.accountCode)?.parentCode ?? "";
+    return pickerGroupByCode.has(parent) ? parent : "";
+  }
+
+  const accountOptions = [
+    ...accounts.map((account) => ({
+      value: account.code,
+      label: `${account.code} · ${account.name}`,
+    })),
+    ...pickerGroups
+      .filter((group) => subAccountsOf(group.code).length > 0)
+      .map((group) => ({
+        value: group.code,
+        label: `${group.code} · ${group.name} (choose sub-account)`,
+      })),
+  ].sort((a, b) => a.value.localeCompare(b.value));
+
+  function selectAccount(index: number, value: string) {
+    if (pickerGroupByCode.has(value)) {
+      const current = lines[index];
+      const keep =
+        current && accountByCode.get(current.accountCode)?.parentCode === value;
+      updateLine(index, {
+        groupCode: value,
+        ...(keep ? {} : { accountCode: "" }),
+      });
+      return;
+    }
+    updateLine(index, { groupCode: "", accountCode: value });
+  }
 
   const projectOptions = [
     { value: "", label: "None" },
@@ -658,6 +728,7 @@ export function JournalsPage() {
                     accountByCode,
                   );
                   const showEntity = Boolean(rule.entityType);
+                  const groupCode = lineGroupCode(line);
                   const showProject =
                     rule.projectRequired ||
                     rule.projectOptional ||
@@ -674,10 +745,8 @@ export function JournalsPage() {
                       <tr>
                       <td>
                         <Select
-                          value={line.accountCode}
-                          onChange={(value) =>
-                            updateLine(index, { accountCode: value })
-                          }
+                          value={groupCode || line.accountCode}
+                          onChange={(value) => selectAccount(index, value)}
                           options={accountOptions}
                           searchable
                           placeholder='Account'
@@ -685,6 +754,27 @@ export function JournalsPage() {
                         />
                       </td>
                       <td>
+                        {groupCode ? (
+                          <Select
+                            value={line.accountCode}
+                            onChange={(value) =>
+                              updateLine(index, { accountCode: value })
+                            }
+                            options={[
+                              {
+                                value: "",
+                                label: `Select ${pickerGroupByCode.get(groupCode)?.name ?? "sub-account"}`,
+                              },
+                              ...subAccountsOf(groupCode).map((account) => ({
+                                value: account.code,
+                                label: account.name,
+                                keywords: account.code,
+                              })),
+                            ]}
+                            searchable
+                            required
+                          />
+                        ) : null}
                         {showEntity ? (
                           <Select
                             value={line.entityId}
@@ -701,12 +791,12 @@ export function JournalsPage() {
                                   ? `Select ${rule.label}`
                                   : `Optional ${rule.label}`,
                               },
-                              ...entityOptions(rule.entityType ?? ""),
+                              ...entityOptions(rule.entityType ?? "", line.accountCode),
                             ]}
                             searchable
                             required={rule.entityRequired}
                           />
-                        ) : (
+                        ) : groupCode ? null : (
                           <span className='muted'>—</span>
                         )}
                       </td>

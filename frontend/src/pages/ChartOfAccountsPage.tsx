@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { AccountPartyListModal } from '../components/AccountPartyListModal'
 import { AccountSplitModal } from '../components/AccountSplitModal'
 import { Role } from '../types/auth'
 import {
@@ -10,18 +11,24 @@ import {
 } from '../components/AccountOpeningModal'
 import { ActionMenu, Modal, Select } from '../components/ui'
 import {
+  ACCOUNT_PARTY_TYPE_LABELS,
   ACCOUNT_TYPE_LABEL,
   AccountType,
   EMPLOYEE_EXPENSE_KIND_LABELS,
+  dimensionRuleForAccount,
   type Account,
+  type AccountPartyType,
   type Customer,
 } from '../types/accounting'
 import type { Employee } from '../types/employee'
+import { otherPartyKindFor, type OtherParty } from '../types/otherParty'
 import type { Supplier } from '../types/procurement'
+
+type PartyEntityType = 'customer' | 'supplier' | 'employee' | 'other'
 
 const PARTY_CONTROL_ACCOUNTS: Record<
   string,
-  { entityType: 'customer' | 'supplier' | 'employee'; label: string }
+  { entityType: PartyEntityType; label: string }
 > = {
   '1151': { entityType: 'customer', label: 'Customers' },
   '2111': { entityType: 'supplier', label: 'Suppliers' },
@@ -29,6 +36,43 @@ const PARTY_CONTROL_ACCOUNTS: Record<
   '1161': { entityType: 'employee', label: 'Employees' },
   '2121': { entityType: 'employee', label: 'Employees' },
 }
+
+function partyMetaFor(account: Account) {
+  const builtIn = PARTY_CONTROL_ACCOUNTS[account.code]
+  if (builtIn) return builtIn
+  if (!account.isPostable || !account.partyType) return undefined
+  return {
+    entityType: account.partyType,
+    label: ACCOUNT_PARTY_TYPE_LABELS[account.partyType],
+  }
+}
+
+/** PDC clearing accounts; mirrors the backend block list. */
+const NO_PARTY_LIST_CODES = new Set(['1152', '2112'])
+/** Cash in hand, cash at bank and mobile wallet groups. */
+const TREASURY_GROUP_CODES = new Set(['1110', '1120', '1130'])
+
+function canHavePartyList(account: Account) {
+  return (
+    account.isPostable &&
+    !NO_PARTY_LIST_CODES.has(account.code) &&
+    !TREASURY_GROUP_CODES.has(account.parentCode ?? '') &&
+    !dimensionRuleForAccount(account.code).entityType
+  )
+}
+
+const ROLE_OPTIONS = [
+  { value: 'postable', label: 'Postable (journals post here)' },
+  { value: 'header', label: 'Header (groups sub-accounts)' },
+]
+
+const PARTY_TYPE_OPTIONS = [
+  { value: '', label: 'None' },
+  ...(Object.keys(ACCOUNT_PARTY_TYPE_LABELS) as AccountPartyType[]).map((value) => ({
+    value,
+    label: ACCOUNT_PARTY_TYPE_LABELS[value],
+  })),
+]
 
 type TreeRow =
   | {
@@ -42,7 +86,7 @@ type TreeRow =
       id: string
       parentCode: string
       depth: number
-      entityType: 'customer' | 'supplier' | 'employee'
+      entityType: PartyEntityType
       entityId: string
       name: string
       meta?: string
@@ -70,6 +114,8 @@ export function ChartOfAccountsPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [otherParties, setOtherParties] = useState<OtherParty[]>([])
+  const [partyListFor, setPartyListFor] = useState<Account | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
@@ -78,6 +124,8 @@ export function ChartOfAccountsPage() {
   const [name, setName] = useState('')
   const [type, setType] = useState<Account['type']>(AccountType.ASSET)
   const [parentCode, setParentCode] = useState('')
+  const [postable, setPostable] = useState(true)
+  const [partyType, setPartyType] = useState<AccountPartyType | ''>('')
   const [description, setDescription] = useState('')
   const [openingBalance, setOpeningBalance] = useState('')
   const [saving, setSaving] = useState(false)
@@ -87,20 +135,25 @@ export function ChartOfAccountsPage() {
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editActive, setEditActive] = useState(true)
+  const [editPartyType, setEditPartyType] = useState<AccountPartyType | ''>('')
+  const [editPostable, setEditPostable] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [opening, setOpening] = useState<OpeningRequest | null>(null)
 
   async function load() {
-    const [rows, customerRows, supplierRows, employeeRows] = await Promise.all([
-      api.accounts(),
-      api.customers(true).catch(() => [] as Customer[]),
-      api.suppliers().catch(() => [] as Supplier[]),
-      api.employees().catch(() => [] as Employee[]),
-    ])
+    const [rows, customerRows, supplierRows, employeeRows, otherRows] =
+      await Promise.all([
+        api.accounts(),
+        api.customers(true).catch(() => [] as Customer[]),
+        api.suppliers().catch(() => [] as Supplier[]),
+        api.employees().catch(() => [] as Employee[]),
+        api.otherParties().catch(() => [] as OtherParty[]),
+      ])
     setAccounts(rows)
     setCustomers(customerRows)
     setSuppliers(supplierRows)
     setEmployees(employeeRows)
+    setOtherParties(otherRows)
   }
 
   useEffect(() => {
@@ -142,7 +195,7 @@ export function ChartOfAccountsPage() {
       for (const account of children) {
         if (matchingCodes && !matchingCodes.has(account.code)) continue
         const accountChildren = childrenMap.get(account.code) ?? []
-        const partyMeta = PARTY_CONTROL_ACCOUNTS[account.code]
+        const partyMeta = partyMetaFor(account)
         const parties =
           partyMeta?.entityType === 'customer'
             ? customers.map((row) => ({
@@ -162,7 +215,19 @@ export function ChartOfAccountsPage() {
                     name: `${row.firstName} ${row.lastName}`.trim(),
                     meta: row.designation ?? row.email ?? undefined,
                   }))
-                : []
+                : partyMeta?.entityType === 'other'
+                  ? otherParties
+                      .filter(
+                        (row) =>
+                          row.isActive &&
+                          row.kind === otherPartyKindFor(account.normalBalance),
+                      )
+                      .map((row) => ({
+                        id: row.id,
+                        name: row.name,
+                        meta: row.phone ?? undefined,
+                      }))
+                  : []
         const hasChildren = accountChildren.length > 0 || parties.length > 0
         rows.push({
           kind: 'account',
@@ -204,6 +269,7 @@ export function ChartOfAccountsPage() {
     customers,
     employees,
     matchingCodes,
+    otherParties,
     search,
     suppliers,
   ])
@@ -240,6 +306,8 @@ export function ChartOfAccountsPage() {
     setName('')
     setDescription('')
     setParentCode('')
+    setPostable(true)
+    setPartyType('')
     setOpeningBalance('')
     setType(AccountType.ASSET)
     setError(null)
@@ -260,6 +328,9 @@ export function ChartOfAccountsPage() {
     setEditName(account.name)
     setEditDescription(account.description ?? '')
     setEditActive(account.isActive)
+    setEditPartyType(account.partyType ?? '')
+    setEditPostable(account.isPostable)
+    setError(null)
     setModalOpen(true)
   }
 
@@ -278,7 +349,7 @@ export function ChartOfAccountsPage() {
 
   function collapseAll() {
     const headers = accounts
-      .filter((row) => !row.isPostable || PARTY_CONTROL_ACCOUNTS[row.code])
+      .filter((row) => !row.isPostable || partyMetaFor(row))
       .map((row) => row.code)
     setCollapsed(new Set(headers))
   }
@@ -289,7 +360,7 @@ export function ChartOfAccountsPage() {
     setError(null)
     setMessage(null)
     try {
-      const amountRaw = openingBalance.trim()
+      const amountRaw = postable ? openingBalance.trim() : ''
       const amount = amountRaw === '' ? undefined : Number(amountRaw)
       if (amountRaw !== '' && (!Number.isFinite(amount) || (amount ?? 0) <= 0)) {
         throw new Error('Opening balance must be a positive number')
@@ -300,11 +371,15 @@ export function ChartOfAccountsPage() {
         type,
         description: description || undefined,
         parentCode: parentCode || undefined,
+        isPostable: postable,
+        partyType: postable && partyType ? partyType : undefined,
         openingBalance: amount,
       })
       setName('')
       setDescription('')
       setParentCode('')
+      setPostable(true)
+      setPartyType('')
       setOpeningBalance('')
       setModalOpen(false)
       if (created.openingJournalNumber) {
@@ -332,6 +407,10 @@ export function ChartOfAccountsPage() {
         name: editName,
         description: editDescription,
         isActive: editActive,
+        ...(editPostable !== editing.isPostable ? { isPostable: editPostable } : {}),
+        ...(editPostable && editPartyType !== (editing.partyType ?? '')
+          ? { partyType: editPartyType || null }
+          : {}),
       })
       setModalOpen(false)
       setEditing(null)
@@ -340,6 +419,26 @@ export function ChartOfAccountsPage() {
       setError(err instanceof Error ? err.message : 'Unable to update account')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function toggleJournalPicker(account: Account) {
+    const next = !account.journalPicker
+    setBusyId(account.id)
+    setError(null)
+    setMessage(null)
+    try {
+      await api.updateAccount(account.id, { journalPicker: next })
+      setMessage(
+        next
+          ? `${account.code} · ${account.name} now shows in Post journal; each line asks which sub-account it is for.`
+          : `${account.code} · ${account.name} no longer shows in Post journal.`,
+      )
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update account')
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -360,7 +459,13 @@ export function ChartOfAccountsPage() {
     }
   }
 
-  function partiesFor(entityType: 'customer' | 'supplier' | 'employee') {
+  function partiesFor(entityType: PartyEntityType, account: Account) {
+    if (entityType === 'other') {
+      const kind = otherPartyKindFor(account.normalBalance)
+      return otherParties
+        .filter((row) => row.isActive && row.kind === kind)
+        .map((row) => ({ id: row.id, name: row.name }))
+    }
     if (entityType === 'customer') {
       return customers.map((row) => ({ id: row.id, name: row.name }))
     }
@@ -378,7 +483,7 @@ export function ChartOfAccountsPage() {
   }
 
   function targetsForLeaf(account: Account): OpeningTarget[] {
-    const partyMeta = PARTY_CONTROL_ACCOUNTS[account.code]
+    const partyMeta = partyMetaFor(account)
     if (!partyMeta) {
       return [
         {
@@ -389,7 +494,7 @@ export function ChartOfAccountsPage() {
         },
       ]
     }
-    return partiesFor(partyMeta.entityType).map((party) => ({
+    return partiesFor(partyMeta.entityType, account).map((party) => ({
       key: `${account.code}:${party.id}`,
       accountCode: account.code,
       label: `${account.code} · ${party.name}`,
@@ -409,7 +514,7 @@ export function ChartOfAccountsPage() {
       for (const child of childrenMap.get(row.code) ?? []) collect(child)
     }
     collect(account)
-    const partyMeta = PARTY_CONTROL_ACCOUNTS[account.code]
+    const partyMeta = partyMetaFor(account)
     setMessage(null)
     setOpening({
       title: `${account.code} · ${account.name}`,
@@ -525,39 +630,44 @@ export function ChartOfAccountsPage() {
                           ? 'Receivable party'
                           : row.entityType === 'supplier'
                             ? 'Payable party'
-                            : 'Employee party'}
+                            : row.entityType === 'other'
+                              ? 'Other party'
+                              : 'Employee party'}
                       </td>
                       <td>
                         <span className="status-pill status-draft">Party</span>
                       </td>
                       <td className="muted">—</td>
                       <td>
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => {
-                            const parent = accounts.find(
-                              (a) => a.code === row.parentCode,
-                            )
-                            setError(null)
-                            setMessage(null)
-                            setOpening({
-                              title: row.name,
-                              targets: [
-                                {
-                                  key: row.id,
-                                  accountCode: row.parentCode,
-                                  label: `${row.parentCode} · ${row.name}`,
-                                  side: parent?.normalBalance ?? 'debit',
-                                  entityType: row.entityType,
-                                  entityId: row.entityId,
-                                },
-                              ],
-                            })
-                          }}
-                        >
-                          Opening balance
-                        </button>
+                        <div className="table-actions coa-row-actions">
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => {
+                              const parent = accounts.find(
+                                (a) => a.code === row.parentCode,
+                              )
+                              setError(null)
+                              setMessage(null)
+                              setOpening({
+                                title: row.name,
+                                targets: [
+                                  {
+                                    key: row.id,
+                                    accountCode: row.parentCode,
+                                    label: `${row.parentCode} · ${row.name}`,
+                                    side: parent?.normalBalance ?? 'debit',
+                                    entityType: row.entityType,
+                                    entityId: row.entityId,
+                                  },
+                                ],
+                              })
+                            }}
+                          >
+                            Opening balance
+                          </button>
+                          <span className="coa-actions-slot" aria-hidden />
+                        </div>
                       </td>
                     </tr>
                   )
@@ -592,10 +702,10 @@ export function ChartOfAccountsPage() {
                     </td>
                     <td>
                       {account.name}
-                      {PARTY_CONTROL_ACCOUNTS[account.code] ? (
+                      {partyMetaFor(account) ? (
                         <span className="muted">
                           {' '}
-                          · {PARTY_CONTROL_ACCOUNTS[account.code]?.label}
+                          · {partyMetaFor(account)?.label}
                         </span>
                       ) : null}
                       {account.employeeExpenseKind ? (
@@ -603,6 +713,9 @@ export function ChartOfAccountsPage() {
                           {' '}
                           · {EMPLOYEE_EXPENSE_KIND_LABELS[account.employeeExpenseKind]} by employee
                         </span>
+                      ) : null}
+                      {account.journalPicker && !account.isPostable ? (
+                        <span className="muted"> · picked in journal</span>
                       ) : null}
                     </td>
                     <td>{ACCOUNT_TYPE_LABEL[account.type]}</td>
@@ -615,7 +728,7 @@ export function ChartOfAccountsPage() {
                     </td>
                     <td>{account.isActive ? 'Active' : 'Inactive'}</td>
                     <td>
-                      <div className="table-actions">
+                      <div className="table-actions coa-row-actions">
                         {canPostOpening(account) ? (
                           <button
                             type="button"
@@ -632,6 +745,19 @@ export function ChartOfAccountsPage() {
                               label: 'Edit',
                               onSelect: () => openEdit(account),
                             },
+                            ...(canHavePartyList(account)
+                              ? [
+                                  {
+                                    label: account.partyType
+                                      ? 'Change party list'
+                                      : 'List suppliers / customers / employees',
+                                    onSelect: () => {
+                                      setMessage(null)
+                                      setPartyListFor(account)
+                                    },
+                                  },
+                                ]
+                              : []),
                             account.isPostable
                               ? {
                                   label: 'Split into sub-accounts',
@@ -644,6 +770,16 @@ export function ChartOfAccountsPage() {
                                   label: 'Add sub-account',
                                   onSelect: () => openCreateUnder(account),
                                 },
+                            ...(!account.isPostable && hasChildren
+                              ? [
+                                  {
+                                    label: account.journalPicker
+                                      ? 'Stop picking sub-account in journal'
+                                      : 'Pick sub-account in journal',
+                                    onSelect: () => void toggleJournalPicker(account),
+                                  },
+                                ]
+                              : []),
                             {
                               label: 'Ledger',
                               onSelect: () => {
@@ -720,6 +856,35 @@ export function ChartOfAccountsPage() {
                 ]}
               />
             </label>
+            {!editing.isPostable && !editing.isSystem ? (
+              <>
+                <label>
+                  Role
+                  <Select
+                    value={editPostable ? 'postable' : 'header'}
+                    onChange={(value) => setEditPostable(value === 'postable')}
+                    options={ROLE_OPTIONS}
+                    disabled={(childrenMap.get(editing.code)?.length ?? 0) > 0}
+                  />
+                </label>
+                {(childrenMap.get(editing.code)?.length ?? 0) > 0 ? (
+                  <p className="muted">
+                    Has sub-accounts. Delete or move them first to make this
+                    account postable (for example, to list suppliers under it).
+                  </p>
+                ) : null}
+              </>
+            ) : null}
+            {editPostable && canHavePartyList({ ...editing, isPostable: true }) ? (
+              <label>
+                Party list (optional)
+                <Select
+                  value={editPartyType}
+                  onChange={(value) => setEditPartyType(value as AccountPartyType | '')}
+                  options={PARTY_TYPE_OPTIONS}
+                />
+              </label>
+            ) : null}
             <div className="form-actions">
               <button type="submit" disabled={saving}>
                 {saving ? 'Saving…' : 'Save changes'}
@@ -751,6 +916,7 @@ export function ChartOfAccountsPage() {
                 value={parentCode}
                 onChange={(value) => {
                   setParentCode(value)
+                  if (value) setPostable(true)
                   void refreshSuggestedCode(type, value)
                 }}
                 options={parentOptions}
@@ -758,6 +924,31 @@ export function ChartOfAccountsPage() {
                 placeholder="None (top level)"
               />
             </label>
+            <label>
+              Role
+              <Select
+                value={postable ? 'postable' : 'header'}
+                onChange={(value) => setPostable(value === 'postable')}
+                options={ROLE_OPTIONS}
+              />
+            </label>
+            {postable ? (
+              <label>
+                Party list (optional)
+                <Select
+                  value={partyType}
+                  onChange={(value) => setPartyType(value as AccountPartyType | '')}
+                  options={PARTY_TYPE_OPTIONS}
+                />
+              </label>
+            ) : null}
+            <p className="muted">
+              {!postable
+                ? 'Header groups sub-accounts; journals cannot post to it.'
+                : partyType
+                  ? `Post journal will ask which ${partyType} each line is for.`
+                  : 'Journals can post to this account.'}
+            </p>
             <label>
               Code (auto)
               <input
@@ -781,19 +972,23 @@ export function ChartOfAccountsPage() {
                 onChange={(e) => setDescription(e.target.value)}
               />
             </label>
-            <label>
-              Opening balance (optional)
-              <input
-                inputMode="decimal"
-                value={openingBalance}
-                onChange={(e) => setOpeningBalance(e.target.value)}
-                placeholder="Leave blank for zero"
-              />
-            </label>
-            <p className="muted">
-              For existing accounts, customers or suppliers, use the Opening
-              balance button in the tree.
-            </p>
+            {postable ? (
+              <>
+                <label>
+                  Opening balance (optional)
+                  <input
+                    inputMode="decimal"
+                    value={openingBalance}
+                    onChange={(e) => setOpeningBalance(e.target.value)}
+                    placeholder="Leave blank for zero"
+                  />
+                </label>
+                <p className="muted">
+                  For existing accounts, customers or suppliers, use the Opening
+                  balance button in the tree.
+                </p>
+              </>
+            ) : null}
             <div className="form-actions">
               <button type="submit" disabled={saving}>
                 {saving ? 'Saving…' : 'Add'}
@@ -803,6 +998,17 @@ export function ChartOfAccountsPage() {
           </form>
         )}
       </Modal>
+
+      <AccountPartyListModal
+        account={partyListFor}
+        otherParties={otherParties}
+        onClose={() => setPartyListFor(null)}
+        onDone={(text) => {
+          setPartyListFor(null)
+          setMessage(text)
+          void load()
+        }}
+      />
 
       <AccountSplitModal
         account={splitting}

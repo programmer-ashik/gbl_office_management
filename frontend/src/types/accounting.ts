@@ -91,6 +91,7 @@ export const JournalEntityType = {
   SUPPLIER: 'supplier',
   EMPLOYEE: 'employee',
   TREASURY: 'treasury',
+  OTHER: 'other',
 } as const
 
 export type JournalEntityType =
@@ -109,6 +110,19 @@ export type Account = {
   isActive: boolean
   /** Salary / conveyance heads: journal lines are tagged with an employee. */
   employeeExpenseKind?: EmployeeExpenseKind | null
+  /** Journal lines on this account pick a party from this list. */
+  partyType?: AccountPartyType | null
+  /** Header only: Post journal lists it and asks which sub-account the line is for. */
+  journalPicker?: boolean
+}
+
+export type AccountPartyType = 'customer' | 'supplier' | 'employee' | 'other'
+
+export const ACCOUNT_PARTY_TYPE_LABELS: Record<AccountPartyType, string> = {
+  customer: 'Customers',
+  supplier: 'Suppliers',
+  employee: 'Employees',
+  other: 'Other parties',
 }
 
 export type AccountSplitBody = {
@@ -495,11 +509,18 @@ const DIMENSION_RULES: Record<string, DimensionRule> = {
   },
 }
 
+const PARTY_LINE_LABELS: Record<AccountPartyType, string> = {
+  customer: 'Customer',
+  supplier: 'Supplier',
+  employee: 'Employee',
+  other: 'Party',
+}
+
 /** Direct Project Cost (COGS). Every head opened under it needs a project. */
 export const PROJECT_COST_GROUP_CODE = '5100'
 
 type AccountTreeNode = Pick<Account, 'code' | 'parentCode'> &
-  Partial<Pick<Account, 'employeeExpenseKind'>>
+  Partial<Pick<Account, 'employeeExpenseKind' | 'partyType'>>
 
 type AccountTree =
   | ReadonlyMap<string, AccountTreeNode>
@@ -540,6 +561,16 @@ export function dimensionRuleForAccount(
     label: '',
   }
   if (!accounts) return rule
+  const partyType = accountTreeMap(accounts).get(accountCode)?.partyType
+  if (!rule.entityType && partyType) {
+    rule = {
+      ...rule,
+      entityType: partyType,
+      entityRequired: false,
+      projectOptional: true,
+      label: PARTY_LINE_LABELS[partyType],
+    }
+  }
   if (
     !rule.entityType &&
     accountTreeMap(accounts).get(accountCode)?.employeeExpenseKind

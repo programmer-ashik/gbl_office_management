@@ -5,9 +5,11 @@ import {
 } from '../../common/enums/account-type.enum';
 import { badRequest, conflict, notFound } from '../../common/errors/app-error';
 import { TreasuryAccountModel } from '../banking/treasury-account.model';
+import { dimensionRuleForAccount } from './account-dimensions';
 import {
   AccountModel,
   type AccountDocument,
+  type AccountPartyType,
   type EmployeeExpenseKind,
 } from './account.model';
 import {
@@ -20,6 +22,12 @@ import { assertAccountIsPostable } from './account-rollup';
 import { repairCashBankChart } from './cash-bank-repair';
 import { LedgerLineModel } from './ledger.model';
 import { ensurePdcAccounts } from './pdc-accounts';
+import { SystemAccountCode } from './system-account-codes';
+
+const NO_PARTY_LIST_CODES = new Set<string>([
+  SystemAccountCode.PDC_RECEIVABLE,
+  SystemAccountCode.PDC_PAYABLE,
+]);
 
 export type PublicAccount = {
   id: string;
@@ -33,6 +41,8 @@ export type PublicAccount = {
   isPostable: boolean;
   isActive: boolean;
   employeeExpenseKind: EmployeeExpenseKind | null;
+  partyType: AccountPartyType | null;
+  journalPicker: boolean;
 };
 
 export type CoaSeedResult = {
@@ -54,6 +64,31 @@ function assertEmployeeExpenseHead(account: {
   }
 }
 
+function assertPartyAccount(
+  account: {
+    code: string;
+    isPostable: boolean;
+    employeeExpenseKind?: EmployeeExpenseKind | null;
+  },
+  partyType: AccountPartyType,
+): void {
+  if (NO_PARTY_LIST_CODES.has(account.code)) {
+    throw badRequest(`${account.code} is a cheque clearing account; it cannot take a party list`);
+  }
+  if (!account.isPostable) {
+    throw badRequest('A party list can only be set on a postable account');
+  }
+  const builtIn = dimensionRuleForAccount(account.code).entityType;
+  if (builtIn) {
+    throw badRequest(`${account.code} already uses the ${builtIn} list`);
+  }
+  if (account.employeeExpenseKind && partyType !== 'employee') {
+    throw badRequest(
+      `${account.code} is tagged by employee, so its party list must be Employees`,
+    );
+  }
+}
+
 export class AccountsService {
   toPublic(account: AccountDocument): PublicAccount {
     return {
@@ -68,6 +103,8 @@ export class AccountsService {
       isPostable: account.isPostable,
       isActive: account.isActive,
       employeeExpenseKind: account.employeeExpenseKind ?? null,
+      partyType: account.partyType ?? null,
+      journalPicker: account.journalPicker === true,
     };
   }
 
@@ -250,6 +287,16 @@ export class AccountsService {
     if (dto.employeeExpenseKind) {
       assertEmployeeExpenseHead({ type: dto.type, isPostable });
     }
+    if (dto.partyType) {
+      assertPartyAccount(
+        {
+          code: dto.code,
+          isPostable,
+          employeeExpenseKind: dto.employeeExpenseKind,
+        },
+        dto.partyType,
+      );
+    }
 
     const account = await AccountModel.create({
       code: dto.code,
@@ -264,6 +311,7 @@ export class AccountsService {
       ...(dto.employeeExpenseKind
         ? { employeeExpenseKind: dto.employeeExpenseKind }
         : {}),
+      ...(dto.partyType ? { partyType: dto.partyType } : {}),
     });
 
     return this.toPublic(account);
@@ -403,13 +451,59 @@ export class AccountsService {
     if (dto.name) account.name = dto.name.trim();
     if (dto.description !== undefined) account.description = dto.description.trim();
     if (dto.isActive !== undefined) account.isActive = dto.isActive;
-    if (dto.isPostable !== undefined) account.isPostable = dto.isPostable;
+    if (dto.isPostable !== undefined && dto.isPostable !== account.isPostable) {
+      if (account.isSystem) {
+        throw badRequest(`${account.code} is a system account; its role cannot be changed`);
+      }
+      if (dto.isPostable) {
+        if (await AccountModel.exists({ parentCode: account.code })) {
+          throw badRequest(
+            `${account.code} still has sub-accounts. Delete or move them before making it postable.`,
+          );
+        }
+      } else if (await LedgerLineModel.exists({ accountId: account._id })) {
+        throw badRequest(
+          `${account.code} already has posted entries. Use "Split into sub-accounts" to turn it into a header.`,
+        );
+      }
+      account.isPostable = dto.isPostable;
+    }
+    if (!account.isPostable) account.partyType = undefined;
+    if (dto.journalPicker !== undefined) {
+      if (dto.journalPicker && account.isPostable) {
+        throw badRequest(
+          `${account.code} is postable; only a header can ask for its sub-account in Post journal`,
+        );
+      }
+      account.journalPicker = dto.journalPicker || undefined;
+    }
+    if (account.isPostable) account.journalPicker = undefined;
     if (dto.employeeExpenseKind !== undefined) {
       if (dto.employeeExpenseKind) {
         assertEmployeeExpenseHead(account);
         account.employeeExpenseKind = dto.employeeExpenseKind;
       } else {
         account.employeeExpenseKind = undefined;
+      }
+    }
+    if (dto.partyType !== undefined && (dto.partyType ?? undefined) !== account.partyType) {
+      if (dto.partyType) {
+        assertPartyAccount(account, dto.partyType);
+        if (await TreasuryAccountModel.exists({ glAccountCode: account.code })) {
+          throw badRequest(`${account.code} is a cash / bank account; it cannot take a party list`);
+        }
+        const tagged = await LedgerLineModel.exists({
+          accountId: account._id,
+          entityType: { $exists: true, $nin: [null, dto.partyType] },
+        });
+        if (tagged) {
+          throw badRequest(
+            `${account.code} already has entries tagged to another party type`,
+          );
+        }
+        account.partyType = dto.partyType;
+      } else {
+        account.partyType = undefined;
       }
     }
     await account.save();

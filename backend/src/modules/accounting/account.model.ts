@@ -15,6 +15,11 @@ export type EmployeeExpenseKind =
 
 export const EMPLOYEE_EXPENSE_KIND_VALUES = Object.values(EmployeeExpenseKind);
 
+/** Party list a user-made sub-account is kept by (picked per journal line). */
+export const ACCOUNT_PARTY_TYPES = ['customer', 'supplier', 'employee', 'other'] as const;
+
+export type AccountPartyType = (typeof ACCOUNT_PARTY_TYPES)[number];
+
 export interface IAccount {
   code: string;
   name: string;
@@ -27,6 +32,10 @@ export interface IAccount {
   isActive: boolean;
   /** Unset on most accounts; set on salary / conveyance expense heads. */
   employeeExpenseKind?: EmployeeExpenseKind;
+  /** Unset on most accounts; journal lines on it pick a party of this type. */
+  partyType?: AccountPartyType;
+  /** Header only: Post journal offers it, then asks which sub-account the line is for. */
+  journalPicker?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -58,6 +67,12 @@ const accountSchema = new Schema<IAccount>(
       enum: EMPLOYEE_EXPENSE_KIND_VALUES,
       required: false,
     },
+    partyType: {
+      type: String,
+      enum: ACCOUNT_PARTY_TYPES,
+      required: false,
+    },
+    journalPicker: { type: Boolean, required: false },
   },
   { timestamps: true, collection: 'accounts' },
 );

@@ -15,7 +15,7 @@ export type OpeningTarget = {
   label: string
   /** Side a positive amount posts to; a negative amount posts to the other side. */
   side: 'debit' | 'credit'
-  entityType?: 'customer' | 'supplier' | 'employee'
+  entityType?: 'customer' | 'supplier' | 'employee' | 'other'
   entityId?: string
 }
 
