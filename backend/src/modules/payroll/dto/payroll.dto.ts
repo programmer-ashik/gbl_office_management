@@ -275,6 +275,14 @@ export class SetPayrollAdvanceDeductionsDto {
   deductions: PayrollAdvanceDeductionDto[];
 }
 
+/** Reopen / delete a posted run: its journals are reversed, never removed. */
+export class ReopenPayrollDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
+}
+
 export class PostPayrollDto {
   /**
    * Chart-of-accounts expense leaf for HQ / office salary (default 5230).

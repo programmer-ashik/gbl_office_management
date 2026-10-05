@@ -14,6 +14,7 @@ import {
   GeneratePayrollDto,
   PostPayrollDto,
   PreviewSalaryBreakdownDto,
+  ReopenPayrollDto,
   SetPayrollAdvanceDeductionsDto,
   UpdatePayrollSettingsDto,
   UpsertSalaryStructureDto,
@@ -175,6 +176,47 @@ export function createPayrollRouter(
     asyncHandler(async (req, res) => {
       const row = await payrollService.getRun(String(req.params.id), req.user!);
       sendSuccess(res, row, 'Payroll run retrieved successfully');
+    }),
+  );
+
+  router.post(
+    '/runs/:id/regenerate',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const row = await payrollService.regenerateRun(String(req.params.id), req.user!);
+      sendSuccess(res, row, 'Payroll draft refreshed successfully');
+    }),
+  );
+
+  router.post(
+    '/runs/:id/reopen',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(ReopenPayrollDto),
+    asyncHandler(async (req, res) => {
+      const row = await payrollService.reopenRun(
+        String(req.params.id),
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Payroll reopened as draft — journals reversed');
+    }),
+  );
+
+  router.delete(
+    '/runs/:id',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const reason =
+        typeof req.query.reason === 'string' ? req.query.reason.slice(0, 300) : undefined;
+      const row = await payrollService.deleteRun(
+        String(req.params.id),
+        { reason },
+        req.user!,
+      );
+      sendSuccess(res, row, 'Payroll run deleted successfully');
     }),
   );
 

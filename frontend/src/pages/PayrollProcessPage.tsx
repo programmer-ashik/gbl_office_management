@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { Modal, Select } from "../components/ui";
+import { useAuth } from "../auth/AuthContext";
+import { ActionMenu, Modal, Select } from "../components/ui";
+import { Role } from "../types/auth";
 import { AccountType, money, type Account } from "../types/accounting";
 import {
   PAYROLL_STATUS_LABEL,
@@ -30,8 +32,23 @@ function accountPathLabel(
   return parts.join(" › ");
 }
 
+type RunAction = { kind: "reopen" | "delete"; run: PayrollRun };
+
+function periodLabel(run: PayrollRun): string {
+  const month =
+    MONTH_OPTIONS.find((m) => Number(m.value) === run.periodMonth)?.label ??
+    String(run.periodMonth).padStart(2, "0");
+  return `${run.periodYear}-${month}`;
+}
+
 export function PayrollProcessPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === Role.ADMIN;
   const [runs, setRuns] = useState<PayrollRun[]>([]);
+  const [runAction, setRunAction] = useState<RunAction | null>(null);
+  const [runActionReason, setRunActionReason] = useState("");
+  const [runActionError, setRunActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [treasury, setTreasury] = useState<TreasuryAccount[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [periodYear, setPeriodYear] = useState(new Date().getFullYear());
@@ -141,6 +158,76 @@ export function PayrollProcessPage() {
     );
     setAdjustError(null);
     setAdjustEmployeeId(employeeId);
+  }
+
+  function showRun(run: PayrollRun) {
+    setPeriodYear(run.periodYear);
+    setPeriodMonth(run.periodMonth);
+  }
+
+  async function onRegenerate(run: PayrollRun) {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const refreshed = await api.regeneratePayroll(run.id);
+      await Promise.all([load(), loadOpenAdvances(run.id)]);
+      showRun(refreshed);
+      setNotice(
+        `${refreshed.sheetNumber} refreshed from current salary structures · ${refreshed.lines.length} employee(s)`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to refresh payroll");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function askRunAction(kind: RunAction["kind"], run: PayrollRun) {
+    setRunActionReason("");
+    setRunActionError(null);
+    setRunAction({ kind, run });
+  }
+
+  async function onConfirmRunAction() {
+    if (!runAction) return;
+    const { kind, run } = runAction;
+    const reason = runActionReason.trim() || undefined;
+    setSaving(true);
+    setRunActionError(null);
+    setNotice(null);
+    try {
+      if (kind === "reopen") {
+        const reopened = await api.reopenPayroll(run.id, { reason });
+        const last = reopened.reopenHistory?.at(-1);
+        await load();
+        showRun(reopened);
+        setNotice(
+          `${reopened.sheetNumber} is a draft again${
+            last?.reversalJournalNumbers.length
+              ? ` · reversed by ${last.reversalJournalNumbers.join(", ")}`
+              : ""
+          }. Refresh or adjust it, then post again.`,
+        );
+      } else {
+        const deleted = await api.deletePayroll(run.id, reason);
+        await load();
+        setNotice(
+          `${deleted.sheetNumber} deleted${
+            deleted.reversalJournalNumbers.length
+              ? ` · journals reversed by ${deleted.reversalJournalNumbers.join(", ")}`
+              : ""
+          }.`,
+        );
+      }
+      setRunAction(null);
+    } catch (err) {
+      setRunActionError(
+        err instanceof Error ? err.message : "Unable to update payroll run",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function onSaveAdjust() {
@@ -515,34 +602,135 @@ export function PayrollProcessPage() {
               <th>Gross</th>
               <th>Net</th>
               <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {runs.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <Link to={`/payroll/${row.id}`}>{row.sheetNumber}</Link>
-                </td>
-                <td>
-                  {row.periodYear}-
-                  {MONTH_OPTIONS.find(
-                    (m) => Number(m.value) === row.periodMonth,
-                  )?.label ?? String(row.periodMonth).padStart(2, "0")}
-                </td>
-                <td>{money(row.totalGross)}</td>
-                <td>{money(row.totalNetPay)}</td>
-                <td>
-                  <span className={`status-pill status-${row.status}`}>
-                    {PAYROLL_STATUS_LABEL[row.status]}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            {runs.map((row) => {
+              const isDraft = row.status === "draft";
+              const lockedReason = "Only an admin can change a posted payroll";
+              return (
+                <tr key={row.id}>
+                  <td>
+                    <Link to={`/payroll/${row.id}`}>{row.sheetNumber}</Link>
+                    {row.reopenHistory?.length ? (
+                      <span className='muted'> · reopened {row.reopenHistory.length}×</span>
+                    ) : null}
+                  </td>
+                  <td>{periodLabel(row)}</td>
+                  <td>{money(row.totalGross)}</td>
+                  <td>{money(row.totalNetPay)}</td>
+                  <td>
+                    <span className={`status-pill status-${row.status}`}>
+                      {PAYROLL_STATUS_LABEL[row.status]}
+                    </span>
+                  </td>
+                  <td>
+                    <ActionMenu
+                      disabled={saving}
+                      items={[
+                        { label: "Open in editor", onSelect: () => showRun(row) },
+                        ...(isDraft
+                          ? [
+                              {
+                                label: "Update (refresh employees & salaries)",
+                                onSelect: () => void onRegenerate(row),
+                              },
+                              {
+                                label: "Delete draft",
+                                danger: true,
+                                onSelect: () => askRunAction("delete", row),
+                              },
+                            ]
+                          : [
+                              {
+                                label: "Update (reopen as draft)",
+                                disabled: !isAdmin,
+                                disabledReason: lockedReason,
+                                onSelect: () => askRunAction("reopen", row),
+                              },
+                              {
+                                label: "Delete (reverse journals)",
+                                danger: true,
+                                disabled: !isAdmin,
+                                disabledReason: lockedReason,
+                                onSelect: () => askRunAction("delete", row),
+                              },
+                            ]),
+                      ]}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </section>
 
+      {notice ? <p className='muted'>{notice}</p> : null}
       {error ? <p className='form-error'>{error}</p> : null}
+
+      <Modal
+        open={runAction != null}
+        title={
+          runAction
+            ? `${runAction.kind === "reopen" ? "Reopen" : "Delete"} ${runAction.run.sheetNumber} · ${periodLabel(runAction.run)}`
+            : ""
+        }
+        onClose={() => setRunAction(null)}
+      >
+        {runAction?.run.status === "draft" ? (
+          <p>
+            This draft has no journals. Deleting it removes the sheet so you can
+            generate {periodLabel(runAction.run)} again.
+          </p>
+        ) : runAction ? (
+          <>
+            <p>
+              {runAction.run.status === "disbursed"
+                ? `The payout journal ${runAction.run.journalNumber ?? ""} and the accrual journal ${runAction.run.accrualJournalNumber ?? ""}`
+                : `The accrual journal ${runAction.run.accrualJournalNumber ?? ""}`}{" "}
+              will be reversed with new reversal journals (nothing is erased from
+              the books). Advance recoveries and loan installments taken in this
+              payroll are put back on the employees.
+            </p>
+            <p className='muted'>
+              {runAction.kind === "reopen"
+                ? "The sheet becomes a draft: use Update to add the missing employee, adjust, then post and disburse again."
+                : "The sheet is then removed so the month can be generated from scratch."}
+            </p>
+            <label>
+              Reason (kept with the reversal)
+              <textarea
+                rows={2}
+                maxLength={300}
+                value={runActionReason}
+                placeholder='e.g. Missed an employee in the September payroll'
+                onChange={(e) => setRunActionReason(e.target.value)}
+              />
+            </label>
+          </>
+        ) : null}
+        {runActionError ? <p className='form-error'>{runActionError}</p> : null}
+        <div className='form-actions'>
+          <button type='button' className='ghost' onClick={() => setRunAction(null)}>
+            Cancel
+          </button>
+          <button
+            type='button'
+            disabled={saving}
+            onClick={() => void onConfirmRunAction()}
+          >
+            {saving
+              ? "Working…"
+              : runAction?.kind === "reopen"
+                ? "Reverse and reopen"
+                : runAction?.run.status === "draft"
+                  ? "Delete draft"
+                  : "Reverse and delete"}
+          </button>
+        </div>
+      </Modal>
 
       <Modal
         open={adjustEmployeeId != null && adjustLine != null}

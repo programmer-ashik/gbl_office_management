@@ -1309,6 +1309,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  regeneratePayroll: (id: string) =>
+    request<PayrollRun>(`/payroll/runs/${id}/regenerate`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  reopenPayroll: (id: string, body: { reason?: string }) =>
+    request<PayrollRun>(`/payroll/runs/${id}/reopen`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deletePayroll: (id: string, reason?: string) =>
+    request<{ id: string; sheetNumber: string; reversalJournalNumbers: string[] }>(
+      `/payroll/runs/${id}${reason ? `?reason=${encodeURIComponent(reason)}` : ''}`,
+      { method: 'DELETE' },
+    ),
   payrollOpenAdvances: (id: string) =>
     request<PayrollOpenAdvance[]>(`/payroll/runs/${id}/open-advances`),
   setPayrollAdvanceDeductions: (

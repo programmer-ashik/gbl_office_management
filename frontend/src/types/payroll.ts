@@ -176,5 +176,14 @@ export type PayrollRun = {
   journalNumber: string | null
   disbursedAt: string | null
   treasuryAccountCode: string | null
+  /** Each reopen of a posted run: journals reversed and why. */
+  reopenHistory?: Array<{
+    reopenedAt: string
+    fromStatus: string
+    accrualJournalNumber: string | null
+    journalNumber: string | null
+    reversalJournalNumbers: string[]
+    reason: string | null
+  }>
   lines: PayrollLine[]
 }

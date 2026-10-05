@@ -34,6 +34,7 @@ import type {
   GeneratePayrollDto,
   PostPayrollDto,
   PreviewSalaryBreakdownDto,
+  ReopenPayrollDto,
   SetPayrollAdvanceDeductionsDto,
   UpdatePayrollSettingsDto,
   UpsertSalaryStructureDto,
@@ -41,7 +42,7 @@ import type {
 import { AccountType } from '../../common/enums/account-type.enum';
 import { AccountModel } from '../accounting/account.model';
 import { SystemAccountCode } from '../accounting/system-account-codes';
-import { JournalEntityType } from '../accounting/journal.enums';
+import { JournalEntityType, JournalStatus } from '../accounting/journal.enums';
 import {
   SalaryFacilityKind,
   SalaryFacilityModel,
@@ -153,6 +154,14 @@ export type PublicPayrollRun = {
   journalNumber: string | null;
   disbursedAt: string | null;
   treasuryAccountCode: string | null;
+  reopenHistory: Array<{
+    reopenedAt: string;
+    fromStatus: string;
+    accrualJournalNumber: string | null;
+    journalNumber: string | null;
+    reversalJournalNumbers: string[];
+    reason: string | null;
+  }>;
   lines: Array<{
     employeeId: string;
     employeeName: string;
@@ -187,6 +196,28 @@ export type PublicPayrollRun = {
     }>;
   }>;
 };
+
+/** Run header totals; the advance total includes salary-facility installments. */
+function runTotals(
+  lines: Array<{
+    grossMinor: number;
+    structuralDeductionMinor: number;
+    totalAdvanceDeductionMinor: number;
+    totalFacilityDeductionMinor?: number;
+    netPayMinor: number;
+  }>,
+) {
+  const sum = (pick: (row: (typeof lines)[number]) => number) =>
+    lines.reduce((total, row) => total + pick(row), 0);
+  return {
+    totalGrossMinor: sum((row) => row.grossMinor),
+    totalStructuralDeductionMinor: sum((row) => row.structuralDeductionMinor),
+    totalAdvanceDeductionMinor: sum(
+      (row) => row.totalAdvanceDeductionMinor + (row.totalFacilityDeductionMinor ?? 0),
+    ),
+    totalNetPayMinor: sum((row) => row.netPayMinor),
+  };
+}
 
 export type PayrollOpenAdvance = {
   employeeId: string;
@@ -731,12 +762,7 @@ export class PayrollService {
     line.netPayMinor = availableMinor - totalMinor;
     run.markModified('lines');
 
-    run.totalAdvanceDeductionMinor = run.lines.reduce(
-      (sum, row) =>
-        sum + row.totalAdvanceDeductionMinor + (row.totalFacilityDeductionMinor ?? 0),
-      0,
-    );
-    run.totalNetPayMinor = run.lines.reduce((sum, row) => sum + row.netPayMinor, 0);
+    run.set(runTotals(run.lines));
     await run.save();
     return this.toPublicPayrollRun(run);
   }
@@ -789,45 +815,219 @@ export class PayrollService {
       throw badRequest('Payroll for this period already exists');
     }
 
-    const structures = await SalaryStructureModel.find({ isActive: true }).exec();
-    if (structures.length === 0) {
-      throw badRequest('No active salary structures found');
-    }
-
-    const lines = [];
-    for (const structure of structures) {
-      lines.push(await this.buildPayrollLine(structure, dto.periodYear, dto.periodMonth));
-    }
-
-    const totalGrossMinor = lines.reduce((sum, row) => sum + row.grossMinor, 0);
-    const totalStructuralDeductionMinor = lines.reduce(
-      (sum, row) => sum + row.structuralDeductionMinor,
-      0,
-    );
-    const totalAdvanceDeductionMinor = lines.reduce(
-      (sum, row) => sum + row.totalAdvanceDeductionMinor,
-      0,
-    );
-    const totalFacilityDeductionMinor = lines.reduce(
-      (sum, row) => sum + (row.totalFacilityDeductionMinor ?? 0),
-      0,
-    );
-    const totalNetPayMinor = lines.reduce((sum, row) => sum + row.netPayMinor, 0);
-
+    const lines = await this.buildRunLines(dto.periodYear, dto.periodMonth);
     const created = await PayrollRunModel.create({
       sheetNumber: await this.nextNumber('payroll', 'PAY'),
       status: PayrollRunStatus.DRAFT,
       periodYear: dto.periodYear,
       periodMonth: dto.periodMonth,
       lines,
-      totalGrossMinor,
-      totalStructuralDeductionMinor,
-      totalAdvanceDeductionMinor:
-        totalAdvanceDeductionMinor + totalFacilityDeductionMinor,
-      totalNetPayMinor,
+      ...runTotals(lines),
       createdBy: new Types.ObjectId(actor.userId),
     });
     return this.toPublicPayrollRun(created);
+  }
+
+  private async buildRunLines(periodYear: number, periodMonth: number) {
+    const structures = await SalaryStructureModel.find({ isActive: true }).exec();
+    if (structures.length === 0) {
+      throw badRequest('No active salary structures found');
+    }
+    const lines = [];
+    for (const structure of structures) {
+      lines.push(await this.buildPayrollLine(structure, periodYear, periodMonth));
+    }
+    return lines;
+  }
+
+  /**
+   * Rebuild a draft from the current salary structures, time logs and
+   * installments — picks up an employee added (or removed) since generating.
+   * Manual advance recovery is kept where it is still valid.
+   */
+  async regenerateRun(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<PublicPayrollRun> {
+    this.assertFinance(actor);
+    const run = await this.findRunOrFail(id);
+    if (run.status !== PayrollRunStatus.DRAFT) {
+      throw badRequest('Only a draft payroll can be refreshed — reopen it first');
+    }
+    const kept = new Map(
+      run.lines.map((line) => [
+        line.employeeId.toString(),
+        line.advanceDeductions.map((row) => ({
+          advanceId: row.advanceId,
+          amountMinor: row.amountMinor,
+        })),
+      ]),
+    );
+
+    const lines = await this.buildRunLines(run.periodYear, run.periodMonth);
+    const advanceIds = [...kept.values()].flat().map((row) => row.advanceId);
+    const advances = advanceIds.length
+      ? await AdvanceModel.find({
+          _id: { $in: advanceIds },
+          status: AdvanceStatus.DISBURSED,
+        }).exec()
+      : [];
+    const openById = new Map(advances.map((row) => [row._id.toString(), row]));
+    for (const line of lines) {
+      const available =
+        line.grossMinor - line.structuralDeductionMinor - line.totalFacilityDeductionMinor;
+      let total = 0;
+      const deductions = [];
+      for (const row of kept.get(line.employeeId.toString()) ?? []) {
+        const advance = openById.get(row.advanceId.toString());
+        if (!advance) continue;
+        const outstanding =
+          (advance.disbursedMinor ?? 0) - (advance.payrollDeductedMinor ?? 0);
+        if (row.amountMinor > outstanding || total + row.amountMinor > available) continue;
+        total += row.amountMinor;
+        deductions.push({
+          advanceId: advance._id,
+          advanceNumber: advance.advanceNumber,
+          ...(advance.projectId ? { projectId: advance.projectId } : {}),
+          amountMinor: row.amountMinor,
+        });
+      }
+      line.advanceDeductions = deductions;
+      line.totalAdvanceDeductionMinor = total;
+      line.netPayMinor = available - total;
+    }
+
+    run.set('lines', lines);
+    run.set(runTotals(lines));
+    await run.save();
+    return this.toPublicPayrollRun(run);
+  }
+
+  /**
+   * Back a posted / disbursed run out to draft: reverse its journals (they
+   * stay in the books with their reversals) and undo the advance and
+   * installment recoveries it applied.
+   */
+  async reopenRun(
+    id: string,
+    dto: ReopenPayrollDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicPayrollRun> {
+    this.assertAdmin(actor);
+    const run = await this.findRunOrFail(id);
+    if (run.status === PayrollRunStatus.DRAFT) {
+      throw badRequest('This payroll is already a draft');
+    }
+    await this.unwindPostedRun(run, actor, dto.reason);
+    await run.save();
+    return this.toPublicPayrollRun(run);
+  }
+
+  async deleteRun(
+    id: string,
+    dto: ReopenPayrollDto,
+    actor: AuthenticatedUser,
+  ): Promise<{ id: string; sheetNumber: string; reversalJournalNumbers: string[] }> {
+    this.assertFinance(actor);
+    const run = await this.findRunOrFail(id);
+    let reversalJournalNumbers: string[] = [];
+    if (run.status !== PayrollRunStatus.DRAFT) {
+      this.assertAdmin(actor);
+      reversalJournalNumbers = await this.unwindPostedRun(run, actor, dto.reason);
+    }
+    await PayrollRunModel.deleteOne({ _id: run._id }).exec();
+    return { id: run._id.toString(), sheetNumber: run.sheetNumber, reversalJournalNumbers };
+  }
+
+  private async unwindPostedRun(
+    run: PayrollRunDocument,
+    actor: AuthenticatedUser,
+    reason?: string,
+  ): Promise<string[]> {
+    const advanceAmounts = new Map<string, number>();
+    const facilityAmounts = new Map<string, number>();
+    for (const line of run.lines) {
+      for (const row of line.advanceDeductions) {
+        const key = row.advanceId.toString();
+        advanceAmounts.set(key, (advanceAmounts.get(key) ?? 0) + row.amountMinor);
+      }
+      for (const row of line.facilityDeductions ?? []) {
+        const key = row.facilityId.toString();
+        facilityAmounts.set(key, (facilityAmounts.get(key) ?? 0) + row.amountMinor);
+      }
+    }
+    const advances = advanceAmounts.size
+      ? await AdvanceModel.find({
+          _id: { $in: [...advanceAmounts.keys()].map((key) => new Types.ObjectId(key)) },
+        }).exec()
+      : [];
+    for (const advance of advances) {
+      if (advance.status === AdvanceStatus.SETTLED && advance.settlementJournalId) {
+        throw badRequest(
+          `${advance.advanceNumber} was settled by vouchers after this payroll recovered part of it, so this payroll cannot be reopened`,
+        );
+      }
+    }
+
+    const reversalJournalNumbers: string[] = [];
+    for (const journalId of [run.journalId, run.accrualJournalId]) {
+      if (!journalId) continue;
+      const journal = await this.journalService.findByIdOrFail(journalId.toString());
+      if (journal.status !== JournalStatus.POSTED) continue;
+      const reversal = await this.journalService.reverse(journal._id.toString(), actor.userId);
+      reversalJournalNumbers.push(reversal.entryNumber);
+    }
+
+    for (const advance of advances) {
+      const amount = advanceAmounts.get(advance._id.toString()) ?? 0;
+      advance.payrollDeductedMinor = Math.max(0, (advance.payrollDeductedMinor ?? 0) - amount);
+      if (advance.status === AdvanceStatus.SETTLED) {
+        advance.status = AdvanceStatus.DISBURSED;
+        advance.spentMinor = undefined;
+        advance.settledAt = undefined;
+        advance.settledBy = undefined;
+      }
+      await advance.save();
+    }
+    const facilities = facilityAmounts.size
+      ? await SalaryFacilityModel.find({
+          _id: { $in: [...facilityAmounts.keys()].map((key) => new Types.ObjectId(key)) },
+        }).exec()
+      : [];
+    for (const facility of facilities) {
+      const amount = facilityAmounts.get(facility._id.toString()) ?? 0;
+      facility.repaidMinor = Math.max(0, (facility.repaidMinor ?? 0) - amount);
+      if (facility.status === SalaryFacilityStatus.SETTLED && facility.repaidMinor < facility.principalMinor) {
+        facility.status = SalaryFacilityStatus.ACTIVE;
+        facility.settledAt = undefined;
+      }
+      await facility.save();
+    }
+
+    run.reopenHistory = [
+      ...(run.reopenHistory ?? []),
+      {
+        reopenedAt: new Date(),
+        reopenedBy: new Types.ObjectId(actor.userId),
+        fromStatus: run.status,
+        accrualJournalNumber: run.accrualJournalNumber,
+        journalNumber: run.journalNumber,
+        reversalJournalNumbers,
+        reason: reason?.trim() || undefined,
+      },
+    ];
+    run.status = PayrollRunStatus.DRAFT;
+    run.accrualJournalId = undefined;
+    run.accrualJournalNumber = undefined;
+    run.postedAt = undefined;
+    run.postedBy = undefined;
+    run.treasuryId = undefined;
+    run.treasuryAccountCode = undefined;
+    run.journalId = undefined;
+    run.journalNumber = undefined;
+    run.disbursedAt = undefined;
+    run.disbursedBy = undefined;
+    return reversalJournalNumbers;
   }
 
   /** Step 1 — Post accrual journal (draft → posted). */
@@ -1256,6 +1456,14 @@ export class PayrollService {
       journalNumber: row.journalNumber ?? null,
       disbursedAt: row.disbursedAt ? row.disbursedAt.toISOString() : null,
       treasuryAccountCode: row.treasuryAccountCode ?? null,
+      reopenHistory: (row.reopenHistory ?? []).map((item) => ({
+        reopenedAt: item.reopenedAt.toISOString(),
+        fromStatus: item.fromStatus,
+        accrualJournalNumber: item.accrualJournalNumber ?? null,
+        journalNumber: item.journalNumber ?? null,
+        reversalJournalNumbers: item.reversalJournalNumbers ?? [],
+        reason: item.reason ?? null,
+      })),
       lines: row.lines.map((line) => ({
         employeeId: line.employeeId.toString(),
         employeeName: line.employeeName,
@@ -1297,6 +1505,12 @@ export class PayrollService {
   private assertFinance(actor: AuthenticatedUser): void {
     if (!FINANCE_ROLES.has(actor.role)) {
       throw forbidden('Finance role required');
+    }
+  }
+
+  private assertAdmin(actor: AuthenticatedUser): void {
+    if (actor.role !== Role.ADMIN) {
+      throw forbidden('Only an admin can reopen or delete a posted payroll');
     }
   }
 

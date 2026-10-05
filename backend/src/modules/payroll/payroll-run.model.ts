@@ -62,9 +62,21 @@ export interface IPayrollRun {
   journalNumber?: string;
   disbursedAt?: Date;
   disbursedBy?: Types.ObjectId;
+  /** Each time a posted run was reopened: the journals reversed and why. */
+  reopenHistory?: IPayrollReopen[];
   createdBy: Types.ObjectId;
   createdAt?: Date;
   updatedAt?: Date;
+}
+
+export interface IPayrollReopen {
+  reopenedAt: Date;
+  reopenedBy: Types.ObjectId;
+  fromStatus: string;
+  accrualJournalNumber?: string;
+  journalNumber?: string;
+  reversalJournalNumbers: string[];
+  reason?: string;
 }
 
 export type PayrollRunDocument = HydratedDocument<IPayrollRun>;
@@ -162,6 +174,23 @@ const payrollRunSchema = new Schema<IPayrollRun>(
     journalNumber: { type: String },
     disbursedAt: { type: Date },
     disbursedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    reopenHistory: {
+      type: [
+        new Schema<IPayrollReopen>(
+          {
+            reopenedAt: { type: Date, required: true },
+            reopenedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+            fromStatus: { type: String, required: true },
+            accrualJournalNumber: { type: String },
+            journalNumber: { type: String },
+            reversalJournalNumbers: { type: [String], default: [] },
+            reason: { type: String, trim: true, maxlength: 300 },
+          },
+          { _id: false },
+        ),
+      ],
+      required: false,
+    },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true, collection: 'payroll_runs' },
