@@ -150,7 +150,8 @@ async function drawSlip(
     dy += 16;
   });
 
-  doc.y = Math.max(y, dy) + 16;
+  const netTop = Math.max(y, dy) + 16;
+  doc.y = netTop;
   doc.rect(left, doc.y, width, 36).fill('#1d4ed8');
   doc
     .fillColor('#ffffff')
@@ -163,7 +164,27 @@ async function drawSlip(
       align: 'right',
     });
 
-  doc.moveDown(3);
+  const signY = netTop + 36 + 70;
+  const signW = 180;
+  const signatures: Array<[string, string, number]> = [
+    ['Employee signature', line.employeeName, left],
+    ['Authorized signature', 'For the company', right - signW],
+  ];
+  doc.strokeColor('#5a6578').lineWidth(0.6);
+  for (const [label, caption, x] of signatures) {
+    doc.moveTo(x, signY).lineTo(x + signW, signY).stroke();
+    doc
+      .fillColor('#152033')
+      .fontSize(9.5)
+      .text(label, x, signY + 5, { width: signW, align: 'center' });
+    doc
+      .fillColor('#5a6578')
+      .fontSize(8)
+      .text(caption, x, signY + 18, { width: signW, align: 'center' });
+  }
+
+  doc.x = left;
+  doc.y = signY + 44;
   doc.fontSize(8).fillColor('#5a6578');
   doc.text(
     'Accrual: Dr 5120/5230 · Cr 1161 / 2133 / 2131 / 2121. Disbursement: Dr 2121 · Cr Cash/Bank.',

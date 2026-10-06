@@ -13,7 +13,12 @@ import {
 import type { TreasuryAccount } from "../types/banking";
 import { MetricCard } from "../components/MetricCard";
 import { SalarySlipDocument } from "../components/SalarySlipDocument";
+import { VoucherPdfPreview } from "../components/VoucherPdfPreview";
 import { MONTH_OPTIONS } from "../utils/months";
+import {
+  downloadSalarySheetPdf,
+  salarySheetPreviewUrl,
+} from "../utils/payrollSalarySheetPdf";
 
 const DEFAULT_SALARY_EXPENSE = "5230";
 
@@ -65,6 +70,11 @@ export function PayrollProcessPage() {
   const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState("GBL Enterprise");
   const [showSlipPreview, setShowSlipPreview] = useState(false);
+  const [sheetPreview, setSheetPreview] = useState<{
+    url: string;
+    run: PayrollRun;
+  } | null>(null);
+  const [sheetBusy, setSheetBusy] = useState(false);
 
   async function load() {
     const [runRows, channels, chart, jvTpl] = await Promise.all([
@@ -158,6 +168,32 @@ export function PayrollProcessPage() {
     );
     setAdjustError(null);
     setAdjustEmployeeId(employeeId);
+  }
+
+  async function onSalarySheet(run: PayrollRun) {
+    setSheetBusy(true);
+    setError(null);
+    try {
+      const url = await salarySheetPreviewUrl({
+        run,
+        preparedBy: user?.email,
+      });
+      setSheetPreview((current) => {
+        if (current) URL.revokeObjectURL(current.url);
+        return { url, run };
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to build salary sheet PDF",
+      );
+    } finally {
+      setSheetBusy(false);
+    }
+  }
+
+  function closeSheetPreview() {
+    if (sheetPreview) URL.revokeObjectURL(sheetPreview.url);
+    setSheetPreview(null);
   }
 
   function showRun(run: PayrollRun) {
@@ -499,6 +535,16 @@ export function PayrollProcessPage() {
                 <div className='form-actions'>
                   <button
                     type='button'
+                    className='ghost'
+                    disabled={sheetBusy || periodRun.lines.length === 0}
+                    onClick={() => void onSalarySheet(periodRun)}
+                  >
+                    {sheetBusy
+                      ? "Preparing…"
+                      : "Salary sheet PDF (for MD approval)"}
+                  </button>
+                  <button
+                    type='button'
                     disabled={saving || !salaryExpenseAccountCode}
                     onClick={() => void onPost(periodRun.id)}
                   >
@@ -630,6 +676,14 @@ export function PayrollProcessPage() {
                       disabled={saving}
                       items={[
                         { label: "Open in editor", onSelect: () => showRun(row) },
+                        {
+                          label: isDraft
+                            ? "Salary sheet PDF (for MD approval)"
+                            : "Salary sheet PDF",
+                          disabled: sheetBusy || row.lines.length === 0,
+                          disabledReason: "No employees on this sheet",
+                          onSelect: () => void onSalarySheet(row),
+                        },
                         ...(isDraft
                           ? [
                               {
@@ -666,6 +720,31 @@ export function PayrollProcessPage() {
           </tbody>
         </table>
       </section>
+
+      <VoucherPdfPreview
+        url={sheetPreview?.url ?? null}
+        title={
+          sheetPreview
+            ? `Salary sheet ${sheetPreview.run.sheetNumber} · ${periodLabel(sheetPreview.run)}`
+            : "Salary sheet"
+        }
+        onClose={closeSheetPreview}
+        actions={
+          sheetPreview ? (
+            <button
+              type='button'
+              onClick={() =>
+                void downloadSalarySheetPdf({
+                  run: sheetPreview.run,
+                  preparedBy: user?.email,
+                })
+              }
+            >
+              Download PDF
+            </button>
+          ) : null
+        }
+      />
 
       {notice ? <p className='muted'>{notice}</p> : null}
       {error ? <p className='form-error'>{error}</p> : null}

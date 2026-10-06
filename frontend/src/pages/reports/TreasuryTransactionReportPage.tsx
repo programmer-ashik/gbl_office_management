@@ -23,6 +23,7 @@ export function TreasuryTransactionReportPage({ mode }: Props) {
       memo: string
       description: string
       counterpart?: string | null
+      reference?: string | null
       debit: number
       credit: number
       runningBalance?: number
@@ -126,7 +127,9 @@ export function TreasuryTransactionReportPage({ mode }: Props) {
         ...lines.map((row) => [
           row.date.slice(0, 10),
           row.entryNumber,
-          row.counterpart || '—',
+          [row.counterpart, row.reference ? `Ref ${row.reference}` : '']
+            .filter(Boolean)
+            .join('\n') || '—',
           row.description || row.memo,
           row.debit ? money(row.debit) : '',
           row.credit ? money(row.credit) : '',
@@ -219,7 +222,12 @@ export function TreasuryTransactionReportPage({ mode }: Props) {
                 <td>{row.date.slice(0, 10)}</td>
                 <td>{row.entryNumber}</td>
                 <td className="ledger-reference-cell">
-                  {row.counterpart || '—'}
+                  {row.counterpart || (row.reference ? null : '—')}
+                  {row.reference ? (
+                    <span className="muted ledger-reference-no">
+                      Ref {row.reference}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="ledger-reference-cell">
                   {row.description || row.memo}

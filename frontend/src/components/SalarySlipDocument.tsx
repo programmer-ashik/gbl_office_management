@@ -202,6 +202,19 @@ export function SalarySlipDocument({
                 </p>
               </div>
             </footer>
+            <div className="flex justify-between gap-8 px-6 pb-6 pt-12 text-center text-xs">
+              {[
+                ['Employee signature', line.employeeName],
+                ['Authorized signature', 'For the company'],
+              ].map(([label, caption]) => (
+                <div key={label} className="w-56">
+                  <div className="border-t border-[var(--muted,#5a6578)] pt-1 font-semibold">
+                    {label}
+                  </div>
+                  <div className="text-[var(--muted,#5a6578)]">{caption}</div>
+                </div>
+              ))}
+            </div>
           </article>
         )
       })}

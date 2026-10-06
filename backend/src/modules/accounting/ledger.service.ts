@@ -671,7 +671,17 @@ type NarrativeJournalLine = {
   accountName: string;
   debitMinor: number;
   description?: string | null;
+  entityName?: string | null;
 };
+
+/** "Advance to Staff · Rahim Uddin" — names the employee holding the advance. */
+export function ledgerHeadLabel(row: NarrativeJournalLine): string {
+  const head = row.accountName || row.accountCode;
+  const holder = row.entityName?.trim();
+  return row.accountCode === SystemAccountCode.EMPLOYEE_ADVANCES && holder
+    ? `${head} · ${holder}`
+    : head;
+}
 
 /** Auto memo numbers look like "gbl-260929-HandCash-Site". */
 function typedText(text: string | null | undefined, memo: string): string {
@@ -710,6 +720,6 @@ export function ledgerLineNarrative(
     memo;
   const heads = (opposite.length ? opposite : others)
     .filter((row) => row.accountCode !== line.accountCode)
-    .map((row) => row.accountName || row.accountCode);
+    .map(ledgerHeadLabel);
   return { description, counterpart: uniqueJoin(heads) || null };
 }

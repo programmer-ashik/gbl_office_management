@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "../../api/client";
 import { ReportExportMenu } from "../../components/ReportExportMenu";
 import { money, type JournalEntry } from "../../types/accounting";
-import { lineDescription } from "../../utils/journalNarrative";
+import { ledgerHead, lineDescription } from "../../utils/journalNarrative";
 
 function todayIso(): string {
   const now = new Date();
@@ -60,7 +60,7 @@ export function DayReportPage() {
           date: entry.date.slice(0, 10),
           entryNumber: entry.entryNumber,
           description: lineDescription(entry, line),
-          account: line.accountName,
+          account: ledgerHead(line),
           debit: line.debit,
           credit: line.credit,
         })),

@@ -38,6 +38,11 @@ class EnvironmentVariables {
   @IsBoolean()
   MONGODB_MEMORY = false;
 
+  /** e.g. "8.8.8.8,1.1.1.1" — for networks whose DNS cannot resolve mongodb+srv records. */
+  @IsOptional()
+  @IsString()
+  MONGODB_DNS_SERVERS?: string;
+
   @IsString()
   @MinLength(32)
   JWT_ACCESS_SECRET!: string;
@@ -81,6 +86,7 @@ export type AppConfig = {
   mongodb: {
     uri: string;
     memory: boolean;
+    dnsServers: string[];
   };
   jwt: {
     accessSecret: string;
@@ -128,6 +134,10 @@ export function loadConfig(): AppConfig {
     mongodb: {
       uri: validated.MONGODB_URI,
       memory: validated.MONGODB_MEMORY,
+      dnsServers: (validated.MONGODB_DNS_SERVERS ?? '')
+        .split(',')
+        .map((server) => server.trim())
+        .filter(Boolean),
     },
     jwt: {
       accessSecret: validated.JWT_ACCESS_SECRET,

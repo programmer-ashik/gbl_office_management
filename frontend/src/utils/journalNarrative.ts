@@ -15,8 +15,17 @@ function uniqueJoin(values: string[]): string {
   return [...new Set(values.filter(Boolean))].join('; ')
 }
 
-function head(line: JournalLine): string {
-  return line.accountName || line.accountCode
+const ADVANCE_TO_STAFF_CODE = '1161'
+
+/** "Advance to Staff · Rahim Uddin" — names the employee holding the advance. */
+export function ledgerHead(
+  line: Pick<JournalLine, 'accountCode' | 'accountName' | 'entityName'>,
+): string {
+  const head = line.accountName || line.accountCode
+  const holder = line.entityName?.trim()
+  return line.accountCode === ADVANCE_TO_STAFF_CODE && holder
+    ? `${head} · ${holder}`
+    : head
 }
 
 /**
@@ -46,7 +55,7 @@ export function lineCounterpart(entry: JournalEntry, line: JournalLine): string 
   const opposite = lines.filter((row) => row.debit > 0 !== isDebit)
   const pool = opposite.length ? opposite : lines.filter((row) => row !== line)
   return uniqueJoin(
-    pool.filter((row) => row.accountCode !== line.accountCode).map(head),
+    pool.filter((row) => row.accountCode !== line.accountCode).map(ledgerHead),
   )
 }
 
@@ -63,8 +72,8 @@ export function journalDescription(entry: JournalEntry): string {
 /** "Dr Site Transport / Cr Hand Cash" */
 export function journalHeads(entry: JournalEntry): string {
   const lines = entry.lines ?? []
-  const debit = uniqueJoin(lines.filter((row) => row.debit > 0).map(head))
-  const credit = uniqueJoin(lines.filter((row) => row.credit > 0).map(head))
+  const debit = uniqueJoin(lines.filter((row) => row.debit > 0).map(ledgerHead))
+  const credit = uniqueJoin(lines.filter((row) => row.credit > 0).map(ledgerHead))
   return [debit && `Dr ${debit}`, credit && `Cr ${credit}`]
     .filter(Boolean)
     .join(' / ')
