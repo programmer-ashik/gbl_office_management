@@ -1,61 +1,42 @@
 import type { JournalEntry, JournalLine } from "../types/accounting";
 
+/** One cost / return line of the project ledger with the running net cost. */
+export type ProjectLedgerRow = {
+  entry: JournalEntry;
+  line: JournalLine;
+  index: number;
+  balance: number;
+};
+
+const toMinor = (value: number) => Math.round((value || 0) * 100);
+
 /**
- * Project a line is posted to in the ledger: its own tag, else the journal tag.
- * Matches how ledger lines are stored, so project filters agree with the ledger.
+ * Project ledger rows in the given order. Lines come from the server already
+ * trimmed to the project's expense heads: costs in Dr, returns in Cr.
  */
-export function postedLineProjectId(
-  entry: JournalEntry,
-  line: JournalLine,
-): string | null {
-  return line.projectId ?? entry.projectId ?? null;
-}
-
-/** Lines of the journal that belong to the project (all lines when no project). */
-export function projectLines(
-  entry: JournalEntry,
-  projectId: string,
-): JournalLine[] {
-  const lines = entry.lines ?? [];
-  if (!projectId) return lines;
-  return lines.filter((line) => postedLineProjectId(entry, line) === projectId);
-}
-
-/** Journals with at least one line in the project (all journals when no project). */
-export function journalsForProject(
-  entries: JournalEntry[],
-  projectId: string,
-): JournalEntry[] {
-  if (!projectId) return entries;
-  return entries.filter((entry) =>
-    entry.lines?.length
-      ? projectLines(entry, projectId).length > 0
-      : entry.projectId === projectId,
-  );
-}
-
-/** Debit / credit of the project's lines across the journals. */
-export function projectTotals(
-  entries: JournalEntry[],
-  projectId: string,
-): { debit: number; credit: number } {
-  let debit = 0;
-  let credit = 0;
+export function projectLedgerRows(entries: JournalEntry[]): ProjectLedgerRow[] {
+  const rows: ProjectLedgerRow[] = [];
+  let balance = 0;
   for (const entry of entries) {
-    if (!entry.lines?.length) {
-      if (!projectId || entry.projectId === projectId) {
-        debit += entry.totalDebit;
-        credit += entry.totalCredit;
-      }
-      continue;
-    }
-    for (const line of projectLines(entry, projectId)) {
-      debit += line.debit;
-      credit += line.credit;
-    }
+    (entry.lines ?? []).forEach((line, index) => {
+      balance += toMinor(line.debit) - toMinor(line.credit);
+      rows.push({ entry, line, index, balance: balance / 100 });
+    });
   }
-  return {
-    debit: Number(debit.toFixed(2)),
-    credit: Number(credit.toFixed(2)),
-  };
+  return rows;
+}
+
+/** Total cost (Dr), total returns (Cr) and net project cost. */
+export function projectLedgerTotals(rows: ProjectLedgerRow[]): {
+  cost: number;
+  returns: number;
+  net: number;
+} {
+  let cost = 0;
+  let returns = 0;
+  for (const { line } of rows) {
+    cost += toMinor(line.debit);
+    returns += toMinor(line.credit);
+  }
+  return { cost: cost / 100, returns: returns / 100, net: (cost - returns) / 100 };
 }

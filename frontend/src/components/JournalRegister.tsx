@@ -28,9 +28,8 @@ import {
   loadJournalVoucherTemplate,
 } from "../utils/journalVoucherPdf";
 import {
-  journalsForProject,
-  projectLines,
-  projectTotals,
+  projectLedgerRows,
+  projectLedgerTotals,
 } from "../utils/journalProjectFilter";
 
 async function getJvTemplate() {
@@ -219,6 +218,8 @@ export function JournalRegister({
         status: filters.status || undefined,
         journalType: filters.journalType || undefined,
         projectId: filters.projectId || undefined,
+        projectView:
+          layout === "ledger" && filters.projectId ? "costs" : undefined,
         search: filters.search || undefined,
       }),
       api.projects(),
@@ -367,9 +368,29 @@ export function JournalRegister({
     })),
   ];
 
+  /** Project filter on the ledger layout: only the project's costs and returns. */
+  const projectLedger = layout === "ledger" && Boolean(applied.projectId);
   const visibleEntries = useMemo(
-    () => journalsForProject(entries, applied.projectId),
-    [entries, applied.projectId],
+    () =>
+      projectLedger
+        ? entries.filter((entry) => (entry.lines?.length ?? 0) > 0)
+        : entries,
+    [entries, projectLedger],
+  );
+  const ledgerRows = useMemo(
+    () => (projectLedger ? projectLedgerRows(visibleEntries) : []),
+    [projectLedger, visibleEntries],
+  );
+  const balanceByLine = useMemo(
+    () =>
+      new Map(
+        ledgerRows.map((row) => [`${row.entry.id}-${row.index}`, row.balance]),
+      ),
+    [ledgerRows],
+  );
+  const projectSummary = useMemo(
+    () => projectLedgerTotals(ledgerRows),
+    [ledgerRows],
   );
   const totalPages = Math.max(1, Math.ceil(visibleEntries.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -381,8 +402,9 @@ export function JournalRegister({
     visibleEntries.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(currentPage * PAGE_SIZE, visibleEntries.length);
 
-  const headDescription =
-    description ??
+  const headDescription = projectLedger
+    ? `Project ledger for ${projectName(applied.projectId)}: costs in Debit, returns in Credit. Offsetting heads (cash, bank, AP, inventory…) are hidden.`
+    : description ??
     (lockedDate
       ? `Showing journals for ${lockedDate}.`
       : "Full journal register with filters and voucher actions.");
@@ -394,8 +416,11 @@ export function JournalRegister({
   }
 
   const totals = useMemo(
-    () => projectTotals(visibleEntries, applied.projectId),
-    [visibleEntries, applied.projectId],
+    () => ({
+      debit: visibleEntries.reduce((sum, row) => sum + row.totalDebit, 0),
+      credit: visibleEntries.reduce((sum, row) => sum + row.totalCredit, 0),
+    }),
+    [visibleEntries],
   );
 
   function exportPayload(): ReportExport {
@@ -404,12 +429,84 @@ export function JournalRegister({
       value: string,
     ) => options.find((row) => row.value === value)?.label ?? value;
 
+    const filters = [
+      { label: "From", value: applied.from || "Start" },
+      { label: "To", value: applied.to || "Today" },
+      {
+        label: "Status",
+        value: applied.status
+          ? optionLabel(statusOptions, applied.status)
+          : "All",
+      },
+      {
+        label: "Type",
+        value: applied.journalType
+          ? optionLabel(typeOptions, applied.journalType)
+          : "All",
+      },
+      {
+        label: "Project",
+        value: applied.projectId
+          ? optionLabel(projectOptions, applied.projectId)
+          : "All",
+      },
+      ...(applied.search ? [{ label: "Search", value: applied.search }] : []),
+      { label: "Journals", value: String(visibleEntries.length) },
+    ];
+
+    if (projectLedger) {
+      const rows = ledgerRows.map(({ entry, line, balance }) => [
+        entry.date.slice(0, 10),
+        entry.entryNumber,
+        line.accountName,
+        lineDescription(entry, line),
+        line.entityName ?? "",
+        line.debit ? money(line.debit) : "",
+        line.credit ? money(line.credit) : "",
+        money(balance),
+      ]);
+      const totalRow = [
+        "",
+        "",
+        "",
+        "",
+        "Total cost / returns · net",
+        money(projectSummary.cost),
+        money(projectSummary.returns),
+        money(projectSummary.net),
+      ];
+      return {
+        title: `Project ledger — ${projectName(applied.projectId)}`,
+        filters,
+        headers: [
+          "Date",
+          "Journal",
+          "Cost Head",
+          "Description",
+          "Entity",
+          "Debit (Cost)",
+          "Credit (Return)",
+          "Net cost",
+        ],
+        rows,
+        sections: [
+          {
+            title: `Project: ${projectName(applied.projectId)}`,
+            rows,
+            totals: [totalRow],
+          },
+        ],
+        rightAlign: [5, 6, 7],
+        totals: [totalRow],
+      };
+    }
+
     const byProject = new Map<
       string,
       { rows: string[][]; debit: number; credit: number }
     >();
     for (const entry of visibleEntries) {
-      for (const line of projectLines(entry, applied.projectId)) {
+      for (const line of entry.lines ?? []) {
         const key = lineProjectId(entry, line) ?? "";
         const bucket = byProject.get(key) ?? { rows: [], debit: 0, credit: 0 };
         bucket.rows.push([
@@ -462,30 +559,7 @@ export function JournalRegister({
 
     return {
       title: exportTitle ?? title,
-      filters: [
-        { label: "From", value: applied.from || "Start" },
-        { label: "To", value: applied.to || "Today" },
-        {
-          label: "Status",
-          value: applied.status
-            ? optionLabel(statusOptions, applied.status)
-            : "All",
-        },
-        {
-          label: "Type",
-          value: applied.journalType
-            ? optionLabel(typeOptions, applied.journalType)
-            : "All",
-        },
-        {
-          label: "Project",
-          value: applied.projectId
-            ? optionLabel(projectOptions, applied.projectId)
-            : "All",
-        },
-        ...(applied.search ? [{ label: "Search", value: applied.search }] : []),
-        { label: "Journals", value: String(visibleEntries.length) },
-      ],
+      filters,
       headers: [
         "Date",
         "Journal",
@@ -576,7 +650,7 @@ export function JournalRegister({
 
   function renderLedgerRows() {
     return pageEntries.flatMap((entry) => {
-      const lines = projectLines(entry, applied.projectId);
+      const lines = entry.lines ?? [];
       const statusPill =
         entry.status !== JournalStatus.POSTED ? (
           <span className={`status-pill status-${entry.status}`}>
@@ -651,13 +725,20 @@ export function JournalRegister({
               />
             </td>
             <td>{line.entityName ?? "—"}</td>
-            <td>{projectName(lineProjectId(entry, line))}</td>
+            {projectLedger ? null : (
+              <td>{projectName(lineProjectId(entry, line))}</td>
+            )}
             <td className='num amount-debit-cell'>
               {line.debit > 0 ? money(line.debit) : "—"}
             </td>
             <td className='num amount-credit-cell'>
               {line.credit > 0 ? money(line.credit) : "—"}
             </td>
+            {projectLedger ? (
+              <td className='num'>
+                {money(balanceByLine.get(`${entry.id}-${index}`) ?? 0)}
+              </td>
+            ) : null}
             <td>{first ? renderActions(entry) : null}</td>
           </tr>
         );
@@ -806,12 +887,17 @@ export function JournalRegister({
               <tr className='ledger-table-header'>
                 <th>Date</th>
                 <th>Journal</th>
-                <th>Ledger Head</th>
+                <th>{projectLedger ? "Cost Head" : "Ledger Head"}</th>
                 <th className='description-cell'>Description</th>
                 <th>Entity</th>
-                <th>Project</th>
-                <th className='num'>Debit</th>
-                <th className='num'>Credit</th>
+                {projectLedger ? null : <th>Project</th>}
+                <th className='num'>
+                  {projectLedger ? "Debit (Cost)" : "Debit"}
+                </th>
+                <th className='num'>
+                  {projectLedger ? "Credit (Return)" : "Credit"}
+                </th>
+                {projectLedger ? <th className='num'>Net cost</th> : null}
                 <th>Actions</th>
               </tr>
             </thead>
@@ -820,19 +906,37 @@ export function JournalRegister({
               {visibleEntries.length === 0 ? (
                 <tr>
                   <td colSpan={9} className='muted'>
-                    No journals match the current filters.
+                    {projectLedger
+                      ? "No project costs or returns match the current filters."
+                      : "No journals match the current filters."}
                   </td>
                 </tr>
               ) : null}
-              <tr className='ledger-balance-row'>
-                <td colSpan={6}>
-                  Totals · {visibleEntries.length} journal
-                  {visibleEntries.length === 1 ? "" : "s"} (all filtered pages)
-                </td>
-                <td className='num'>{money(totals.debit)}</td>
-                <td className='num'>{money(totals.credit)}</td>
-                <td />
-              </tr>
+              {projectLedger ? (
+                <tr className='ledger-balance-row'>
+                  <td colSpan={5}>
+                    Total cost / returns · net project cost ·{" "}
+                    {visibleEntries.length} journal
+                    {visibleEntries.length === 1 ? "" : "s"} (all filtered
+                    pages)
+                  </td>
+                  <td className='num'>{money(projectSummary.cost)}</td>
+                  <td className='num'>{money(projectSummary.returns)}</td>
+                  <td className='num'>{money(projectSummary.net)}</td>
+                  <td />
+                </tr>
+              ) : (
+                <tr className='ledger-balance-row'>
+                  <td colSpan={6}>
+                    Totals · {visibleEntries.length} journal
+                    {visibleEntries.length === 1 ? "" : "s"} (all filtered
+                    pages)
+                  </td>
+                  <td className='num'>{money(totals.debit)}</td>
+                  <td className='num'>{money(totals.credit)}</td>
+                  <td />
+                </tr>
+              )}
             </tbody>
           </table>
         ) : (

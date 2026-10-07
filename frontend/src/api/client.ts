@@ -374,9 +374,14 @@ export const api = {
     entityId?: string
     search?: string
     source?: string
+    /** With projectId: only the project's expense lines (project ledger). */
+    projectView?: 'costs'
   }) => {
     const query = new URLSearchParams()
     if (params?.projectId) query.set('projectId', params.projectId)
+    if (params?.projectId && params.projectView) {
+      query.set('projectView', params.projectView)
+    }
     if (params?.fromDate) query.set('fromDate', params.fromDate)
     if (params?.toDate) query.set('toDate', params.toDate)
     if (params?.status) query.set('status', params.status)

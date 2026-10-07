@@ -30,6 +30,7 @@ function listFiltersFromQuery(query: Record<string, unknown>) {
     entityId: str('entityId'),
     search: str('search') ?? str('q'),
     source: str('source'),
+    projectView: str('projectView') === 'costs' ? ('costs' as const) : undefined,
   };
 }
 

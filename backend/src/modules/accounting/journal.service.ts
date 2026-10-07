@@ -191,6 +191,8 @@ export type JournalListFilters = {
   entityId?: string;
   search?: string;
   source?: string;
+  /** With `projectId`: only the project's expense lines (costs Dr, returns Cr). */
+  projectView?: 'costs';
 };
 
 export type JournalSummary = {
@@ -800,6 +802,13 @@ export class JournalService {
     limit = 200,
     filters: JournalListFilters = {},
   ): Promise<PublicJournal[]> {
+    if (
+      filters.projectView === 'costs' &&
+      filters.projectId &&
+      Types.ObjectId.isValid(filters.projectId)
+    ) {
+      return this.listProjectCosts(limit, filters);
+    }
     const filter = this.buildListFilter(filters);
     const query = JournalEntryModel.find(filter).sort({
       createdAt: -1,
@@ -820,6 +829,61 @@ export class JournalService {
         .slice(0, limit)
         .map((entry) => this.toPublic(entry)),
     );
+  }
+
+  /**
+   * Project ledger: journals with an expense line posted to the project, each
+   * trimmed to those lines. Offsetting heads (cash, AP, inventory…) are left out.
+   */
+  private async listProjectCosts(
+    limit: number,
+    filters: JournalListFilters,
+  ): Promise<PublicJournal[]> {
+    const projectId = filters.projectId!;
+    const projectOid = new Types.ObjectId(projectId);
+    const expenseCodes = (
+      await AccountModel.find({ type: AccountType.EXPENSE }).select('code').lean()
+    ).map((row) => row.code);
+    const base = this.buildListFilter({ ...filters, projectId: undefined });
+    const projectMatch = {
+      $or: [
+        {
+          lines: {
+            $elemMatch: { projectId: projectOid, accountCode: { $in: expenseCodes } },
+          },
+        },
+        { projectId: projectOid, 'lines.accountCode': { $in: expenseCodes } },
+      ],
+    };
+    let entries = await JournalEntryModel.find({ $and: [base, projectMatch] })
+      .sort({ createdAt: -1, date: -1, entryNumber: -1 })
+      .exec();
+    if (filters.journalType) {
+      entries = entries.filter((entry) =>
+        journalMatchesType(entry, filters.journalType!),
+      );
+    }
+    const expense = new Set(expenseCodes);
+    const journals = await withAdvancePurposeJournals(
+      entries.slice(0, limit).map((entry) => this.toPublic(entry)),
+    );
+    return journals.map((journal) => {
+      const lines = journal.lines.filter(
+        (line) =>
+          expense.has(line.accountCode) &&
+          (line.projectId ?? journal.projectId) === projectId,
+      );
+      return {
+        ...journal,
+        lines,
+        totalDebit: fromMinorUnits(
+          lines.reduce((sum, line) => sum + toMinorUnits(line.debit), 0),
+        ),
+        totalCredit: fromMinorUnits(
+          lines.reduce((sum, line) => sum + toMinorUnits(line.credit), 0),
+        ),
+      };
+    });
   }
 
   /** Public view for display: advance journals read with the employee's purpose. */
