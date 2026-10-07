@@ -27,6 +27,11 @@ import {
   journalVoucherPreviewUrl,
   loadJournalVoucherTemplate,
 } from "../utils/journalVoucherPdf";
+import {
+  journalsForProject,
+  projectLines,
+  projectTotals,
+} from "../utils/journalProjectFilter";
 
 async function getJvTemplate() {
   return loadJournalVoucherTemplate(() => api.journalVoucherTemplate(), {
@@ -362,15 +367,19 @@ export function JournalRegister({
     })),
   ];
 
-  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const visibleEntries = useMemo(
+    () => journalsForProject(entries, applied.projectId),
+    [entries, applied.projectId],
+  );
+  const totalPages = Math.max(1, Math.ceil(visibleEntries.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageEntries = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
-    return entries.slice(start, start + PAGE_SIZE);
-  }, [entries, currentPage]);
+    return visibleEntries.slice(start, start + PAGE_SIZE);
+  }, [visibleEntries, currentPage]);
   const rangeStart =
-    entries.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const rangeEnd = Math.min(currentPage * PAGE_SIZE, entries.length);
+    visibleEntries.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(currentPage * PAGE_SIZE, visibleEntries.length);
 
   const headDescription =
     description ??
@@ -385,11 +394,8 @@ export function JournalRegister({
   }
 
   const totals = useMemo(
-    () => ({
-      debit: entries.reduce((sum, row) => sum + row.totalDebit, 0),
-      credit: entries.reduce((sum, row) => sum + row.totalCredit, 0),
-    }),
-    [entries],
+    () => projectTotals(visibleEntries, applied.projectId),
+    [visibleEntries, applied.projectId],
   );
 
   function exportPayload(): ReportExport {
@@ -402,10 +408,9 @@ export function JournalRegister({
       string,
       { rows: string[][]; debit: number; credit: number }
     >();
-    for (const entry of entries) {
-      for (const line of entry.lines ?? []) {
+    for (const entry of visibleEntries) {
+      for (const line of projectLines(entry, applied.projectId)) {
         const key = lineProjectId(entry, line) ?? "";
-        if (applied.projectId && key && key !== applied.projectId) continue;
         const bucket = byProject.get(key) ?? { rows: [], debit: 0, credit: 0 };
         bucket.rows.push([
           entry.date.slice(0, 10),
@@ -479,7 +484,7 @@ export function JournalRegister({
             : "All",
         },
         ...(applied.search ? [{ label: "Search", value: applied.search }] : []),
-        { label: "Journals", value: String(entries.length) },
+        { label: "Journals", value: String(visibleEntries.length) },
       ],
       headers: [
         "Date",
@@ -571,7 +576,7 @@ export function JournalRegister({
 
   function renderLedgerRows() {
     return pageEntries.flatMap((entry) => {
-      const lines = entry.lines ?? [];
+      const lines = projectLines(entry, applied.projectId);
       const statusPill =
         entry.status !== JournalStatus.POSTED ? (
           <span className={`status-pill status-${entry.status}`}>
@@ -689,7 +694,7 @@ export function JournalRegister({
           </div>
           <ReportExportMenu
             payload={exportPayload}
-            disabled={entries.length === 0}
+            disabled={visibleEntries.length === 0}
           />
         </div>
       ) : (
@@ -812,7 +817,7 @@ export function JournalRegister({
             </thead>
             <tbody>
               {renderLedgerRows()}
-              {entries.length === 0 ? (
+              {visibleEntries.length === 0 ? (
                 <tr>
                   <td colSpan={9} className='muted'>
                     No journals match the current filters.
@@ -821,8 +826,8 @@ export function JournalRegister({
               ) : null}
               <tr className='ledger-balance-row'>
                 <td colSpan={6}>
-                  Totals · {entries.length} journal
-                  {entries.length === 1 ? "" : "s"} (all filtered pages)
+                  Totals · {visibleEntries.length} journal
+                  {visibleEntries.length === 1 ? "" : "s"} (all filtered pages)
                 </td>
                 <td className='num'>{money(totals.debit)}</td>
                 <td className='num'>{money(totals.credit)}</td>
@@ -890,7 +895,7 @@ export function JournalRegister({
                   </tr>
                 );
               })}
-              {entries.length === 0 ? (
+              {visibleEntries.length === 0 ? (
                 <tr>
                   <td colSpan={10} className='muted'>
                     No journals match the current filters.
@@ -902,10 +907,10 @@ export function JournalRegister({
         )}
       </div>
 
-      {entries.length > 0 ? (
+      {visibleEntries.length > 0 ? (
         <div className='table-pagination'>
           <p className='muted'>
-            Showing {rangeStart}–{rangeEnd} of {entries.length}
+            Showing {rangeStart}–{rangeEnd} of {visibleEntries.length}
           </p>
           <div className='form-actions'>
             <button
