@@ -26,6 +26,11 @@ export function SalarySlipDocument({
   companyName = 'GBL Enterprise',
 }: Props) {
   const logo = resolveAssetUrl(logoUrl ?? null)
+  const issueDate = new Date().toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  })
 
   return (
     <div className="space-y-6 print:space-y-4">
@@ -61,26 +66,20 @@ export function SalarySlipDocument({
                 <p className="font-semibold text-[var(--ink,#152033)]">
                   {run.sheetNumber}
                 </p>
-                <p>{periodLabel(run.periodYear, run.periodMonth)}</p>
+                <p>
+                  Month of Salary: {periodLabel(run.periodYear, run.periodMonth)}
+                </p>
+                <p>Issue Date: {issueDate}</p>
               </div>
             </header>
 
-            <div className="grid gap-4 px-6 py-4 sm:grid-cols-2">
+            <div className="px-6 py-4">
               <div className="text-sm">
                 <p className="text-xs uppercase tracking-wide text-[var(--muted,#5a6578)]">
                   Employee
                 </p>
                 <p className="font-semibold text-[var(--ink,#152033)]">
                   {line.employeeName}
-                </p>
-              </div>
-              <div className="text-sm sm:text-right">
-                <p className="text-xs uppercase tracking-wide text-[var(--muted,#5a6578)]">
-                  Payment
-                </p>
-                <p className="font-medium text-[var(--ink,#152033)]">
-                  {run.treasuryAccountCode ?? '—'}
-                  {run.journalNumber ? ` · ${run.journalNumber}` : ''}
                 </p>
               </div>
             </div>
@@ -189,10 +188,7 @@ export function SalarySlipDocument({
               </table>
             </div>
 
-            <footer className="flex items-center justify-between gap-4 border-t border-[var(--line-strong,#cfd6e0)] px-6 py-4">
-              <p className="text-xs text-[var(--muted,#5a6578)]">
-                Accrual Dr 5120/5230 · Disbursement Dr 2121 · System generated
-              </p>
+            <footer className="flex items-center justify-end gap-4 border-t border-[var(--line-strong,#cfd6e0)] px-6 py-4">
               <div className="rounded-md bg-[var(--theme-table-head-bg,#1d4ed8)] px-4 py-2 text-right text-white">
                 <p className="text-[10px] uppercase tracking-wider opacity-90">
                   Net payable

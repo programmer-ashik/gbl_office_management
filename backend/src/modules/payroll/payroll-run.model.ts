@@ -24,11 +24,22 @@ export interface IPayrollAllocation {
   amountMinor: number;
 }
 
+/** Allowance split copied from the salary structure when the line was built. */
+export interface IPayrollEarnings {
+  houseRentMinor: number;
+  medicalAllowanceMinor: number;
+  conveyanceAllowanceMinor: number;
+  otherAllowancesMinor: number;
+  customBreakdownApplied: boolean;
+}
+
 export interface IPayrollLine {
   employeeId: Types.ObjectId;
   employeeName: string;
   basicMinor: number;
   allowancesMinor: number;
+  /** Missing on runs generated before the split was stored. */
+  earnings?: IPayrollEarnings;
   structuralDeductionMinor: number;
   providentFundMinor: number;
   taxDeductionMinor: number;
@@ -121,12 +132,24 @@ const allocationSchema = new Schema<IPayrollAllocation>(
   { _id: false },
 );
 
+const earningsSchema = new Schema<IPayrollEarnings>(
+  {
+    houseRentMinor: { type: Number, required: true, min: 0, default: 0 },
+    medicalAllowanceMinor: { type: Number, required: true, min: 0, default: 0 },
+    conveyanceAllowanceMinor: { type: Number, required: true, min: 0, default: 0 },
+    otherAllowancesMinor: { type: Number, required: true, min: 0, default: 0 },
+    customBreakdownApplied: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
 const payrollLineSchema = new Schema<IPayrollLine>(
   {
     employeeId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     employeeName: { type: String, required: true },
     basicMinor: { type: Number, required: true, min: 1 },
     allowancesMinor: { type: Number, required: true, min: 0 },
+    earnings: { type: earningsSchema, required: false },
     structuralDeductionMinor: { type: Number, required: true, min: 0 },
     providentFundMinor: { type: Number, required: true, min: 0, default: 0 },
     taxDeductionMinor: { type: Number, required: true, min: 0, default: 0 },

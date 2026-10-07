@@ -26,6 +26,7 @@ import {
 import {
   buildPayrollSlipsPdf,
   buildSalarySlipPdf,
+  type SlipEarnings,
 } from './salary-slip-pdf';
 import type {
   CreateSalaryFacilityDto,
@@ -66,6 +67,7 @@ import {
   breakdownToLegacyComponents,
   calculateSalaryBreakdown,
   DEFAULT_PAYROLL_RULE_CONFIG,
+  payrollEarningsFromStructure,
   type PayrollRuleConfig,
   type SalaryBreakdownResult,
 } from './salary-breakdown';
@@ -1195,10 +1197,46 @@ export class PayrollService {
     if (run.status !== PayrollRunStatus.DISBURSED) {
       throw badRequest('Salary slips are available after disbursement');
     }
+    const earnings = await this.slipEarnings(run);
     if (employeeId) {
-      return buildSalarySlipPdf(run, employeeId);
+      return buildSalarySlipPdf(run, employeeId, earnings);
     }
-    return buildPayrollSlipsPdf(run);
+    return buildPayrollSlipsPdf(run, earnings);
+  }
+
+  /**
+   * Earnings split per employee. Older runs did not store it, so it is taken from
+   * the employee's salary structure, but only while that structure still matches
+   * the basic and allowances that were paid.
+   */
+  private async slipEarnings(run: PayrollRunDocument): Promise<SlipEarnings> {
+    const result: SlipEarnings = new Map();
+    const missing = run.lines.filter((line) => !line.earnings);
+    for (const line of run.lines) {
+      if (line.earnings) result.set(line.employeeId.toString(), line.earnings);
+    }
+    if (!missing.length) return result;
+    const structures = await SalaryStructureModel.find({
+      employeeId: { $in: missing.map((line) => line.employeeId) },
+    })
+      .sort({ isActive: 1 })
+      .exec();
+    const byEmployee = new Map(
+      structures.map((row) => [row.employeeId.toString(), row]),
+    );
+    for (const line of missing) {
+      const structure = byEmployee.get(line.employeeId.toString());
+      const allowancesMinor =
+        structure?.allowances.reduce((sum, row) => sum + row.amountMinor, 0) ?? -1;
+      if (
+        structure &&
+        structure.basicMinor === line.basicMinor &&
+        allowancesMinor === line.allowancesMinor
+      ) {
+        result.set(line.employeeId.toString(), payrollEarningsFromStructure(structure));
+      }
+    }
+    return result;
   }
 
   private async buildPayrollLine(
@@ -1281,6 +1319,7 @@ export class PayrollService {
       employeeName: structure.employeeName,
       basicMinor: structure.basicMinor,
       allowancesMinor,
+      earnings: payrollEarningsFromStructure(structure),
       structuralDeductionMinor,
       providentFundMinor,
       taxDeductionMinor,

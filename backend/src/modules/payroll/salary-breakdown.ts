@@ -184,6 +184,40 @@ export function calculateSalaryBreakdown(
   };
 }
 
+/**
+ * House rent / medical / conveyance / other from the structure's allowance rows
+ * (the same rows that make up a payroll line's allowances); unmatched rows count as other.
+ */
+export function payrollEarningsFromStructure(structure: {
+  allowances: Array<{ name: string; amountMinor: number }>;
+  customBreakdownApplied?: boolean;
+}): {
+  houseRentMinor: number;
+  medicalAllowanceMinor: number;
+  conveyanceAllowanceMinor: number;
+  otherAllowancesMinor: number;
+  customBreakdownApplied: boolean;
+} {
+  const sumWhere = (pattern: RegExp) =>
+    structure.allowances
+      .filter((row) => pattern.test(row.name))
+      .reduce((sum, row) => sum + row.amountMinor, 0);
+  const total = structure.allowances.reduce((sum, row) => sum + row.amountMinor, 0);
+  const houseRentMinor = sumWhere(/house/i);
+  const medicalAllowanceMinor = sumWhere(/medical/i);
+  const conveyanceAllowanceMinor = sumWhere(/convey/i);
+  return {
+    houseRentMinor,
+    medicalAllowanceMinor,
+    conveyanceAllowanceMinor,
+    otherAllowancesMinor: Math.max(
+      0,
+      total - houseRentMinor - medicalAllowanceMinor - conveyanceAllowanceMinor,
+    ),
+    customBreakdownApplied: Boolean(structure.customBreakdownApplied),
+  };
+}
+
 /** Sync typed breakdown → legacy allowance/deduction component rows for payroll runs. */
 export function breakdownToLegacyComponents(row: SalaryBreakdownResult): {
   basic: number;
