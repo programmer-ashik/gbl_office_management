@@ -92,6 +92,28 @@ const footerSchema = new Schema(
   { _id: false },
 );
 
+const voucherConfigSchema = new Schema(
+  {
+    theme: {
+      type: String,
+      enum: ['bw', 'color'],
+      default: 'color',
+    },
+    companySubtitle: { type: String, default: '', maxlength: 120 },
+    currencyLabel: { type: String, default: 'Amount in BDT', maxlength: 80 },
+    majorUnitLabel: { type: String, default: 'TAKA', maxlength: 40 },
+    minorUnitLabel: { type: String, default: 'PAISA', maxlength: 40 },
+    amountInWordsLabel: {
+      type: String,
+      default: 'Amount in words Taka:',
+      maxlength: 80,
+    },
+    showWatermark: { type: Boolean, default: true },
+    signatoryTitles: { type: [String], default: undefined },
+  },
+  { _id: false },
+);
+
 const reportTemplateSchema = new Schema<IReportTemplate>(
   {
     templateName: { type: String, required: true, trim: true, maxlength: 160 },
@@ -105,7 +127,7 @@ const reportTemplateSchema = new Schema<IReportTemplate>(
     headerConfig: { type: headerSchema, required: true },
     layoutStructure: { type: [blockSchema], required: true },
     footerConfig: { type: footerSchema, required: true },
-    voucherConfig: { type: Schema.Types.Mixed },
+    voucherConfig: { type: voucherConfigSchema, default: undefined },
     isDefault: { type: Boolean, required: true, default: true },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },

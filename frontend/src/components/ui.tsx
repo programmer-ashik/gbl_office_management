@@ -16,6 +16,8 @@ export type SelectOption = {
   value: string
   label: string
   disabled?: boolean
+  /** Extra text matched by search but not shown (e.g. a hidden code). */
+  keywords?: string
 }
 
 type SelectProps = {
@@ -31,6 +33,9 @@ type SelectProps = {
   id?: string
   name?: string
   className?: string
+  /** Adds a footer action (e.g. "Add new client") that receives the current search text. */
+  onCreate?: (query: string) => void
+  createLabel?: (query: string) => string
 }
 
 type PopoverCoords = {
@@ -54,6 +59,8 @@ export function Select({
   id,
   name,
   className,
+  onCreate,
+  createLabel,
 }: SelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -77,7 +84,8 @@ export function Select({
     return options.filter(
       (option) =>
         option.label.toLowerCase().includes(needle) ||
-        option.value.toLowerCase().includes(needle),
+        option.value.toLowerCase().includes(needle) ||
+        option.keywords?.toLowerCase().includes(needle) === true,
     )
   }, [options, query])
 
@@ -182,14 +190,14 @@ export function Select({
       placePopover()
     }
 
-    document.addEventListener('mousedown', onPointerDown, true)
+    document.addEventListener('pointerdown', onPointerDown, true)
     document.addEventListener('keydown', onKey, true)
     window.addEventListener('resize', onReposition)
     window.addEventListener('scroll', onReposition, true)
 
     return () => {
       window.clearTimeout(arm)
-      document.removeEventListener('mousedown', onPointerDown, true)
+      document.removeEventListener('pointerdown', onPointerDown, true)
       document.removeEventListener('keydown', onKey, true)
       window.removeEventListener('resize', onReposition)
       window.removeEventListener('scroll', onReposition, true)
@@ -308,6 +316,21 @@ export function Select({
           <li className="ui-select-empty muted">No matches</li>
         ) : null}
       </ul>
+      {onCreate ? (
+        <button
+          type="button"
+          className="ghost ui-select-create"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            const text = query.trim()
+            setOpen(false)
+            setQuery('')
+            onCreate(text)
+          }}
+        >
+          {createLabel ? createLabel(query.trim()) : '+ Add new'}
+        </button>
+      ) : null}
     </div>
   ) : null
 
@@ -428,12 +451,12 @@ export function ActionMenu({
       placeMenu()
     }
 
-    document.addEventListener('mousedown', onPointerDown, true)
+    document.addEventListener('pointerdown', onPointerDown, true)
     window.addEventListener('resize', onReposition)
     window.addEventListener('scroll', onReposition, true)
     return () => {
       window.clearTimeout(arm)
-      document.removeEventListener('mousedown', onPointerDown, true)
+      document.removeEventListener('pointerdown', onPointerDown, true)
       window.removeEventListener('resize', onReposition)
       window.removeEventListener('scroll', onReposition, true)
     }

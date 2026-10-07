@@ -21,7 +21,13 @@ export type PublicUser = {
   lastName: string
   role: Role
   isActive: boolean
+  /** Explicit allowlist of nav section ids. null/undefined = role defaults. */
+  allowedPermissions?: string[] | null
+  /** @deprecated Prefer allowedPermissions; kept for older records. */
+  deniedPermissions?: string[]
   lastLoginAt: string | null
+  /** Linked employee record; null for login-only users (e.g. external admins). */
+  employeeId?: string | null
   createdAt?: string
   updatedAt?: string
 }

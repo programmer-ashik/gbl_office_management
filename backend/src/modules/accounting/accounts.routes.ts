@@ -10,7 +10,12 @@ import { validateBody } from '../../common/middleware/validate';
 import type { AuthService } from '../auth/auth.service';
 import type { UsersService } from '../users/users.service';
 import type { AccountsService } from './accounts.service';
-import { CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
+import { applyAccountSplit, planAccountSplit } from './account-split';
+import {
+  CreateAccountDto,
+  SplitAccountDto,
+  UpdateAccountDto,
+} from './dto/account.dto';
 import { PartyOpeningBalanceDto } from './dto/party-opening-balance.dto';
 import type { JournalService } from './journal.service';
 
@@ -175,6 +180,42 @@ export function createAccountsRouter(
     asyncHandler(async (req, res) => {
       const result = await accountsService.remove(String(req.params.id));
       sendSuccess(res, result, 'Account deleted successfully');
+    }),
+  );
+
+  router.post(
+    '/:id/split/preview',
+    auth,
+    requireRoles(...FINANCE),
+    validateBody(SplitAccountDto),
+    asyncHandler(async (req, res) => {
+      const account = await accountsService.findByIdOrFail(String(req.params.id));
+      const dto = req.body as SplitAccountDto;
+      const plan = await planAccountSplit({ code: account.code, ...dto });
+      sendSuccess(res, plan, 'Split preview ready');
+    }),
+  );
+
+  router.post(
+    '/:id/split',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(SplitAccountDto),
+    asyncHandler(async (req, res) => {
+      if (!journalService) {
+        throw badRequest('Journal service unavailable');
+      }
+      const account = await accountsService.findByIdOrFail(String(req.params.id));
+      const dto = req.body as SplitAccountDto;
+      const result = await applyAccountSplit(journalService, req.user!.userId, {
+        code: account.code,
+        ...dto,
+      });
+      sendSuccess(
+        res,
+        result,
+        `${account.code} is now a header with ${result.children.length} sub-account(s)`,
+      );
     }),
   );
 

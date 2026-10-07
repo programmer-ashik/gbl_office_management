@@ -54,6 +54,12 @@ export class CreateProjectDto {
   @Type(() => ClientInfoDto)
   client: ClientInfoDto;
 
+  /** Existing customer; the client name and contact details are taken from it. */
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsMongoId()
+  customerId?: string;
+
   @IsDateString()
   startDate: string;
 
@@ -96,6 +102,11 @@ export class UpdateProjectDto {
   @ValidateNested()
   @Type(() => ClientInfoDto)
   client?: ClientInfoDto;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsMongoId()
+  customerId?: string;
 
   @IsOptional()
   @IsDateString()

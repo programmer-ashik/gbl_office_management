@@ -109,5 +109,30 @@ export function createQuotationsRouter(
     }),
   );
 
+  router.put(
+    '/:id',
+    auth,
+    requireRoles(...QUOTATION_CREATE_ROLES),
+    validateBody(CreateQuotationDto),
+    asyncHandler(async (req, res) => {
+      const row = await quotationsService.update(
+        String(req.params.id),
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Quotation updated successfully');
+    }),
+  );
+
+  router.delete(
+    '/:id',
+    auth,
+    requireRoles(...QUOTATION_CREATE_ROLES),
+    asyncHandler(async (req, res) => {
+      await quotationsService.remove(String(req.params.id), req.user!);
+      sendSuccess(res, { deleted: true }, 'Quotation deleted successfully');
+    }),
+  );
+
   return router;
 }

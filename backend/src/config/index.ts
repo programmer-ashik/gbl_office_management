@@ -38,6 +38,11 @@ class EnvironmentVariables {
   @IsBoolean()
   MONGODB_MEMORY = false;
 
+  /** e.g. "8.8.8.8,1.1.1.1" — for networks whose DNS cannot resolve mongodb+srv records. */
+  @IsOptional()
+  @IsString()
+  MONGODB_DNS_SERVERS?: string;
+
   @IsString()
   @MinLength(32)
   JWT_ACCESS_SECRET!: string;
@@ -65,6 +70,14 @@ class EnvironmentVariables {
   @IsOptional()
   @IsString()
   BOOTSTRAP_ADMIN_PASSWORD?: string;
+
+  /** When true, inserts demo users/projects/sample vouchers. Keep false in production. */
+  @IsOptional()
+  @Transform(
+    ({ value }: { value: unknown }) => value === true || value === 'true',
+  )
+  @IsBoolean()
+  SEED_DEMO = false;
 }
 
 export type AppConfig = {
@@ -73,6 +86,7 @@ export type AppConfig = {
   mongodb: {
     uri: string;
     memory: boolean;
+    dnsServers: string[];
   };
   jwt: {
     accessSecret: string;
@@ -85,6 +99,7 @@ export type AppConfig = {
     email?: string;
     password?: string;
   };
+  seedDemo: boolean;
 };
 
 let cached: AppConfig | undefined;
@@ -119,6 +134,10 @@ export function loadConfig(): AppConfig {
     mongodb: {
       uri: validated.MONGODB_URI,
       memory: validated.MONGODB_MEMORY,
+      dnsServers: (validated.MONGODB_DNS_SERVERS ?? '')
+        .split(',')
+        .map((server) => server.trim())
+        .filter(Boolean),
     },
     jwt: {
       accessSecret: validated.JWT_ACCESS_SECRET,
@@ -133,6 +152,7 @@ export function loadConfig(): AppConfig {
       email: validated.BOOTSTRAP_ADMIN_EMAIL,
       password: validated.BOOTSTRAP_ADMIN_PASSWORD,
     },
+    seedDemo: validated.SEED_DEMO,
   };
 
   return cached;

@@ -122,8 +122,8 @@ class FooterConfigDto {
 
 class VoucherConfigDto {
   @IsOptional()
-  @IsIn(['yellow', 'blue', 'emerald', 'crimson', 'charcoal'])
-  theme?: 'yellow' | 'blue' | 'emerald' | 'crimson' | 'charcoal';
+  @IsIn(['bw', 'color', 'yellow', 'blue', 'emerald', 'crimson', 'charcoal'])
+  theme?: 'bw' | 'color' | 'yellow' | 'blue' | 'emerald' | 'crimson' | 'charcoal';
 
   @IsOptional()
   @Transform(emptyToUndefined)

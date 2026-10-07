@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsIn,
@@ -258,6 +259,37 @@ export class CreateProductCategoryDto {
   @IsOptional()
   @IsMongoId()
   parentId?: string;
+}
+
+export class UpdateProductCategoryDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  code?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class ReassignCategoryItemsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsMongoId({ each: true })
+  itemIds: string[];
+
+  @IsMongoId()
+  targetCategoryId: string;
+
+  @IsOptional()
+  @IsMongoId()
+  targetSubCategoryId?: string;
 }
 
 export class PurchaseOrderLineDto {

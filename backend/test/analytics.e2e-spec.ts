@@ -81,7 +81,7 @@ describe('Phase 10 analytics and end-to-end integration (e2e)', () => {
         memo: 'Opening capital',
         lines: [
           { accountCode: '1111', debit: 100_000 },
-          { accountCode: '1112', debit: 400_000 },
+          { accountCode: '1122', debit: 400_000 },
           { accountCode: '3100', credit: 500_000 },
         ],
       })
