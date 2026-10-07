@@ -14,6 +14,17 @@ describe('money', () => {
 
   it('rejects more than two decimal places', () => {
     expect(() => toMinorUnits(10.555)).toThrow(AppError);
+    expect(() => toMinorUnits(1221806.145)).toThrow(AppError);
+    expect(() => toMinorUnits(987654321.001)).toThrow(AppError);
+  });
+
+  it('accepts large two-decimal amounts despite floating-point noise', () => {
+    expect(toMinorUnits(1221806.14)).toBe(122180614);
+    expect(toMinorUnits(1234567.89)).toBe(123456789);
+    expect(toMinorUnits(2500000.07)).toBe(250000007);
+    for (let minor = 100_000_000; minor < 2_000_000_000; minor += 7919) {
+      expect(toMinorUnits(fromMinorUnits(minor))).toBe(minor);
+    }
   });
 
   it('round-trips through major units', () => {

@@ -40,6 +40,8 @@ export function createLedgersRouter(
           : undefined;
       const entityId =
         typeof req.query.entityId === 'string' ? req.query.entityId : undefined;
+      const projectId =
+        typeof req.query.projectId === 'string' ? req.query.projectId : undefined;
       const ledger = await ledgerService.listForAccount(
         String(req.params.accountCode),
         {
@@ -47,6 +49,7 @@ export function createLedgersRouter(
           fromDate,
           toDate,
           entity: { entityType, entityId },
+          projectId,
         },
       );
       sendSuccess(res, ledger, 'Ledger retrieved successfully');

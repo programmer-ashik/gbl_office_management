@@ -29,6 +29,7 @@ export enum SupplierPaymentStatus {
 }
 
 export enum ApLedgerEntryType {
+  OPENING = 'opening',
   RECEIPT = 'receipt',
   RETURN = 'return',
   BILL = 'bill',

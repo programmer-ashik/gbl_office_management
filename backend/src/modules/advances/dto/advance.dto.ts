@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
@@ -13,8 +13,13 @@ import {
 } from 'class-validator';
 
 export class CreateAdvanceDto {
+  /** Omit (or send empty / null) for an office advance with no project. */
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    value === '' || value === null ? undefined : value,
+  )
   @IsMongoId()
-  projectId: string;
+  projectId?: string;
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)

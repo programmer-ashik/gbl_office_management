@@ -85,7 +85,7 @@ describe('Phase 8 payroll and project cost allocation (e2e)', () => {
         date: '2026-09-01',
         memo: 'Opening cash',
         lines: [
-          { accountCode: '1112', debit: 1_000_000 },
+          { accountCode: '1122', debit: 1_000_000 },
           { accountCode: '3100', credit: 1_000_000 },
         ],
       })
@@ -143,7 +143,7 @@ describe('Phase 8 payroll and project cost allocation (e2e)', () => {
       .expect(201);
   });
 
-  it('generates payroll with advance auto-deduction and project allocation', async () => {
+  it('generates payroll without cutting project advances, then recovers one manually', async () => {
     const advance = await request(app)
       .post('/api/v1/advances')
       .set('Authorization', `Bearer ${employeeToken}`)
@@ -153,9 +153,18 @@ describe('Phase 8 payroll and project cost allocation (e2e)', () => {
         purpose: 'Site petty cash',
       })
       .expect(201);
+    const advanceId = advance.body.data.id as string;
 
     await request(app)
-      .post(`/api/v1/advances/${advance.body.data.id as string}/disburse`)
+      .post(`/api/v1/advances/${advanceId}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({})
+      .expect((res) => {
+        if (res.status >= 300) throw new Error(`approve ${res.status}`);
+      });
+
+    await request(app)
+      .post(`/api/v1/advances/${advanceId}/disburse`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
         treasuryId,
@@ -172,11 +181,39 @@ describe('Phase 8 payroll and project cost allocation (e2e)', () => {
     payrollRunId = run.body.data.id as string;
     const line = run.body.data.lines[0];
     expect(line.gross).toBe(45_000);
-    expect(line.totalAdvanceDeductions).toBe(8000);
-    expect(line.netPay).toBe(35_000);
+    expect(line.totalAdvanceDeductions).toBe(0);
+    expect(line.netPay).toBe(43_000);
     expect(line.allocations).toHaveLength(2);
     expect(line.allocations[0].amount).toBe(33_750);
     expect(line.allocations[1].amount).toBe(11_250);
+
+    const open = await request(app)
+      .get(`/api/v1/payroll/runs/${payrollRunId}/open-advances`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(open.body.data).toEqual([
+      expect.objectContaining({
+        advanceId,
+        purpose: 'Site petty cash',
+        outstanding: 8000,
+        deducting: 0,
+      }),
+    ]);
+
+    await request(app)
+      .put(`/api/v1/payroll/runs/${payrollRunId}/advance-deductions`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeId: line.employeeId, deductions: [{ advanceId, amount: 9000 }] })
+      .expect(400);
+
+    const adjusted = await request(app)
+      .put(`/api/v1/payroll/runs/${payrollRunId}/advance-deductions`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeId: line.employeeId, deductions: [{ advanceId, amount: 8000 }] })
+      .expect(200);
+    expect(adjusted.body.data.lines[0].totalAdvanceDeductions).toBe(8000);
+    expect(adjusted.body.data.lines[0].netPay).toBe(35_000);
+    expect(adjusted.body.data.totalNetPay).toBe(35_000);
   });
 
   it('posts accrual then disburses payroll and posts labor cost to projects', async () => {

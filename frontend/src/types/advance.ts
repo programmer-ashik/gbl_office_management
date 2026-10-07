@@ -1,5 +1,6 @@
 export const AdvanceStatus = {
   PENDING: 'pending',
+  APPROVED: 'approved',
   REJECTED: 'rejected',
   DISBURSED: 'disbursed',
   SUBMITTED: 'submitted',
@@ -10,6 +11,7 @@ export type AdvanceStatus = (typeof AdvanceStatus)[keyof typeof AdvanceStatus]
 
 export const ADVANCE_STATUS_LABEL: Record<AdvanceStatus, string> = {
   pending: 'Pending',
+  approved: 'Approved',
   rejected: 'Rejected',
   disbursed: 'Disbursed',
   submitted: 'Submitted',
@@ -30,15 +32,21 @@ export const SETTLEMENT_CASE_LABEL: Record<SettlementCase, string> = {
   more: 'More spend',
 }
 
+/** What vouchers must settle: disbursed less any salary recovery. */
+export function advanceToSettle(row: Advance): number {
+  return row.balanceToSettle ?? row.disbursedAmount ?? row.requestedAmount
+}
+
 export type Advance = {
   id: string
   advanceNumber: string
   status: AdvanceStatus
   employeeId: string
   employeeName: string
-  projectId: string
-  projectCode: string
-  projectName: string
+  /** null for office advances not tied to a project. */
+  projectId: string | null
+  projectCode: string | null
+  projectName: string | null
   requestedAmount: number
   purpose: string
   requestedAt: string
@@ -46,6 +54,10 @@ export type Advance = {
   disbursedAt: string | null
   treasuryAccountCode: string | null
   disbursementJournalNumber: string | null
+  /** Recovered from salary through payroll. */
+  payrollRecovered?: number
+  /** Disbursed less salary recovery — what vouchers must settle. */
+  balanceToSettle?: number | null
   vouchers: Array<{
     accountCode: string
     accountName: string
@@ -109,4 +121,6 @@ export type AdvanceProjectOption = {
 export type ExpenseAccountOption = {
   code: string
   name: string
+  /** Direct project cost head; not allowed on advances without a project. */
+  projectOnly?: boolean
 }

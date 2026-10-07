@@ -150,7 +150,7 @@ describe('Phase 3 project management & budgeting (e2e)', () => {
         memo: 'Milestone invoice recognized',
         projectId,
         lines: [
-          { accountCode: '1121', debit: 200000 },
+          { accountCode: '1151', debit: 200000 },
           { accountCode: '4110', credit: 200000 },
         ],
       })
@@ -196,7 +196,7 @@ describe('Phase 3 project management & budgeting (e2e)', () => {
         memo: 'Advance to site engineer',
         projectId,
         lines: [
-          { accountCode: '1131', debit: 10000 },
+          { accountCode: '1161', debit: 10000 },
           { accountCode: '1111', credit: 10000 },
         ],
       })

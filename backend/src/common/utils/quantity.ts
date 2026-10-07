@@ -1,4 +1,5 @@
 import { badRequest } from '../errors/app-error';
+import { isWholeAfterScaling } from './money';
 
 export const QTY_SCALE = 1000;
 
@@ -11,7 +12,7 @@ export function toMilliQty(quantity: number): number {
   }
   const scaled = quantity * QTY_SCALE;
   const milli = Math.round(scaled);
-  if (Math.abs(scaled - milli) > 1e-8) {
+  if (!isWholeAfterScaling(scaled)) {
     throw badRequest('Quantity cannot have more than 3 decimal places');
   }
   return milli;

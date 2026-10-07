@@ -47,7 +47,7 @@ export type FooterConfig = {
 
 /** Debit / Credit landscape voucher branding (settings + PDF). */
 export type VoucherConfig = {
-  theme: 'yellow' | 'blue' | 'emerald' | 'crimson' | 'charcoal'
+  theme: 'bw' | 'color'
   companySubtitle: string
   currencyLabel: string
   majorUnitLabel: string
@@ -173,9 +173,25 @@ export function defaultBalanceSheetTemplate(): BalanceSheetTemplate {
   }
 }
 
+export const DEFAULT_COMPANY_NAME = 'GBL Enterprise'
+
+/** Used on vouchers until a different logo is uploaded in Settings. */
+export const DEFAULT_COMPANY_LOGO_URL = '/gbl-logo.png'
+
+export const DEFAULT_COMPANY_ADDRESS =
+  'Plot No# B/49, Block No# E, Zakir Hossain Road, Mohammadpur, Dhaka-1207.'
+
+export function voucherLogoUrl(template: BalanceSheetTemplate): string {
+  return resolveAssetUrl(template.companyLogoUrl) ?? DEFAULT_COMPANY_LOGO_URL
+}
+
+export function voucherAddress(template: BalanceSheetTemplate): string {
+  return template.headerConfig.address?.trim() || DEFAULT_COMPANY_ADDRESS
+}
+
 export function defaultVoucherConfig(): VoucherConfig {
   return {
-    theme: 'yellow',
+    theme: 'color',
     companySubtitle: '',
     currencyLabel: 'Amount in BDT',
     majorUnitLabel: 'TAKA',
@@ -202,7 +218,7 @@ export function defaultJournalVoucherTemplate(): JournalVoucherTemplate {
     headerConfig: {
       companyName: 'GBL Enterprise',
       reportTitle: 'Journal Voucher',
-      address: '',
+      address: DEFAULT_COMPANY_ADDRESS,
       taxId: '',
       showDate: true,
       showStatusBadge: true,
@@ -305,6 +321,8 @@ export function hydrateClientTemplate(
     headerConfig: {
       ...fallback.headerConfig,
       ...(partial.headerConfig ?? {}),
+      address:
+        partial.headerConfig?.address?.trim() || fallback.headerConfig.address,
     },
     footerConfig: {
       ...fallback.footerConfig,
@@ -314,6 +332,13 @@ export function hydrateClientTemplate(
       ...defaultVoucherConfig(),
       ...(fallback.voucherConfig ?? {}),
       ...(partial.voucherConfig ?? {}),
+      theme: ['bw', 'charcoal'].includes(
+        String(
+          partial.voucherConfig?.theme ?? fallback.voucherConfig?.theme ?? '',
+        ),
+      )
+        ? 'bw'
+        : 'color',
       signatoryTitles:
         partial.voucherConfig?.signatoryTitles?.length
           ? partial.voucherConfig.signatoryTitles

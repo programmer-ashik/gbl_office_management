@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { MetricCard } from '../components/MetricCard'
+import { VoucherPdfPreview } from '../components/VoucherPdfPreview'
 import { Select } from '../components/ui'
 import { money } from '../types/accounting'
 import { Role } from '../types/auth'
@@ -15,7 +16,13 @@ import {
   PURCHASE_DESTINATION_LABEL,
   qty,
   type PurchaseOrder,
+  type Supplier,
 } from '../types/procurement'
+import {
+  downloadPurchaseOrderInvoicePdf,
+  purchaseOrderInvoiceNumber,
+  purchaseOrderInvoicePreviewUrl,
+} from '../utils/purchaseOrderInvoicePdf'
 
 type PaymentMethod = 'due' | 'cash' | 'bank'
 
@@ -31,6 +38,48 @@ export function PurchaseOrderDetailPage() {
   const [treasury, setTreasury] = useState<TreasuryAccount[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null)
+  const [invoiceBusy, setInvoiceBusy] = useState(false)
+
+  useEffect(
+    () => () => {
+      if (invoiceUrl) URL.revokeObjectURL(invoiceUrl)
+    },
+    [invoiceUrl],
+  )
+
+  async function invoiceInput(order: PurchaseOrder) {
+    const supplier: Supplier | null = await api
+      .supplier(order.supplierId)
+      .catch(() => null)
+    return { order, supplier }
+  }
+
+  async function onPreviewInvoice() {
+    if (!row) return
+    setInvoiceBusy(true)
+    setError(null)
+    try {
+      setInvoiceUrl(await purchaseOrderInvoicePreviewUrl(await invoiceInput(row)))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to build invoice')
+    } finally {
+      setInvoiceBusy(false)
+    }
+  }
+
+  async function onDownloadInvoice() {
+    if (!row) return
+    setInvoiceBusy(true)
+    setError(null)
+    try {
+      await downloadPurchaseOrderInvoicePdf(await invoiceInput(row))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to download invoice')
+    } finally {
+      setInvoiceBusy(false)
+    }
+  }
 
   async function load() {
     if (!id) return
@@ -157,6 +206,7 @@ export function PurchaseOrderDetailPage() {
   const canReturn =
     isFinance && row.receivedAmount > 0 && row.status !== 'cancelled'
   const showQty = canReceive || canReturn
+  const canInvoice = row.status === 'received'
 
   return (
     <>
@@ -170,9 +220,30 @@ export function PurchaseOrderDetailPage() {
             {row.warehouseName ? ` · ${row.warehouseName}` : row.warehouseCode ? ` · ${row.warehouseCode}` : ''}
           </p>
         </div>
-        <Link to="/procurement" className="ghost-link">
-          All POs
-        </Link>
+        <div className="form-actions">
+          {canInvoice ? (
+            <>
+              <button
+                type="button"
+                className="ghost"
+                disabled={invoiceBusy}
+                onClick={() => void onPreviewInvoice()}
+              >
+                Preview invoice
+              </button>
+              <button
+                type="button"
+                disabled={invoiceBusy}
+                onClick={() => void onDownloadInvoice()}
+              >
+                {invoiceBusy ? 'Preparing…' : 'Download invoice'}
+              </button>
+            </>
+          ) : null}
+          <Link to="/procurement" className="ghost-link">
+            All POs
+          </Link>
+        </div>
       </header>
 
       <section className="grid metric-card-grid">
@@ -316,6 +387,21 @@ export function PurchaseOrderDetailPage() {
       </section>
 
       {error ? <p className="form-error">{error}</p> : null}
+
+      <VoucherPdfPreview
+        title={`Invoice ${purchaseOrderInvoiceNumber(row)}`}
+        url={invoiceUrl}
+        onClose={() => setInvoiceUrl(null)}
+        actions={
+          <button
+            type="button"
+            disabled={invoiceBusy}
+            onClick={() => void onDownloadInvoice()}
+          >
+            Download PDF
+          </button>
+        }
+      />
     </>
   )
 }

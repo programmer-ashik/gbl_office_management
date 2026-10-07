@@ -46,6 +46,8 @@ export const JournalEntityType = {
   SUPPLIER: 'supplier',
   EMPLOYEE: 'employee',
   TREASURY: 'treasury',
+  /** Other receivable / payable party (Procurement → Other parties). */
+  OTHER: 'other',
 } as const
 
 export type JournalEntityType =

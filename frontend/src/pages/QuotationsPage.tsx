@@ -2,17 +2,26 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { canAuditQuotations, canCreateQuotation } from "../auth/permissions";
-import { Select } from "../components/ui";
+import {
+  canAuditQuotations,
+  canCreateQuotation,
+  canDeleteQuotation,
+  canEditQuotation,
+} from "../auth/permissions";
+import { Select, ActionMenu } from "../components/ui";
 import { money } from "../types/accounting";
-import type { PublicUser } from "../types/auth";
+import type { Employee } from "../types/employee";
 import type { Project } from "../types/project";
 import {
   QUOTATION_STATUS_LABEL,
   QuotationStatus,
   type Quotation,
 } from "../types/quotation";
-import { downloadQuotationPdf } from "../utils/quotationPdf";
+import {
+  downloadQuotationPdf,
+  quotationPdfPreviewUrl,
+} from "../utils/quotationPdf";
+import { VoucherPdfPreview } from "../components/VoucherPdfPreview";
 
 export function QuotationsPage() {
   const { user } = useAuth();
@@ -21,7 +30,7 @@ export function QuotationsPage() {
   const canAudit = canAuditQuotations(user?.role);
 
   const [rows, setRows] = useState<Quotation[]>([]);
-  const [employees, setEmployees] = useState<PublicUser[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,6 +40,9 @@ export function QuotationsPage() {
   const [status, setStatus] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewTitle, setPreviewTitle] = useState("");
 
   async function load() {
     setLoading(true);
@@ -49,7 +61,7 @@ export function QuotationsPage() {
       setRows(list);
       setProjects(projectRows);
       if (canAudit && employees.length === 0) {
-        const staff = await api.employees().catch(() => [] as PublicUser[]);
+        const staff = await api.employees().catch(() => [] as Employee[]);
         setEmployees(staff);
       }
     } catch (err) {
@@ -67,12 +79,36 @@ export function QuotationsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canCreate]);
 
+  function closePreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+  }
+
+  function openPreview(row: Quotation) {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewTitle(row.quotationNumber);
+    void quotationPdfPreviewUrl(row).then(setPreviewUrl);
+  }
+
+  async function onDelete(row: Quotation) {
+    if (!window.confirm(`Delete ${row.quotationNumber}?`)) return;
+    setError(null);
+    try {
+      await api.deleteQuotation(row.id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete quotation");
+    }
+  }
+
   const employeeOptions = useMemo(
     () =>
-      employees.map((row) => ({
-        value: row.id,
-        label: `${row.firstName} ${row.lastName}`.trim(),
-      })),
+      employees
+        .filter((row) => row.userId)
+        .map((row) => ({
+          value: row.userId!,
+          label: `${row.firstName} ${row.lastName}`.trim(),
+        })),
     [employees],
   );
 
@@ -231,7 +267,7 @@ export function QuotationsPage() {
 
         {/* Table */}
         <div className='journal-lines-scroll'>
-          <table className='journal-lines-table'>
+          <table className='journal-lines-table mobile-stack'>
             <thead>
               <tr>
                 <th>Number</th>
@@ -248,42 +284,69 @@ export function QuotationsPage() {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id}>
-                  <td>
+                  <td className='mobile-stack-title'>
                     <Link to={`/quotations/${row.id}`}>
                       {row.quotationNumber}
                     </Link>
                   </td>
 
-                  <td>{row.clientInfo.name}</td>
+                  <td data-label='Client'>{row.clientInfo.name}</td>
 
-                  <td>{row.projectName ?? "—"}</td>
+                  <td data-label='Project'>{row.projectName ?? "—"}</td>
 
-                  <td>{row.createdByName}</td>
+                  <td data-label='Created by'>{row.createdByName}</td>
 
-                  <td>{row.createdAt.slice(0, 10)}</td>
+                  <td data-label='Date'>{row.createdAt.slice(0, 10)}</td>
 
-                  <td>{QUOTATION_STATUS_LABEL[row.status]}</td>
+                  <td data-label='Status'>{QUOTATION_STATUS_LABEL[row.status]}</td>
 
-                  <td className='num'>{money(row.grandTotal)}</td>
+                  <td className='num' data-label='Total'>
+                    {money(row.grandTotal)}
+                  </td>
 
-                  <td>
-                    <div className='form-actions'>
-                      <button
-                        type='button'
-                        className='ghost'
-                        onClick={() => navigate(`/quotations/${row.id}`)}
-                      >
-                        Open
-                      </button>
-
-                      <button
-                        type='button'
-                        className='ghost'
-                        onClick={() => downloadQuotationPdf(row)}
-                      >
-                        PDF
-                      </button>
-                    </div>
+                  <td className='mobile-stack-actions'>
+                    <ActionMenu
+                      items={[
+                        {
+                          label: "View",
+                          onSelect: () => navigate(`/quotations/${row.id}`),
+                        },
+                        {
+                          label: "Preview",
+                          onSelect: () => openPreview(row),
+                        },
+                        ...(canEditQuotation(
+                          user?.role,
+                          row.status,
+                          row.createdBy === user?.id,
+                        )
+                          ? [
+                              {
+                                label: "Edit",
+                                onSelect: () =>
+                                  navigate(`/quotations/${row.id}?edit=1`),
+                              },
+                            ]
+                          : []),
+                        {
+                          label: "Download PDF",
+                          onSelect: () => void downloadQuotationPdf(row),
+                        },
+                        ...(canDeleteQuotation(
+                          user?.role,
+                          row.status,
+                          row.createdBy === user?.id,
+                        )
+                          ? [
+                              {
+                                label: "Delete",
+                                danger: true as const,
+                                onSelect: () => void onDelete(row),
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}
@@ -299,6 +362,12 @@ export function QuotationsPage() {
           </table>
         </div>
       </section>
+
+      <VoucherPdfPreview
+        title={previewTitle || "Quotation preview"}
+        url={previewUrl}
+        onClose={closePreview}
+      />
     </>
   );
 }

@@ -8,7 +8,11 @@ import { validateBody } from '../../common/middleware/validate';
 import type { AdvancesService } from '../advances/advances.service';
 import type { AuthService } from '../auth/auth.service';
 import type { UsersService } from '../users/users.service';
-import { CreateEmployeeDto } from './dto/employee.dto';
+import {
+  CreateEmployeeDto,
+  GrantEmployeeAccessDto,
+  UpdateEmployeeDto,
+} from './dto/employee.dto';
 import type { EmployeesService } from './employees.service';
 
 export function createEmployeesRouter(
@@ -64,6 +68,46 @@ export function createEmployeesRouter(
         req.user!,
       );
       sendSuccess(res, balance, 'Employee advance balance retrieved');
+    }),
+  );
+
+  router.post(
+    '/:id/grant-access',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(GrantEmployeeAccessDto),
+    asyncHandler(async (req, res) => {
+      const row = await employeesService.grantAccess(
+        String(req.params.id),
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Login account created for employee', 201);
+    }),
+  );
+
+  router.get(
+    '/:id',
+    auth,
+    requireRoles(Role.ADMIN, Role.ACCOUNTANT),
+    asyncHandler(async (req, res) => {
+      const row = await employeesService.get(String(req.params.id), req.user!);
+      sendSuccess(res, row, 'Employee retrieved successfully');
+    }),
+  );
+
+  router.patch(
+    '/:id',
+    auth,
+    requireRoles(Role.ADMIN),
+    validateBody(UpdateEmployeeDto),
+    asyncHandler(async (req, res) => {
+      const row = await employeesService.update(
+        String(req.params.id),
+        req.body,
+        req.user!,
+      );
+      sendSuccess(res, row, 'Employee updated successfully');
     }),
   );
 
