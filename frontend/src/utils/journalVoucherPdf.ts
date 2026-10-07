@@ -25,9 +25,24 @@ const TOTAL_GRAY: [number, number, number] = [180, 180, 180]
 
 export type VoucherKind = 'debit' | 'credit' | 'journal'
 
+/** Cash, bank and mobile-banking heads sit under 1110 (1111 / 112x / 113x). */
+function isTreasuryAccount(code: string, name: string): boolean {
+  if (/^11[123]/.test(code.trim())) return true
+  return (
+    code.trim().startsWith('1') &&
+    /cash|bank|bkash|nagad|mobile|treasury|petty/i.test(name)
+  )
+}
+
+function isAdvanceSettlement(entry: JournalEntry): boolean {
+  return entry.journalType === JournalType.EMPLOYEE_SETTLEMENT
+}
+
 /** Payment / outflow → Debit Voucher; receipt / inflow → Credit Voucher. */
 export function resolveVoucherKind(entry: JournalEntry): VoucherKind {
   switch (entry.journalType) {
+    case JournalType.EMPLOYEE_SETTLEMENT:
+      return 'journal'
     case JournalType.CASH_PAYMENT:
     case JournalType.BANK_WITHDRAWAL:
     case JournalType.SUPPLIER_PAYMENT:
@@ -52,8 +67,7 @@ export function resolveVoucherKind(entry: JournalEntry): VoucherKind {
   let cashDebit = 0
   let cashCredit = 0
   for (const line of entry.lines) {
-    const label = `${line.accountCode} ${line.accountName}`.toLowerCase()
-    if (!/cash|bank|treasury|petty/.test(label)) continue
+    if (!isTreasuryLine(line)) continue
     cashDebit += line.debit || 0
     cashCredit += line.credit || 0
   }
@@ -66,6 +80,12 @@ export function voucherKindTitle(kind: VoucherKind): string {
   if (kind === 'debit') return 'Debit Voucher'
   if (kind === 'credit') return 'Credit Voucher'
   return 'Journal Voucher'
+}
+
+export function voucherTitle(entry: JournalEntry): string {
+  return isAdvanceSettlement(entry)
+    ? 'Advance Settlement Voucher'
+    : voucherKindTitle(resolveVoucherKind(entry))
 }
 
 const ONES = [
@@ -159,19 +179,11 @@ function partyLabel(entry: JournalEntry, kind: 'debit' | 'credit'): string {
   if (preferred) return preferred
   const any = entry.lines.find((l) => l.entityName)?.entityName
   if (any) return any
-  const expenseLike = entry.lines.find(
-    (l) =>
-      l.debit > 0 &&
-      !/cash|bank|treasury/i.test(`${l.accountCode} ${l.accountName}`),
-  )
+  const expenseLike = entry.lines.find((l) => l.debit > 0 && !isTreasuryLine(l))
   if (kind === 'debit' && expenseLike) {
     return `${expenseLike.accountCode} · ${expenseLike.accountName}`
   }
-  const incomeLike = entry.lines.find(
-    (l) =>
-      l.credit > 0 &&
-      !/cash|bank|treasury/i.test(`${l.accountCode} ${l.accountName}`),
-  )
+  const incomeLike = entry.lines.find((l) => l.credit > 0 && !isTreasuryLine(l))
   if (kind === 'credit' && incomeLike) {
     return `${incomeLike.accountCode} · ${incomeLike.accountName}`
   }
@@ -179,9 +191,7 @@ function partyLabel(entry: JournalEntry, kind: 'debit' | 'credit'): string {
 }
 
 function isTreasuryLine(line: JournalLine): boolean {
-  return /cash|bank|bkash|nagad|mobile|treasury|petty/i.test(
-    `${line.accountCode} ${line.accountName}`,
-  )
+  return isTreasuryAccount(line.accountCode, line.accountName)
 }
 
 /** Hand Cash, Cash in Bank (named account), or Mobile Banking (bKash / Nagad). */
@@ -277,6 +287,8 @@ function lineNarrative(
 
 /** Lines printed as voucher rows: the non-cash/bank side of the payment or receipt. */
 function voucherRows(entry: JournalEntry, kind: 'debit' | 'credit'): JournalLine[] {
+  // Settlement: every bill plus any unspent cash returned, so the rows add up to the advance.
+  if (isAdvanceSettlement(entry)) return entry.lines.filter((l) => l.debit > 0)
   const lines: JournalLine[] =
     kind === 'debit'
       ? entry.lines.filter((l) => l.debit > 0)
@@ -292,6 +304,17 @@ export function voucherPartyNames(
   entry: JournalEntry,
   kind: 'debit' | 'credit',
 ): string {
+  if (isAdvanceSettlement(entry)) {
+    const employees = [
+      ...new Set(
+        entry.lines
+          .filter((line) => line.credit > 0)
+          .map((line) => line.entityName?.trim())
+          .filter(Boolean),
+      ),
+    ]
+    if (employees.length > 0) return employees.join(', ')
+  }
   const names = [
     ...new Set(
       voucherRows(entry, kind)
@@ -306,10 +329,70 @@ export function voucherMethodLabel(kind: 'debit' | 'credit'): string {
   return kind === 'credit' ? 'Receiving Method:' : 'Payment Method:'
 }
 
+function amountLabel(value: number): string {
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
+}
+
+function sumLines(lines: JournalLine[], side: 'debit' | 'credit'): number {
+  return Math.round(lines.reduce((sum, line) => sum + (line[side] || 0), 0) * 100) / 100
+}
+
+/** "Against advance ADV-… (Advance to Staff · Rahim) of 100: spent 90, returned 10 to Hand Cash" */
+function settlementSummary(entry: JournalEntry): string {
+  const advanceLines = entry.lines.filter((l) => l.credit > 0 && l.accountCode === '1161')
+  const dueLines = entry.lines.filter((l) => l.credit > 0 && l.accountCode !== '1161')
+  const returnLines = entry.lines.filter((l) => l.debit > 0 && isTreasuryLine(l))
+  const spentLines = entry.lines.filter((l) => l.debit > 0 && !isTreasuryLine(l))
+  const holder = advanceLines.find((l) => l.entityName)?.entityName?.trim()
+  const head = advanceLines[0]?.accountName || 'Advance to Staff'
+  const parts = [`spent ${amountLabel(sumLines(spentLines, 'debit'))}`]
+  const returned = sumLines(returnLines, 'debit')
+  if (returned > 0) {
+    parts.push(
+      `returned ${amountLabel(returned)} to ${[...new Set(returnLines.map(channelLabel))].join(', ')}`,
+    )
+  }
+  const due = sumLines(dueLines, 'credit')
+  if (due > 0) parts.push(`${amountLabel(due)} payable to the employee`)
+  const reference = entry.reference ? ` ${entry.reference}` : ''
+  return `Settled against advance${reference} (${head}${holder ? ` · ${holder}` : ''}) of ${amountLabel(sumLines(advanceLines, 'credit'))}: ${parts.join(', ')}.`
+}
+
+function settlementLineItems(
+  entry: JournalEntry,
+): Array<{ description: string; major: string; minor: string }> {
+  const rows = voucherRows(entry, 'debit')
+  const items = rows.map((line) => {
+    const whole = Math.floor(Math.abs(line.debit))
+    const cents = Math.round((Math.abs(line.debit) - whole) * 100)
+    const description = isTreasuryLine(line)
+      ? `Being the amount of unspent advance returned to ${channelLabel(line)}`
+      : `Being the amount of ${lineNarrative(entry, line, rows)}`
+    return {
+      description,
+      major: whole.toLocaleString('en-US'),
+      minor: String(cents).padStart(2, '0'),
+    }
+  })
+  return [...items, { description: settlementSummary(entry), major: '', minor: '' }]
+}
+
+/** Settlement: where unspent cash came back; plain journals have no payment method. */
+export function voucherSettlementMethod(entry: JournalEntry): string {
+  const returned = entry.lines.filter((l) => l.debit > 0 && isTreasuryLine(l))
+  return returned.length
+    ? `Unspent returned to ${[...new Set(returned.map(channelLabel))].join(', ')}`
+    : 'Adjusted against employee advance'
+}
+
 export function voucherLineItems(
   entry: JournalEntry,
   kind: 'debit' | 'credit',
 ): Array<{ description: string; major: string; minor: string }> {
+  if (isAdvanceSettlement(entry)) return settlementLineItems(entry)
   const rows = voucherRows(entry, kind)
   const channels = paymentChannels(entry, kind)
   const chequeNo = entry.chequeNumber?.trim()
@@ -369,10 +452,15 @@ async function buildDebitCreditVoucherPdf(
   const amount = entry.totalDebit
   const party = voucherPartyNames(entry, kind)
   const items = voucherLineItems(entry, kind)
+  const settlement = isAdvanceSettlement(entry)
   const title =
     options?.forceTitle ??
     (kind === 'debit' ? 'DEBIT VOUCHER' : 'CREDIT VOUCHER')
-  const partyField = kind === 'debit' ? 'Paid to:' : 'Received from:'
+  const partyField = settlement
+    ? 'Employee:'
+    : kind === 'debit'
+      ? 'Paid to:'
+      : 'Received from:'
 
   // —— Accent left sidebar ——
   const monochrome = normalizeVoucherTheme(vc.theme) === 'bw'
@@ -500,10 +588,12 @@ async function buildDebitCreditVoucherPdf(
   y = 46
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
-  const methodLabel = voucherMethodLabel(kind)
+  const methodLabel = settlement ? 'Settlement:' : voucherMethodLabel(kind)
   doc.text(methodLabel, contentX, y)
   const methodX = contentX + doc.getTextWidth(methodLabel) + 3
-  const method = voucherPaymentMethod(entry, kind)
+  const method = settlement
+    ? voucherSettlementMethod(entry)
+    : voucherPaymentMethod(entry, kind)
   if (method) {
     const methodW = contentRight - methodX - 2
     doc.setFont('helvetica', 'bold')
@@ -681,7 +771,7 @@ export async function buildJournalVoucherPdf(
     // Neutral journals: still landscape, titled as Journal via debit layout
     // with kind overridden in PDF title when needed.
     return buildDebitCreditVoucherPdf(entry, landscapeKind, template, {
-      forceTitle: 'JOURNAL VOUCHER',
+      forceTitle: voucherTitle(entry).toUpperCase(),
     })
   }
   return buildDebitCreditVoucherPdf(entry, kind, template)

@@ -23,8 +23,7 @@ import {
   downloadJournalVoucher,
   journalVoucherPreviewUrl,
   loadJournalVoucherTemplate,
-  resolveVoucherKind,
-  voucherKindTitle,
+  voucherTitle,
 } from "../utils/journalVoucherPdf";
 import { VoucherPdfPreview } from "../components/VoucherPdfPreview";
 import { lineCounterpart, lineDescription } from "../utils/journalNarrative";
@@ -169,14 +168,13 @@ export function JournalDetailPage() {
   const type = entry.effectiveType ?? entry.journalType;
   const typeLabel =
     JOURNAL_TYPE_LABEL[type as JournalType] ?? type ?? "General";
-  const voucherKind = resolveVoucherKind(entry);
-  const voucherTitle = voucherKindTitle(voucherKind);
+  const pageTitle = voucherTitle(entry);
 
   return (
     <>
       <header className='workspace-header'>
         <div>
-          <h1>{voucherTitle}</h1>
+          <h1>{pageTitle}</h1>
           <p className='muted'>
             {entry.entryNumber} · {typeLabel}
           </p>
