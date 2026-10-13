@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { CashFlowWeeklyView } from "../components/CashFlowWeeklyView";
 import { MetricCard } from "../components/MetricCard";
 import { money } from "../types/accounting";
 import type { CashFlowForecast, FinancialStatements } from "../types/analytics";
@@ -65,14 +66,6 @@ export function DashboardPage() {
         .catch(() => setStatements(null)),
     ]);
   }, [isFinance]);
-
-  const maxFlow = (() => {
-    if (!cashFlow?.weeks.length) return 1;
-    return Math.max(
-      1,
-      ...cashFlow.weeks.map((week) => Math.max(week.inflow, week.outflow)),
-    );
-  })();
 
   if (!user) {
     return null;
@@ -195,26 +188,7 @@ export function DashboardPage() {
               })()}
             />
           </section>
-          <div className='cashflow-bars'>
-            {cashFlow.weeks.map((week) => (
-              <div key={week.weekStart} className='cashflow-row'>
-                <span>{week.weekLabel}</span>
-                <div className='cashflow-track' aria-hidden>
-                  <div
-                    className='cashflow-in'
-                    style={{ width: `${(week.inflow / maxFlow) * 100}%` }}
-                  />
-                  <div
-                    className='cashflow-out'
-                    style={{ width: `${(week.outflow / maxFlow) * 100}%` }}
-                  />
-                </div>
-                <span className={week.net < 0 ? "loss" : "gain"}>
-                  {money(week.net)}
-                </span>
-              </div>
-            ))}
-          </div>
+          <CashFlowWeeklyView forecast={cashFlow} />
         </section>
       ) : null}
 

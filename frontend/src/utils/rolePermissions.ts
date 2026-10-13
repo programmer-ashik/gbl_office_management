@@ -33,6 +33,7 @@ const SPLIT_SECTIONS: Record<string, string[]> = {
 /** Pages moved to another section stay open to users granted their old one. */
 const MOVED_PATHS: Record<string, string> = {
   '/customers': 'reporting',
+  '/analytics/cash-flow': 'reporting',
 }
 
 /** Saved as `-<id>` when a split-out section was explicitly unchecked. */

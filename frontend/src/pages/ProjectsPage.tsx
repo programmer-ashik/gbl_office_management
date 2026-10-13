@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { ClampText } from '../components/ClampText'
 import { QuickCustomerForm } from '../components/QuickCustomerForm'
 import { ActionMenu, Modal, Select } from '../components/ui'
 import { money, type Customer } from '../types/accounting'
@@ -370,97 +371,124 @@ export function ProjectsPage() {
             />
           </label>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Name</th>
-              <th>Client</th>
-              <th>Status</th>
-              <th>Budget used</th>
-              <th>Net profit</th>
-              <th>Invoice</th>
-              <th aria-label="Actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {visibleProjects.map((project) => (
-              <tr key={project.id}>
-                <td>{project.code}</td>
-                <td>
-                  <Link to={`/projects/${project.id}`}>{project.name}</Link>
-                </td>
-                <td>{project.client.name}</td>
-                <td>
-                  <span className={`status-pill status-${project.status}`}>
-                    {PROJECT_STATUS_LABEL[project.status]}
-                  </span>
-                </td>
-                <td>
-                  {project.financials.budgetUsedPct === null
-                    ? money(project.financials.totalCost)
-                    : `${project.financials.budgetUsedPct.toFixed(0)}%`}
-                  {project.financials.isOverBudget ? (
-                    <span className="badge-bad budget-flag">Over</span>
-                  ) : null}
-                </td>
-                <td className={project.financials.netProfit < 0 ? 'loss' : 'gain'}>
-                  {money(project.financials.netProfit)}
-                </td>
-                <td>
-                  {(() => {
-                    const invoice = invoiceByProject.get(project.id)
-                    if (invoice) {
-                      return (
-                        <Link to={`/projects/${project.id}/invoice`}>
-                          {invoice.invoiceNumber} · {money(invoice.amount)}
-                        </Link>
-                      )
-                    }
-                    return project.status === 'completed' ? (
-                      <span className="badge-warn">Not sent</span>
-                    ) : (
-                      <span className="muted">—</span>
-                    )
-                  })()}
-                </td>
-                <td>
-                  <ActionMenu
-                    items={[
-                      project.status === 'completed'
-                        ? {
-                            label: invoiceByProject.has(project.id)
-                              ? 'View invoice'
-                              : 'Send invoice',
-                            onSelect: () => openInvoice(project),
-                          }
-                        : {
-                            label: 'Complete & send invoice',
-                            onSelect: () => {
-                              setCompleteError(null)
-                              setCompleting(project)
-                            },
-                          },
-                      {
-                        label: 'Open project',
-                        onSelect: () => navigate(`/projects/${project.id}`),
-                      },
-                    ]}
-                  />
-                </td>
-              </tr>
-            ))}
-            {visibleProjects.length === 0 ? (
+        <div className="table-scroll">
+          <table className="fixed-table">
+            <colgroup>
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '56px' }} />
+            </colgroup>
+            <thead>
               <tr>
-                <td colSpan={8} className="muted">
-                  {filterCustomer
-                    ? `No projects under ${filterCustomer.name}.`
-                    : 'No projects yet.'}
-                </td>
+                <th>Code</th>
+                <th>Name</th>
+                <th>Client</th>
+                <th>Status</th>
+                <th>Budget used</th>
+                <th className="num">Net profit</th>
+                <th>Invoice</th>
+                <th aria-label="Actions" />
               </tr>
-            ) : null}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {visibleProjects.map((project) => (
+                <tr key={project.id}>
+                  <td>
+                    <ClampText title={project.code}>{project.code}</ClampText>
+                  </td>
+                  <td>
+                    <ClampText title={project.name}>
+                      <Link to={`/projects/${project.id}`}>{project.name}</Link>
+                    </ClampText>
+                  </td>
+                  <td>
+                    <ClampText title={project.client.name}>
+                      {project.client.name}
+                    </ClampText>
+                  </td>
+                  <td>
+                    <span className={`status-pill status-${project.status}`}>
+                      {PROJECT_STATUS_LABEL[project.status]}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="cell-with-flag">
+                      <ClampText>
+                        {project.financials.budgetUsedPct === null
+                          ? money(project.financials.totalCost)
+                          : `${project.financials.budgetUsedPct.toFixed(0)}%`}
+                      </ClampText>
+                      {project.financials.isOverBudget ? (
+                        <span className="badge-bad budget-flag">Over</span>
+                      ) : null}
+                    </div>
+                  </td>
+                  <td
+                    className={`num ${project.financials.netProfit < 0 ? 'loss' : 'gain'}`}
+                  >
+                    {money(project.financials.netProfit)}
+                  </td>
+                  <td>
+                    {(() => {
+                      const invoice = invoiceByProject.get(project.id)
+                      if (invoice) {
+                        const label = `${invoice.invoiceNumber} · ${money(invoice.amount)}`
+                        return (
+                          <ClampText title={label}>
+                            <Link to={`/projects/${project.id}/invoice`}>{label}</Link>
+                          </ClampText>
+                        )
+                      }
+                      return project.status === 'completed' ? (
+                        <span className="badge-warn">Not sent</span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )
+                    })()}
+                  </td>
+                  <td className="cell-actions">
+                    <ActionMenu
+                      items={[
+                        project.status === 'completed'
+                          ? {
+                              label: invoiceByProject.has(project.id)
+                                ? 'View invoice'
+                                : 'Send invoice',
+                              onSelect: () => openInvoice(project),
+                            }
+                          : {
+                              label: 'Complete & send invoice',
+                              onSelect: () => {
+                                setCompleteError(null)
+                                setCompleting(project)
+                              },
+                            },
+                        {
+                          label: 'Open project',
+                          onSelect: () => navigate(`/projects/${project.id}`),
+                        },
+                      ]}
+                    />
+                  </td>
+                </tr>
+              ))}
+              {visibleProjects.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="muted">
+                    {filterCustomer
+                      ? `No projects under ${filterCustomer.name}.`
+                      : 'No projects yet.'}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <Modal

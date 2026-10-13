@@ -63,6 +63,13 @@ export const NAV_SECTIONS: NavSection[] = [
         hint: 'Burn rate & KPIs',
         roles: PROJECT_VIEW,
       },
+      {
+        label: 'Cash Flow & Burn Rate',
+        to: '/analytics/cash-flow',
+        icon: 'cashflow',
+        hint: 'Forecasts · Analytics',
+        roles: FINANCE,
+      },
     ],
   },
   {
@@ -407,13 +414,6 @@ export const NAV_SECTIONS: NavSection[] = [
         to: '/accounts',
         icon: 'accounts',
         hint: 'General ledger heads',
-        roles: FINANCE,
-      },
-      {
-        label: 'Cash Flow & Burn Rate',
-        to: '/analytics/cash-flow',
-        icon: 'cashflow',
-        hint: 'Forecasts · Analytics',
         roles: FINANCE,
       },
     ],

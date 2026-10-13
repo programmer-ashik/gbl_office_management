@@ -121,8 +121,16 @@ textarea {
   padding: 32px 20px;
   overflow: hidden;
   background:
-    radial-gradient(ellipse 70% 55% at 15% 20%, rgba(14, 165, 233, 0.28), transparent 58%),
-    radial-gradient(ellipse 55% 45% at 88% 78%, rgba(20, 184, 166, 0.22), transparent 55%),
+    radial-gradient(
+      ellipse 70% 55% at 15% 20%,
+      rgba(14, 165, 233, 0.28),
+      transparent 58%
+    ),
+    radial-gradient(
+      ellipse 55% 45% at 88% 78%,
+      rgba(20, 184, 166, 0.22),
+      transparent 55%
+    ),
     linear-gradient(155deg, #020617 0%, #0c1a2e 42%, #0f2744 72%, #12304f 100%);
 }
 
@@ -276,7 +284,7 @@ textarea {
 
 .auth-brand-name {
   margin: 0;
-  font-family: var(--display, 'IBM Plex Serif', Georgia, serif);
+  font-family: var(--display, "IBM Plex Serif", Georgia, serif);
   font-size: 1.35rem;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -340,7 +348,7 @@ textarea {
   transition: background-color 99999s ease-out;
 }
 
-.auth-card button[type='submit'] {
+.auth-card button[type="submit"] {
   margin-top: 4px;
   min-height: 44px;
   background: linear-gradient(90deg, #0c4a6e 0%, #0284c7 55%, #0ea5e9 100%);
@@ -348,7 +356,7 @@ textarea {
   box-shadow: none;
 }
 
-.auth-card button[type='submit']:hover:not(:disabled) {
+.auth-card button[type="submit"]:hover:not(:disabled) {
   background: linear-gradient(90deg, #082f49 0%, #0369a1 55%, #0284c7 100%);
   filter: none;
 }
@@ -495,7 +503,7 @@ button:hover:not(:disabled):not(.ghost):not(.ui-select-trigger):not(
     .sidebar-toggle
   ):not(.theme-picker-card):not(.recon-clip):not(.file-upload-browse):not(
     .journal-line-note
-  ):not(.expandable-text) {
+  ):not(.expandable-text):not(.clamp-text-toggle) {
   background: linear-gradient(
     90deg,
     var(--theme-btn-hover-from, var(--theme-btn-from, var(--navy))) 0%,
@@ -1141,7 +1149,7 @@ button.ghost {
 
 .nav-link {
   display: block;
-  color: var(--sidebar-muted, #c9d2de);
+  color: var(--sidebar-muted, #ffffff);
   text-decoration: none;
   padding: 8px 10px 8px 12px;
   border-radius: var(--radius);
@@ -1441,6 +1449,99 @@ button.ghost {
 .expandable-text-static {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* Fixed column widths (set with <colgroup>); long text never widens a column. */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+table.fixed-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 760px;
+}
+
+table.fixed-table th,
+table.fixed-table td {
+  overflow: hidden;
+  vertical-align: top;
+}
+
+table.fixed-table th {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+table.fixed-table td.num,
+table.fixed-table th.num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+table.fixed-table td.cell-actions {
+  overflow: visible;
+}
+
+.clamp-text {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.clamp-text-body {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clamp-text.is-truncated {
+  cursor: pointer;
+}
+
+.clamp-text.is-open .clamp-text-body {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.clamp-text-toggle {
+  min-height: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  color: #1d4ed8;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.clamp-text-toggle:hover,
+.clamp-text-toggle:focus-visible {
+  text-decoration: underline;
+  background: none;
+}
+
+/* Clamped text with a trailing badge (e.g. "Over" budget). */
+.cell-with-flag {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cell-with-flag > .clamp-text {
+  flex: 1 1 auto;
+}
+
+.cell-with-flag > .budget-flag {
+  flex: none;
+  margin-left: 0;
 }
 
 /* Fixed-width description column: text wraps and grows downward. */
@@ -2839,38 +2940,176 @@ td .ui-action-menu {
   );
 }
 
-.cashflow-bars {
-  display: grid;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.cashflow-row {
-  display: grid;
-  grid-template-columns: 110px 1fr 90px;
-  gap: 10px;
+.cf-toolbar {
+  display: flex;
   align-items: center;
-  font-size: var(--text-sm);
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 0 8px;
 }
 
-.cashflow-track {
-  height: 10px;
-  background: rgba(15, 39, 68, 0.06);
+.cf-toolbar h3 {
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+.cf-view-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
+  background: var(--card);
+}
+
+.cf-view-toggle button.ghost {
+  min-height: 30px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.cf-view-toggle button.ghost.is-active {
+  background: var(--navy);
+  color: #fff;
+}
+
+.cf-chart {
+  position: relative;
+  width: 100%;
   overflow: hidden;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
 }
 
-.cashflow-in {
+.cf-chart svg {
+  display: block;
+}
+
+.cf-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 6px;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.cf-legend span,
+.cf-tip-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cf-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.cf-swatch-in {
   background: var(--ok);
-  height: 100%;
 }
 
-.cashflow-out {
+.cf-swatch-out {
   background: var(--danger);
-  height: 100%;
-  justify-self: end;
+}
+
+.cf-swatch-net {
+  height: 3px;
+  width: 14px;
+  border-radius: 2px;
+  background: var(--navy);
+}
+
+.cf-grid {
+  stroke: var(--line);
+  stroke-dasharray: 3 4;
+}
+
+.cf-axis {
+  stroke: var(--line-strong);
+}
+
+.cf-tick,
+.cf-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.cf-bar-in {
+  fill: var(--ok);
+}
+
+.cf-bar-out {
+  fill: var(--danger);
+}
+
+.cf-net-line {
+  fill: none;
+  stroke: var(--navy);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.cf-net-dot {
+  fill: var(--card);
+  stroke: var(--navy);
+  stroke-width: 2;
+}
+
+.cf-net-dot.is-negative {
+  stroke: var(--danger);
+}
+
+.cf-hover-band {
+  fill: rgba(15, 39, 68, 0.05);
+}
+
+.cf-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.cf-tooltip {
+  position: absolute;
+  transform: translate(-50%, 0);
+  display: grid;
+  gap: 4px;
+  min-width: 170px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgba(15, 39, 68, 0.14);
+  font-size: var(--text-sm);
+  pointer-events: none;
+}
+
+.cf-tip-row b {
+  margin-left: auto;
+  padding-left: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-tip-balance {
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
+}
+
+.cf-table {
+  min-width: 560px;
+}
+
+.cf-table .cf-opening-row td {
+  color: var(--muted);
+}
+
+.cf-table tfoot td {
+  padding: 10px 4px;
+  font-weight: 700;
+  border-top: 2px solid var(--line-strong);
 }
 
 .journal-lines-scroll {
@@ -3230,8 +3469,7 @@ td .ui-action-menu {
   .name-row,
   .triple-row,
   .inline-form,
-  .match-grid,
-  .cashflow-row {
+  .match-grid {
     grid-template-columns: 1fr;
   }
 
@@ -3761,6 +3999,16 @@ td .ui-action-menu {
   text-decoration: underline double;
 }
 
+/* Keep statement bands readable over the theme's row-hover tint. */
+.bs-statement .bs-table tbody tr.bs-statement-section:hover td {
+  background: var(--ink);
+  color: #fff;
+}
+
+.bs-statement .bs-table tbody tr.bs-statement-total:hover td {
+  background: rgba(15, 39, 68, 0.06);
+}
+
 .bs-total-row {
   border-top: 1px solid var(--ink);
   background: rgba(15, 39, 68, 0.04);
@@ -4261,7 +4509,7 @@ table thead th,
     .theme-picker-card
   ):not(.recon-clip):not(.file-upload-browse):not(.journal-line-note):not(
     .expandable-text
-  ) {
+  ):not(.clamp-text-toggle) {
   border-radius: 999px;
   background: linear-gradient(
     90deg,
@@ -4280,7 +4528,7 @@ table thead th,
     .theme-picker-card
   ):not(.recon-clip):not(.file-upload-browse):not(.journal-line-note):not(
     .expandable-text
-  ):hover {
+  ):not(.clamp-text-toggle):hover {
   background: linear-gradient(
     90deg,
     var(--theme-btn-hover-from, var(--theme-btn-from, #0f2744)) 0%,
@@ -4576,7 +4824,11 @@ table thead th,
   min-height: 72px;
   padding: 12px 14px;
   border: 1.5px dashed
-    color-mix(in srgb, var(--theme-table-head-bg, #1d4ed8) 45%, var(--line-strong));
+    color-mix(
+      in srgb,
+      var(--theme-table-head-bg, #1d4ed8) 45%,
+      var(--line-strong)
+    );
   border-radius: var(--theme-input-radius, var(--radius));
   background: color-mix(in srgb, var(--theme-table-head-bg, #1d4ed8) 5%, #fff);
   cursor: pointer;
@@ -6187,4 +6439,98 @@ button.ghost.link-button {
 .inv-grossup-breakdown > p {
   margin: 0.2rem 0 0;
   font-size: 0.78rem;
+}
+
+/*
+ * Every data table: a long value stays on one line with "…" instead of
+ * stretching its column; clicking it wraps it downward (useTableCellClamp).
+ * Zero specificity, so cells with their own width/wrap rules keep them.
+ * Documents, entry forms and fixed-layout tables opt out.
+ */
+@media screen {
+  :where(
+      table:not(
+        .fixed-table,
+        .no-clamp,
+        .bs-table,
+        .inv-table,
+        .cheque-preview-lines,
+        .recon-table
+      )
+    )
+    > :where(tbody)
+    > :where(tr)
+    > :where(
+      td:not([colspan]):not(
+          :has(
+            input,
+            select,
+            textarea,
+            button,
+            table,
+            img,
+            .ui-select,
+            .ui-action-menu
+          )
+        )
+    ) {
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :where(
+      table:not(
+        .fixed-table,
+        .no-clamp,
+        .bs-table,
+        .inv-table,
+        .cheque-preview-lines,
+        .recon-table
+      )
+    )
+    > :where(tbody)
+    > :where(tr)
+    > :where(
+      td:not([colspan]):not(
+          :has(
+            input,
+            select,
+            textarea,
+            button,
+            table,
+            img,
+            .ui-select,
+            .ui-action-menu
+          )
+        )
+    )
+    > :where(div, p) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  table td[data-clamp-truncated] {
+    cursor: pointer;
+  }
+
+  table td[data-clamp-open],
+  table td[data-clamp-open] > * {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+  }
+
+  table td[data-clamp-open] {
+    cursor: pointer;
+  }
+}
+
+@media (max-width: 720px) {
+  table.mobile-stack td {
+    max-width: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }

@@ -6,12 +6,14 @@ import { useAuth } from '../auth/AuthContext'
 import { NavIcon } from '../nav/icons'
 import { isPathDenied } from '../utils/rolePermissions'
 import { MOBILE_QUERY, useMediaQuery } from '../utils/useMediaQuery'
+import { useTableCellClamp } from '../utils/useTableCellClamp'
 
 export function AppLayout() {
   const { user } = useAuth()
   const location = useLocation()
   const isMobile = useMediaQuery(MOBILE_QUERY)
   const [menuOpen, setMenuOpen] = useState(false)
+  useTableCellClamp(location.pathname)
 
   useEffect(() => {
     setMenuOpen(false)

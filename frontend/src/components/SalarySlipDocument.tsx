@@ -85,7 +85,7 @@ export function SalarySlipDocument({
             </div>
 
             <div className="grid gap-0 border-t border-[var(--line-strong,#cfd6e0)] sm:grid-cols-2">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm no-clamp">
                 <thead>
                   <tr className="bg-[var(--theme-table-head-bg,#1d4ed8)] text-[var(--theme-table-head-color,#fff)]">
                     <th className="px-4 py-2 text-left font-semibold">
@@ -118,7 +118,7 @@ export function SalarySlipDocument({
                 </tbody>
               </table>
 
-              <table className="w-full text-sm">
+              <table className="w-full text-sm no-clamp">
                 <thead>
                   <tr className="bg-[var(--theme-table-head-bg,#1d4ed8)] text-[var(--theme-table-head-color,#fff)]">
                     <th className="px-4 py-2 text-left font-semibold">
