@@ -54,6 +54,7 @@ import { SupplierDetailPage } from "./pages/SupplierDetailPage";
 import { TreasuryDetailPage } from "./pages/TreasuryDetailPage";
 import { TrialBalancePage } from "./pages/TrialBalancePage";
 import { BalanceSheetPage } from "./pages/BalanceSheetPage";
+import { IncomeStatementPage } from "./pages/IncomeStatementPage";
 import { BalanceSheetTemplateBuilderPage } from "./pages/BalanceSheetTemplateBuilderPage";
 import { JournalVoucherTemplateBuilderPage } from "./pages/ReportTemplateBuilderPage";
 import { AccountLedgerPage } from "./pages/AccountLedgerPage";
@@ -127,6 +128,10 @@ export default function App() {
             <Route path='/reports/day' element={<DayReportPage />} />
             <Route path='/trial-balance' element={<TrialBalancePage />} />
             <Route path='/balance-sheet' element={<BalanceSheetPage />} />
+            <Route
+              path='/income-statement'
+              element={<IncomeStatementPage />}
+            />
 
             <Route path='/projects' element={<ProjectsPage />} />
             <Route path='/projects/budgets' element={<ProjectBudgetsPage />} />

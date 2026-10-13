@@ -18,6 +18,7 @@ import {
   JournalStatus,
   JournalType,
   money,
+  type Account,
   type JournalEntry,
   type JournalLine,
 } from "../types/accounting";
@@ -126,6 +127,8 @@ type JournalRegisterProps = {
 };
 
 const PAGE_SIZE = 15;
+/** Project filter value for lines tagged to no project (office overhead). */
+const NO_PROJECT = "none";
 
 function compareChronological(a: JournalEntry, b: JournalEntry): number {
   const byDate = a.date.slice(0, 10).localeCompare(b.date.slice(0, 10));
@@ -148,6 +151,40 @@ function lineProjectId(entry: JournalEntry, line: JournalLine): string | null {
   return tagged.size === 1 ? ([...tagged][0] as string) : null;
 }
 
+/** Postable codes under `code` (itself when postable); inactive heads kept for history. */
+function postableCodesUnder(code: string, accounts: Account[]): Set<string> {
+  const out = new Set<string>();
+  const self = accounts.find((row) => row.code === code);
+  if (!self || self.isPostable) return new Set([code]);
+  const queue = [code];
+  const seen = new Set(queue);
+  while (queue.length > 0) {
+    const parent = queue.shift()!;
+    for (const row of accounts) {
+      if (row.parentCode !== parent || seen.has(row.code)) continue;
+      seen.add(row.code);
+      if (row.isPostable) out.add(row.code);
+      else queue.push(row.code);
+    }
+  }
+  return out;
+}
+
+const roundMoney = (value: number) => Math.round(value * 100) / 100;
+
+/** Journal reduced to the lines on the selected ledger head(s). */
+function withAccountLines(entry: JournalEntry, codes: Set<string>): JournalEntry {
+  const lines = (entry.lines ?? []).filter((line) =>
+    codes.has(line.accountCode),
+  );
+  return {
+    ...entry,
+    lines,
+    totalDebit: roundMoney(lines.reduce((sum, line) => sum + line.debit, 0)),
+    totalCredit: roundMoney(lines.reduce((sum, line) => sum + line.credit, 0)),
+  };
+}
+
 export function JournalRegister({
   title = "Journal register",
   description,
@@ -168,6 +205,8 @@ export function JournalRegister({
   const [status, setStatus] = useState("");
   const [journalType, setJournalType] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountCode, setAccountCode] = useState("");
   const [search, setSearch] = useState("");
   const [searchDebounced, setSearchDebounced] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -182,8 +221,17 @@ export function JournalRegister({
     status: "",
     journalType: "",
     projectId: "",
+    accountCode: "",
     search: "",
   });
+
+  useEffect(() => {
+    if (layout !== "ledger") return;
+    api
+      .accounts()
+      .then(setAccounts)
+      .catch(() => setAccounts([]));
+  }, [layout]);
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -199,6 +247,7 @@ export function JournalRegister({
     status?: string;
     journalType?: string;
     projectId?: string;
+    accountCode?: string;
     search?: string;
   }) {
     const from = lockedDate ?? overrides?.from ?? fromDate;
@@ -209,6 +258,7 @@ export function JournalRegister({
       status: overrides?.status ?? status,
       journalType: overrides?.journalType ?? journalType,
       projectId: overrides?.projectId ?? projectId,
+      accountCode: overrides?.accountCode ?? accountCode,
       search: overrides?.search ?? searchDebounced,
     };
     const [journals, projectRows] = await Promise.all([
@@ -220,6 +270,7 @@ export function JournalRegister({
         projectId: filters.projectId || undefined,
         projectView:
           layout === "ledger" && filters.projectId ? "costs" : undefined,
+        accountCode: filters.accountCode || undefined,
         search: filters.search || undefined,
       }),
       api.projects(),
@@ -361,6 +412,11 @@ export function JournalRegister({
 
   const projectOptions = [
     { value: "", label: "All projects" },
+    {
+      value: NO_PROJECT,
+      label: "No project (office)",
+      keywords: "none office overhead operating",
+    },
     ...projects.map((project) => ({
       value: project.id,
       label: project.name,
@@ -368,15 +424,53 @@ export function JournalRegister({
     })),
   ];
 
+  const accountFilterOptions = useMemo(() => {
+    const active = accounts.filter((row) => row.isActive);
+    const postable = active.filter((row) => row.isPostable);
+    const groups = active.filter(
+      (row) =>
+        row.journalPicker &&
+        !row.isPostable &&
+        postable.some((child) => child.parentCode === row.code),
+    );
+    return [
+      { value: "", label: "All ledger heads" },
+      ...[
+        ...postable.map((row) => ({
+          value: row.code,
+          label: `${row.code} · ${row.name}`,
+        })),
+        ...groups.map((row) => ({
+          value: row.code,
+          label: `${row.code} · ${row.name} (all sub-accounts)`,
+        })),
+      ].sort((a, b) => a.value.localeCompare(b.value)),
+    ];
+  }, [accounts]);
+
+  /** Ledger-head filter: only lines on that head (a header covers its sub-accounts). */
+  const accountScope = useMemo(
+    () =>
+      layout === "ledger" && applied.accountCode && accounts.length > 0
+        ? postableCodesUnder(applied.accountCode, accounts)
+        : null,
+    [layout, applied.accountCode, accounts],
+  );
+  const accountLabel = applied.accountCode
+    ? (accountFilterOptions.find((row) => row.value === applied.accountCode)
+        ?.label ?? applied.accountCode)
+    : "";
+
   /** Project filter on the ledger layout: only the project's costs and returns. */
   const projectLedger = layout === "ledger" && Boolean(applied.projectId);
-  const visibleEntries = useMemo(
-    () =>
-      projectLedger
-        ? entries.filter((entry) => (entry.lines?.length ?? 0) > 0)
-        : entries,
-    [entries, projectLedger],
-  );
+  const visibleEntries = useMemo(() => {
+    const scoped = accountScope
+      ? entries.map((entry) => withAccountLines(entry, accountScope))
+      : entries;
+    return projectLedger || accountScope
+      ? scoped.filter((entry) => (entry.lines?.length ?? 0) > 0)
+      : scoped;
+  }, [entries, projectLedger, accountScope]);
   const ledgerRows = useMemo(
     () => (projectLedger ? projectLedgerRows(visibleEntries) : []),
     [projectLedger, visibleEntries],
@@ -402,8 +496,13 @@ export function JournalRegister({
     visibleEntries.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(currentPage * PAGE_SIZE, visibleEntries.length);
 
-  const headDescription = projectLedger
+  const officeLedger = projectLedger && applied.projectId === NO_PROJECT;
+  const headDescription = officeLedger
+    ? "Office expenses: every expense line not tagged to a project (rent, utilities, office salary, petty cash…). Costs in Debit, refunds in Credit; offsetting heads are hidden."
+    : projectLedger
     ? `Project ledger for ${projectName(applied.projectId)}: costs in Debit, returns in Credit. Offsetting heads (cash, bank, AP, inventory…) are hidden.`
+    : accountScope
+    ? `Ledger head ${accountLabel}: only its lines are shown; offsetting heads are hidden.`
     : description ??
     (lockedDate
       ? `Showing journals for ${lockedDate}.`
@@ -411,6 +510,7 @@ export function JournalRegister({
 
   function projectName(id: string | null): string {
     if (!id) return "—";
+    if (id === NO_PROJECT) return "No project (office)";
     const project = projects.find((row) => row.id === id);
     return project ? project.name : "Tagged";
   }
@@ -450,6 +550,7 @@ export function JournalRegister({
           ? optionLabel(projectOptions, applied.projectId)
           : "All",
       },
+      ...(accountLabel ? [{ label: "Ledger head", value: accountLabel }] : []),
       ...(applied.search ? [{ label: "Search", value: applied.search }] : []),
       { label: "Journals", value: String(visibleEntries.length) },
     ];
@@ -476,7 +577,9 @@ export function JournalRegister({
         money(projectSummary.net),
       ];
       return {
-        title: `Project ledger — ${projectName(applied.projectId)}`,
+        title: officeLedger
+          ? "Office expenses — no project"
+          : `Project ledger — ${projectName(applied.projectId)}`,
         filters,
         headers: [
           "Date",
@@ -491,7 +594,9 @@ export function JournalRegister({
         rows,
         sections: [
           {
-            title: `Project: ${projectName(applied.projectId)}`,
+            title: officeLedger
+              ? "Office expenses (no project)"
+              : `Project: ${projectName(applied.projectId)}`,
             rows,
             totals: [totalRow],
           },
@@ -845,6 +950,17 @@ export function JournalRegister({
               searchable
             />
           </label>
+          {layout === "ledger" ? (
+            <label>
+              Ledger head
+              <Select
+                value={accountCode}
+                onChange={setAccountCode}
+                options={accountFilterOptions}
+                searchable
+              />
+            </label>
+          ) : null}
           <button type='submit'>Apply</button>
           <button
             type='button'
@@ -855,6 +971,7 @@ export function JournalRegister({
               setStatus("");
               setJournalType("");
               setProjectId("");
+              setAccountCode("");
               setSearch("");
               setSearchDebounced("");
               void load({
@@ -863,6 +980,7 @@ export function JournalRegister({
                 status: "",
                 journalType: "",
                 projectId: "",
+                accountCode: "",
                 search: "",
               }).catch((err: unknown) => {
                 setError(
@@ -907,7 +1025,9 @@ export function JournalRegister({
                 <tr>
                   <td colSpan={9} className='muted'>
                     {projectLedger
-                      ? "No project costs or returns match the current filters."
+                      ? officeLedger
+                        ? "No office expenses match the current filters."
+                        : "No project costs or returns match the current filters."
                       : "No journals match the current filters."}
                   </td>
                 </tr>
@@ -915,7 +1035,8 @@ export function JournalRegister({
               {projectLedger ? (
                 <tr className='ledger-balance-row'>
                   <td colSpan={5}>
-                    Total cost / returns · net project cost ·{" "}
+                    Total cost / returns · net {officeLedger ? "office" : "project"}{" "}
+                    cost ·{" "}
                     {visibleEntries.length} journal
                     {visibleEntries.length === 1 ? "" : "s"} (all filtered
                     pages)

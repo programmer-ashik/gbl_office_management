@@ -18,6 +18,7 @@ import type {
   PostedJournalDetailsBody,
   PostedJournalEditability,
   BalanceSheetReport,
+  IncomeStatementReport,
   TrialBalance,
 } from '../types/accounting'
 import type { OtherParty, OtherPartyKind } from '../types/otherParty'
@@ -515,6 +516,21 @@ export const api = {
       ? `?asOfDate=${encodeURIComponent(asOfDate)}`
       : ''
     return request<BalanceSheetReport>(`/reports/balance-sheet${query}`)
+  },
+  incomeStatement: (params: {
+    fromDate?: string
+    toDate?: string
+    /** A project id, or `none` for lines with no project (office). */
+    projectId?: string
+  }) => {
+    const search = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) {
+      if (value) search.set(key, value)
+    }
+    const query = search.toString()
+    return request<IncomeStatementReport>(
+      `/reports/income-statement${query ? `?${query}` : ''}`,
+    )
   },
   balanceSheetTemplate: () =>
     request<BalanceSheetTemplate>('/templates/balance-sheet'),

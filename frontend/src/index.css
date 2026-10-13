@@ -2582,6 +2582,11 @@ td:nth-last-child(-n + 2) {
   font-size: 0.75rem;
 }
 
+.ledger-sub-account {
+  display: block;
+  font-weight: 600;
+}
+
 .journal-register-continued td {
   border-top-color: transparent;
 }
@@ -3724,6 +3729,36 @@ td .ui-action-menu {
 
 .bs-subtotal-row {
   border-top: 1px solid var(--ink);
+}
+
+.bs-statement {
+  max-width: min(900px, 100%);
+}
+
+.bs-statement-section td {
+  padding: 10px;
+  background: var(--ink);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.bs-statement-subtotal td {
+  padding: 8px 10px;
+  border-top: 1px solid var(--ink);
+  font-weight: 700;
+}
+
+.bs-statement-total td {
+  padding: 12px 10px;
+  border-top: 1px solid var(--ink);
+  background: rgba(15, 39, 68, 0.06);
+  font-weight: 700;
+  font-size: var(--text-md);
+}
+
+.bs-statement-total .bs-amount {
+  text-decoration: underline double;
 }
 
 .bs-total-row {

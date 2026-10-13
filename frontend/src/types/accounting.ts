@@ -359,6 +359,40 @@ export type BalanceSheetReport = {
   difference: number
 }
 
+export type IncomeStatementLine = {
+  code: string
+  name: string
+  parentCode: string | null
+  amount: number
+  isHeader: boolean
+  isPostable: boolean
+  depth: number
+}
+
+export type IncomeStatementSection = {
+  id: string
+  title: string
+  total: number
+  lines: IncomeStatementLine[]
+}
+
+export type IncomeStatementReport = {
+  fromDate: string | null
+  toDate: string
+  /** A project id, `none` (office) or null (whole company). */
+  projectId: string | null
+  revenue: IncomeStatementSection
+  directCosts: IncomeStatementSection
+  grossProfit: number
+  operatingExpenses: IncomeStatementSection
+  operatingProfit: number
+  otherIncome: IncomeStatementSection
+  otherExpenses: IncomeStatementSection
+  totalRevenue: number
+  totalExpenses: number
+  netProfit: number
+}
+
 export type AccountLedger = {
   account: {
     accountCode: string
@@ -384,6 +418,9 @@ export type AccountLedger = {
     reference: string | null
     debit: number
     credit: number
+    /** Posting account; differs from the ledger account on a header ledger. */
+    accountCode?: string
+    accountName?: string
     runningBalance?: number
     entityType?: string | null
     entityId?: string | null

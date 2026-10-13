@@ -40,6 +40,8 @@ export function AccountLedgerPage() {
   const navigate = useNavigate();
 
   const [accounts, setAccounts] = useState<Account[]>([]);
+  /** Journal-picker headers (e.g. 5220 Utility Bills) readable as one ledger. */
+  const [groups, setGroups] = useState<Account[]>([]);
   const [accountCode, setAccountCode] = useState(routeCode ?? "");
   const [entityId, setEntityId] = useState(
     () => searchParams.get("entityId") ?? "",
@@ -68,6 +70,17 @@ export function AccountLedgerPage() {
   const selectedAccount = useMemo(
     () => accounts.find((row) => row.code === accountCode),
     [accounts, accountCode],
+  );
+  const selectedGroup = groups.find((row) => row.code === accountCode);
+  const activeGroup =
+    selectedGroup ??
+    groups.find((row) => row.code === selectedAccount?.parentCode);
+  const subAccounts = useMemo(
+    () =>
+      activeGroup
+        ? accounts.filter((row) => row.parentCode === activeGroup.code)
+        : [],
+    [accounts, activeGroup],
   );
 
   const bankAccounts = useMemo(() => {
@@ -136,6 +149,15 @@ export function AccountLedgerPage() {
       .then((rows) => {
         const postable = rows.filter((row) => row.isPostable && row.isActive);
         setAccounts(postable);
+        setGroups(
+          rows.filter(
+            (row) =>
+              row.journalPicker &&
+              !row.isPostable &&
+              row.isActive &&
+              postable.some((child) => child.parentCode === row.code),
+          ),
+        );
         if (!accountCode && postable[0]) {
           setAccountCode(postable[0].code);
         }
@@ -358,10 +380,16 @@ export function AccountLedgerPage() {
     return { debit, credit, opening, closing };
   }, [filteredEntries, running, ledger]);
 
-  const accountOptions = accounts.map((account) => ({
-    value: account.code,
-    label: `${account.code} · ${account.name}`,
-  }));
+  const accountOptions = [
+    ...accounts.map((account) => ({
+      value: account.code,
+      label: `${account.code} · ${account.name}`,
+    })),
+    ...groups.map((group) => ({
+      value: group.code,
+      label: `${group.code} · ${group.name} (all sub-accounts)`,
+    })),
+  ].sort((a, b) => a.value.localeCompare(b.value));
 
   const entityFilterLabel = dimension?.label ?? "Entity";
   const allEntitiesLabel = useMemo(() => {
@@ -449,6 +477,9 @@ export function AccountLedgerPage() {
         entryNumber: row.entryNumber,
         memo: row.description || row.memo || "",
         reference: [
+          selectedGroup && row.accountCode
+            ? `${row.accountCode} · ${row.accountName}`
+            : "",
           row.counterpart,
           row.reference ? `Ref ${row.reference}` : "",
         ]
@@ -614,6 +645,28 @@ export function AccountLedgerPage() {
                   placeholder={
                     isSupplierPayable ? "All suppliers" : allEntitiesLabel
                   }
+                />
+              </label>
+            ) : null}
+
+            {activeGroup && !showBankPicker ? (
+              <label className='ledger-filter-party'>
+                Sub-account
+                <Select
+                  value={accountCode}
+                  onChange={onAccountChange}
+                  options={[
+                    {
+                      value: activeGroup.code,
+                      label: `All ${activeGroup.name}`,
+                    },
+                    ...subAccounts.map((row) => ({
+                      value: row.code,
+                      label: `${row.code} · ${row.name}`,
+                    })),
+                  ]}
+                  searchable
+                  portal
                 />
               </label>
             ) : null}
@@ -788,6 +841,11 @@ export function AccountLedgerPage() {
                         </Link>
                       </td>
                       <td className='ledger-reference-cell'>
+                        {selectedGroup && row.accountCode ? (
+                          <strong className='ledger-sub-account'>
+                            {row.accountCode} · {row.accountName}
+                          </strong>
+                        ) : null}
                         {row.counterpart || (row.reference ? null : "—")}
                         {row.reference ? (
                           <span className='muted ledger-reference-no'>

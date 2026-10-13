@@ -63,6 +63,7 @@ import {
   type JournalEntryDocument,
 } from './journal-entry.model';
 import { LedgerLineModel } from './ledger.model';
+import { postableCodesUnder } from './account-tree';
 
 export type PreparedLine = {
   accountCode: string;
@@ -180,7 +181,11 @@ type ChequeFields = {
   pdcDirection?: PdcDirection;
 };
 
+/** `projectId` filter value for lines tagged to no project (office overhead). */
+export const NO_PROJECT = 'none';
+
 export type JournalListFilters = {
+  /** A project id, or `NO_PROJECT`. */
   projectId?: string;
   fromDate?: string;
   toDate?: string;
@@ -193,6 +198,8 @@ export type JournalListFilters = {
   source?: string;
   /** With `projectId`: only the project's expense lines (costs Dr, returns Cr). */
   projectView?: 'costs';
+  /** Resolved from `accountCode`: a header expands to its postable sub-accounts. */
+  accountCodes?: string[];
 };
 
 export type JournalSummary = {
@@ -798,14 +805,26 @@ export class JournalService {
     return entry;
   }
 
+  /** `accountCode` on a header account covers every postable sub-account. */
+  private async withAccountScope(
+    filters: JournalListFilters,
+  ): Promise<JournalListFilters> {
+    const code = filters.accountCode?.trim();
+    if (!code) return filters;
+    const codes = await postableCodesUnder(code);
+    const isHeader = codes !== null && !codes.includes(code.toUpperCase());
+    return isHeader ? { ...filters, accountCodes: codes } : filters;
+  }
+
   async list(
     limit = 200,
-    filters: JournalListFilters = {},
+    rawFilters: JournalListFilters = {},
   ): Promise<PublicJournal[]> {
+    const filters = await this.withAccountScope(rawFilters);
     if (
       filters.projectView === 'costs' &&
       filters.projectId &&
-      Types.ObjectId.isValid(filters.projectId)
+      (filters.projectId === NO_PROJECT || Types.ObjectId.isValid(filters.projectId))
     ) {
       return this.listProjectCosts(limit, filters);
     }
@@ -834,27 +853,36 @@ export class JournalService {
   /**
    * Project ledger: journals with an expense line posted to the project, each
    * trimmed to those lines. Offsetting heads (cash, AP, inventory…) are left out.
+   * `NO_PROJECT` gives the office ledger: expense lines with no project at all.
    */
   private async listProjectCosts(
     limit: number,
     filters: JournalListFilters,
   ): Promise<PublicJournal[]> {
-    const projectId = filters.projectId!;
-    const projectOid = new Types.ObjectId(projectId);
+    const office = filters.projectId === NO_PROJECT;
+    const projectId = office ? null : filters.projectId!;
+    const projectOid = projectId ? new Types.ObjectId(projectId) : null;
     const expenseCodes = (
       await AccountModel.find({ type: AccountType.EXPENSE }).select('code').lean()
     ).map((row) => row.code);
     const base = this.buildListFilter({ ...filters, projectId: undefined });
-    const projectMatch = {
-      $or: [
-        {
+    const projectMatch = office
+      ? {
+          projectId: null,
           lines: {
-            $elemMatch: { projectId: projectOid, accountCode: { $in: expenseCodes } },
+            $elemMatch: { projectId: null, accountCode: { $in: expenseCodes } },
           },
-        },
-        { projectId: projectOid, 'lines.accountCode': { $in: expenseCodes } },
-      ],
-    };
+        }
+      : {
+          $or: [
+            {
+              lines: {
+                $elemMatch: { projectId: projectOid, accountCode: { $in: expenseCodes } },
+              },
+            },
+            { projectId: projectOid, 'lines.accountCode': { $in: expenseCodes } },
+          ],
+        };
     let entries = await JournalEntryModel.find({ $and: [base, projectMatch] })
       .sort({ createdAt: -1, date: -1, entryNumber: -1 })
       .exec();
@@ -892,7 +920,8 @@ export class JournalService {
     return row;
   }
 
-  async summary(filters: JournalListFilters = {}): Promise<JournalSummary> {
+  async summary(rawFilters: JournalListFilters = {}): Promise<JournalSummary> {
+    const filters = await this.withAccountScope(rawFilters);
     const filter = this.buildListFilter(filters);
     const found = await JournalEntryModel.find(filter)
       .select(
@@ -1066,7 +1095,10 @@ export class JournalService {
 
   private buildListFilter(filters: JournalListFilters): Record<string, unknown> {
     const filter: Record<string, unknown> = {};
-    if (filters.projectId && Types.ObjectId.isValid(filters.projectId)) {
+    if (filters.projectId === NO_PROJECT) {
+      filter.projectId = null;
+      filter.lines = { $elemMatch: { projectId: null } };
+    } else if (filters.projectId && Types.ObjectId.isValid(filters.projectId)) {
       filter.$or = [
         { projectId: new Types.ObjectId(filters.projectId) },
         { 'lines.projectId': new Types.ObjectId(filters.projectId) },
@@ -1077,7 +1109,9 @@ export class JournalService {
       filter.journalType = { $in: [JournalType.GENERAL, null] };
     }
     if (filters.source) filter.source = filters.source;
-    if (filters.accountCode) {
+    if (filters.accountCodes) {
+      filter['lines.accountCode'] = { $in: filters.accountCodes };
+    } else if (filters.accountCode) {
       filter['lines.accountCode'] = filters.accountCode.trim().toUpperCase();
     }
     if (filters.entityType) filter['lines.entityType'] = filters.entityType;

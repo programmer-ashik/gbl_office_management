@@ -396,6 +396,13 @@ export const NAV_SECTIONS: NavSection[] = [
         roles: FINANCE,
       },
       {
+        label: 'Income Statement',
+        to: '/income-statement',
+        icon: 'chart',
+        hint: 'Profit & loss',
+        roles: FINANCE,
+      },
+      {
         label: 'Chart of Accounts',
         to: '/accounts',
         icon: 'accounts',
