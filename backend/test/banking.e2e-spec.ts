@@ -60,15 +60,17 @@ describe('Phase 4 banking, cash and petty cash (e2e)', () => {
       glAccountCode: string;
       bookBalance: number;
     }>;
-    const byKind = new Map(rows.map((row) => [row.kind, row]));
-    expect(byKind.get(TreasuryKind.CASH)?.glAccountCode).toBe('1111');
-    expect(byKind.get(TreasuryKind.COMMERCIAL_BANK)?.glAccountCode).toBe('1112');
-    expect(byKind.get(TreasuryKind.MOBILE_BANKING)?.glAccountCode).toBe('1020');
-    cashId = byKind.get(TreasuryKind.CASH)!.id;
-    bankId = byKind.get(TreasuryKind.COMMERCIAL_BANK)!.id;
+    const cash = rows.find((row) => row.glAccountCode === '1111');
+    const brac = rows.find((row) => row.glAccountCode === '1122');
+    const bkash = rows.find((row) => row.glAccountCode === '1131');
+    expect(cash?.kind).toBe(TreasuryKind.CASH);
+    expect(brac?.kind).toBe(TreasuryKind.COMMERCIAL_BANK);
+    expect(bkash?.kind).toBe(TreasuryKind.MOBILE_BANKING);
+    cashId = cash!.id;
+    bankId = brac!.id;
   });
 
-  it('creates a child bank account under 1010', async () => {
+  it('creates the next bank account as a sibling under Cash in Bank', async () => {
     const res = await request(app)
       .post('/api/v1/treasury')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -80,7 +82,7 @@ describe('Phase 4 banking, cash and petty cash (e2e)', () => {
       })
       .expect(201);
 
-    expect(res.body.data.glAccountCode).toMatch(/^1010-/);
+    expect(res.body.data.glAccountCode).toBe('1124');
     expect(res.body.data.bookBalance).toBe(0);
     childBankId = res.body.data.id as string;
     childBankCode = res.body.data.glAccountCode as string;

@@ -4,7 +4,7 @@ import { PayrollRunStatus } from '../../common/enums/payroll.enum';
 export interface IPayrollAdvanceDeduction {
   advanceId: Types.ObjectId;
   advanceNumber: string;
-  projectId: Types.ObjectId;
+  projectId?: Types.ObjectId;
   amountMinor: number;
 }
 
@@ -24,11 +24,22 @@ export interface IPayrollAllocation {
   amountMinor: number;
 }
 
+/** Allowance split copied from the salary structure when the line was built. */
+export interface IPayrollEarnings {
+  houseRentMinor: number;
+  medicalAllowanceMinor: number;
+  conveyanceAllowanceMinor: number;
+  otherAllowancesMinor: number;
+  customBreakdownApplied: boolean;
+}
+
 export interface IPayrollLine {
   employeeId: Types.ObjectId;
   employeeName: string;
   basicMinor: number;
   allowancesMinor: number;
+  /** Missing on runs generated before the split was stored. */
+  earnings?: IPayrollEarnings;
   structuralDeductionMinor: number;
   providentFundMinor: number;
   taxDeductionMinor: number;
@@ -62,9 +73,21 @@ export interface IPayrollRun {
   journalNumber?: string;
   disbursedAt?: Date;
   disbursedBy?: Types.ObjectId;
+  /** Each time a posted run was reopened: the journals reversed and why. */
+  reopenHistory?: IPayrollReopen[];
   createdBy: Types.ObjectId;
   createdAt?: Date;
   updatedAt?: Date;
+}
+
+export interface IPayrollReopen {
+  reopenedAt: Date;
+  reopenedBy: Types.ObjectId;
+  fromStatus: string;
+  accrualJournalNumber?: string;
+  journalNumber?: string;
+  reversalJournalNumbers: string[];
+  reason?: string;
 }
 
 export type PayrollRunDocument = HydratedDocument<IPayrollRun>;
@@ -73,7 +96,7 @@ const advanceDeductionSchema = new Schema<IPayrollAdvanceDeduction>(
   {
     advanceId: { type: Schema.Types.ObjectId, ref: 'Advance', required: true },
     advanceNumber: { type: String, required: true },
-    projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true },
+    projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: false },
     amountMinor: { type: Number, required: true, min: 1 },
   },
   { _id: false },
@@ -109,12 +132,24 @@ const allocationSchema = new Schema<IPayrollAllocation>(
   { _id: false },
 );
 
+const earningsSchema = new Schema<IPayrollEarnings>(
+  {
+    houseRentMinor: { type: Number, required: true, min: 0, default: 0 },
+    medicalAllowanceMinor: { type: Number, required: true, min: 0, default: 0 },
+    conveyanceAllowanceMinor: { type: Number, required: true, min: 0, default: 0 },
+    otherAllowancesMinor: { type: Number, required: true, min: 0, default: 0 },
+    customBreakdownApplied: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
 const payrollLineSchema = new Schema<IPayrollLine>(
   {
     employeeId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     employeeName: { type: String, required: true },
     basicMinor: { type: Number, required: true, min: 1 },
     allowancesMinor: { type: Number, required: true, min: 0 },
+    earnings: { type: earningsSchema, required: false },
     structuralDeductionMinor: { type: Number, required: true, min: 0 },
     providentFundMinor: { type: Number, required: true, min: 0, default: 0 },
     taxDeductionMinor: { type: Number, required: true, min: 0, default: 0 },
@@ -162,6 +197,23 @@ const payrollRunSchema = new Schema<IPayrollRun>(
     journalNumber: { type: String },
     disbursedAt: { type: Date },
     disbursedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    reopenHistory: {
+      type: [
+        new Schema<IPayrollReopen>(
+          {
+            reopenedAt: { type: Date, required: true },
+            reopenedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+            fromStatus: { type: String, required: true },
+            accrualJournalNumber: { type: String },
+            journalNumber: { type: String },
+            reversalJournalNumbers: { type: [String], default: [] },
+            reason: { type: String, trim: true, maxlength: 300 },
+          },
+          { _id: false },
+        ),
+      ],
+      required: false,
+    },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true, collection: 'payroll_runs' },

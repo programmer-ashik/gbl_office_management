@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { canCreateQuotation } from '../auth/permissions'
@@ -8,6 +8,7 @@ import type { Item, ProductCategory, StockRow } from '../types/procurement'
 import { writeQuotationProductSelection } from '../utils/quotationProductSelection'
 
 const PAGE_SIZE = 25
+const UNCATEGORIZED = '__uncategorized__'
 
 type StockSummary = {
   quantity: number
@@ -43,6 +44,7 @@ export function QuotationProductSelectPage() {
   const [selectedCategoryId, setSelectedCategoryId] = useState('')
   const [selectedSubId, setSelectedSubId] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(1)
 
   useEffect(() => {
@@ -67,27 +69,112 @@ export function QuotationProductSelectPage() {
     [categories],
   )
 
+  const childrenByParent = useMemo(() => {
+    const map = new Map<string, ProductCategory[]>()
+    for (const row of categories) {
+      if (!row.parentId) continue
+      const list = map.get(row.parentId) ?? []
+      list.push(row)
+      map.set(row.parentId, list)
+    }
+    return map
+  }, [categories])
+
   const filteredRoots = useMemo(() => {
     const q = categorySearch.trim().toLowerCase()
     if (!q) return roots
+    const matches = (row: ProductCategory) =>
+      row.name.toLowerCase().includes(q) ||
+      (row.code ?? '').toLowerCase().includes(q)
     return roots.filter(
       (row) =>
-        row.name.toLowerCase().includes(q) ||
-        (row.code ?? '').toLowerCase().includes(q),
+        matches(row) || (childrenByParent.get(row.id) ?? []).some(matches),
     )
-  }, [roots, categorySearch])
+  }, [roots, categorySearch, childrenByParent])
+
+  useEffect(() => {
+    const q = categorySearch.trim().toLowerCase()
+    if (!q) return
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      for (const row of filteredRoots) {
+        const children = childrenByParent.get(row.id) ?? []
+        if (
+          children.some(
+            (sub) =>
+              sub.name.toLowerCase().includes(q) ||
+              (sub.code ?? '').toLowerCase().includes(q),
+          )
+        ) {
+          next.add(row.id)
+        }
+      }
+      return next
+    })
+  }, [categorySearch, filteredRoots, childrenByParent])
+
+  function toggleExpanded(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectCategory(rootId: string, subId = '') {
+    setSelectedCategoryId(rootId)
+    setSelectedSubId(subId)
+    if (
+      rootId &&
+      !subId &&
+      (childrenByParent.get(rootId)?.length ?? 0) > 0
+    ) {
+      setExpandedIds((prev) => new Set(prev).add(rootId))
+    }
+  }
+
+  function onKeySelect(event: KeyboardEvent, action: () => void) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      action()
+    }
+  }
+
+  const categoryById = useMemo(
+    () => new Map(categories.map((row) => [row.id, row])),
+    [categories],
+  )
+
+  /** Top-level category of a product; null when it has none (or it no longer exists). */
+  const rootCategoryId = useMemo(() => {
+    const rootOf = (id: string | null): string | null => {
+      let current = id ? categoryById.get(id) : undefined
+      while (current?.parentId) {
+        const parent = categoryById.get(current.parentId)
+        if (!parent) break
+        current = parent
+      }
+      return current?.id ?? null
+    }
+    return (row: Item) => rootOf(row.categoryId) ?? rootOf(row.subCategoryId)
+  }, [categoryById])
+
+  const uncategorizedCount = useMemo(
+    () => items.filter((row) => !rootCategoryId(row)).length,
+    [items, rootCategoryId],
+  )
 
   const filteredItems = useMemo(() => {
     const q = productSearch.trim().toLowerCase()
     return items.filter((row) => {
-      const stock = stockMap.get(row.id)
-      if (!stock || stock.quantity <= 0) return false
-      if (selectedSubId && row.subCategoryId !== selectedSubId) return false
-      if (
-        selectedCategoryId &&
-        !selectedSubId &&
-        row.categoryId !== selectedCategoryId
-      ) {
+      if (selectedCategoryId === UNCATEGORIZED) {
+        if (rootCategoryId(row)) return false
+      } else if (selectedSubId) {
+        if (row.subCategoryId !== selectedSubId && row.categoryId !== selectedSubId) {
+          return false
+        }
+      } else if (selectedCategoryId && rootCategoryId(row) !== selectedCategoryId) {
         return false
       }
       if (!q) return true
@@ -98,7 +185,7 @@ export function QuotationProductSelectPage() {
         (row.model ?? '').toLowerCase().includes(q)
       )
     })
-  }, [items, selectedCategoryId, selectedSubId, productSearch, stockMap])
+  }, [items, selectedCategoryId, selectedSubId, productSearch, rootCategoryId])
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
@@ -119,10 +206,14 @@ export function QuotationProductSelectPage() {
   }, [productSearch, selectedCategoryId, selectedSubId])
 
   function categoryLabel(row: Item) {
-    const cat = categories.find((c) => c.id === row.categoryId)
-    const sub = categories.find((c) => c.id === row.subCategoryId)
-    if (!cat) return '—'
-    return sub ? `${cat.name} / ${sub.name}` : cat.name
+    const cat = row.categoryId ? categoryById.get(row.categoryId) : undefined
+    const sub = row.subCategoryId ? categoryById.get(row.subCategoryId) : undefined
+    if (cat && sub) return `${cat.name} / ${sub.name}`
+    return cat?.name ?? sub?.name ?? 'Uncategorized'
+  }
+
+  function stockQuantity(row: Item) {
+    return stockMap.get(row.id)?.quantity ?? row.quantity ?? 0
   }
 
   function toggle(id: string) {
@@ -180,7 +271,7 @@ export function QuotationProductSelectPage() {
         <div>
           <h1>Select products</h1>
           <p className="muted">
-            In-stock items only. Select products, then save back to the quotation.
+            Select products, then save back to the quotation.
           </p>
         </div>
         <div className="form-actions">
@@ -203,51 +294,105 @@ export function QuotationProductSelectPage() {
         <aside className="table-card catalog-sidebar compact-panel">
           <div className="compact-toolbar">
             <input
-              className="quote-pick-search"
+              className="compact-search"
               value={categorySearch}
               onChange={(e) => setCategorySearch(e.target.value)}
               placeholder="Categories…"
               aria-label="Search categories"
             />
           </div>
-          <button
-            type="button"
-            className={`catalog-cat-btn ${!selectedCategoryId ? 'is-active' : ''}`}
-            onClick={() => {
-              setSelectedCategoryId('')
-              setSelectedSubId('')
-            }}
-          >
-            All categories
-          </button>
-          <ul className="catalog-cat-list">
-            {filteredRoots.map((cat) => {
-              const children = categories.filter(
-                (row) => row.parentId === cat.id,
-              )
+          <ul className="catalog-tree">
+            <li>
+              <div
+                className={`catalog-tree-row ${!selectedCategoryId && !selectedSubId ? 'is-active' : ''}`}
+              >
+                <span className="catalog-tree-spacer" aria-hidden="true" />
+                <span
+                  className="catalog-tree-label"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => selectCategory('')}
+                  onKeyDown={(e) => onKeySelect(e, () => selectCategory(''))}
+                >
+                  All categories
+                </span>
+              </div>
+            </li>
+            {filteredRoots.map((row) => {
+              const children = childrenByParent.get(row.id) ?? []
+              const open = children.length > 0 && expandedIds.has(row.id)
               return (
-                <li key={cat.id}>
-                  <button
-                    type="button"
-                    className={`catalog-cat-btn ${selectedCategoryId === cat.id ? 'is-active' : ''}`}
-                    onClick={() => {
-                      setSelectedCategoryId(cat.id)
-                      setSelectedSubId('')
-                    }}
+                <li key={row.id}>
+                  <div
+                    className={`catalog-tree-row ${selectedCategoryId === row.id && !selectedSubId ? 'is-active' : ''} ${!row.isActive ? 'is-inactive' : ''}`}
                   >
-                    {cat.name}
-                  </button>
-                  {selectedCategoryId === cat.id && children.length > 0 ? (
-                    <ul className="catalog-sub-list">
+                    {children.length > 0 ? (
+                      <span
+                        className={`catalog-tree-toggle ${open ? 'is-open' : ''}`}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={open ? 'Collapse' : 'Expand'}
+                        aria-expanded={open}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleExpanded(row.id)
+                        }}
+                        onKeyDown={(e) =>
+                          onKeySelect(e, () => toggleExpanded(row.id))
+                        }
+                      >
+                        ▸
+                      </span>
+                    ) : (
+                      <span className="catalog-tree-spacer" aria-hidden="true" />
+                    )}
+                    <span
+                      className="catalog-tree-label"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => selectCategory(row.id)}
+                      onKeyDown={(e) =>
+                        onKeySelect(e, () => selectCategory(row.id))
+                      }
+                    >
+                      {row.name}
+                      {!row.isActive ? (
+                        <span className="muted catalog-tree-badge">
+                          inactive
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                  {open ? (
+                    <ul className="catalog-tree catalog-tree-nested">
                       {children.map((sub) => (
                         <li key={sub.id}>
-                          <button
-                            type="button"
-                            className={`catalog-cat-btn is-sub ${selectedSubId === sub.id ? 'is-active' : ''}`}
-                            onClick={() => setSelectedSubId(sub.id)}
+                          <div
+                            className={`catalog-tree-row ${selectedSubId === sub.id ? 'is-active' : ''} ${!sub.isActive ? 'is-inactive' : ''}`}
                           >
-                            {sub.name}
-                          </button>
+                            <span
+                              className="catalog-tree-spacer"
+                              aria-hidden="true"
+                            />
+                            <span
+                              className="catalog-tree-label is-sub"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => selectCategory(row.id, sub.id)}
+                              onKeyDown={(e) =>
+                                onKeySelect(e, () =>
+                                  selectCategory(row.id, sub.id),
+                                )
+                              }
+                            >
+                              {sub.name}
+                              {!sub.isActive ? (
+                                <span className="muted catalog-tree-badge">
+                                  inactive
+                                </span>
+                              ) : null}
+                            </span>
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -255,21 +400,46 @@ export function QuotationProductSelectPage() {
                 </li>
               )
             })}
+            {uncategorizedCount > 0 ? (
+              <li>
+                <div
+                  className={`catalog-tree-row ${selectedCategoryId === UNCATEGORIZED ? 'is-active' : ''}`}
+                >
+                  <span className="catalog-tree-spacer" aria-hidden="true" />
+                  <span
+                    className="catalog-tree-label"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => selectCategory(UNCATEGORIZED)}
+                    onKeyDown={(e) =>
+                      onKeySelect(e, () => selectCategory(UNCATEGORIZED))
+                    }
+                  >
+                    Uncategorized ({uncategorizedCount})
+                  </span>
+                </div>
+              </li>
+            ) : null}
           </ul>
         </aside>
 
         <div className="table-card compact-panel quote-pick-panel">
-          <div className="compact-toolbar quote-pick-toolbar">
+          <div className="compact-toolbar">
+            <div className="bg-white rounded-md border border-gray-300 shadow-sm flex items-center gap-2 px-3 py-1">
+              <span className="muted compact-count">
+                All Items ({filteredItems.length})
+              </span>
+            </div>
             <input
-              className="quote-pick-search"
+              className="compact-search"
               value={productSearch}
               onChange={(e) => setProductSearch(e.target.value)}
-              placeholder="Search SKU, name…"
+              placeholder="Search products…"
               aria-label="Search products"
               autoFocus
             />
             <span className="muted compact-count">
-              {filteredItems.length} · {selectedIds.size} selected
+              {selectedIds.size} selected
             </span>
           </div>
 
@@ -297,8 +467,9 @@ export function QuotationProductSelectPage() {
               </thead>
               <tbody>
                 {pageItems.map((row) => {
-                  const stock = stockMap.get(row.id)!
-                  const displayPrice = row.unitPrice ?? stock.unitPrice
+                  const quantity = stockQuantity(row)
+                  const displayPrice =
+                    row.unitPrice ?? stockMap.get(row.id)?.unitPrice ?? 0
                   return (
                     <tr
                       key={row.id}
@@ -337,7 +508,9 @@ export function QuotationProductSelectPage() {
                       <td>{row.unit}</td>
                       <td>{row.brand ?? '—'}</td>
                       <td>{categoryLabel(row)}</td>
-                      <td className="num">{stock.quantity}</td>
+                      <td className={quantity > 0 ? 'num' : 'num muted'}>
+                        {quantity > 0 ? quantity : 'Out of stock'}
+                      </td>
                       <td className="num">{money(displayPrice)}</td>
                     </tr>
                   )
@@ -345,7 +518,9 @@ export function QuotationProductSelectPage() {
                 {pageItems.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="muted">
-                      No in-stock products match this filter.
+                      {items.length === 0
+                        ? 'No products yet. Add them in Product Catalog.'
+                        : 'No products match this filter.'}
                     </td>
                   </tr>
                 ) : null}

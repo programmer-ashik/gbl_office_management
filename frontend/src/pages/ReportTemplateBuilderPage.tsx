@@ -29,6 +29,7 @@ import {
 } from "../components/DebitVoucher";
 import {
   BLOCK_LABELS,
+  DEFAULT_COMPANY_ADDRESS,
   defaultBalanceSheetTemplate,
   defaultJournalVoucherTemplate,
   defaultVoucherConfig,
@@ -39,12 +40,18 @@ import {
   type ReportTemplateBlockType,
   type TemplateBlock,
   type VoucherConfig,
+  voucherAddress,
+  voucherLogoUrl,
 } from "../types/report-template";
 import {
   clearJournalVoucherTemplateCache,
   amountInWords,
+  voucherLineItems,
+  voucherPartyNames,
+  voucherPaymentMethod,
 } from "../utils/journalVoucherPdf";
 import { type JournalEntry } from "../types/accounting";
+import { clearCompanyBrandingCache } from "../utils/companyBranding";
 
 function SortableBlockCard({
   block,
@@ -150,7 +157,7 @@ function sampleJournalEntry(): JournalEntry {
         accountName: "Cash in Hand",
         debit: 0,
         credit: 3499.5,
-        description: "Cash payment",
+        description: null,
         projectId: null,
         entityType: null,
         entityId: null,
@@ -167,25 +174,23 @@ function JournalVoucherPreview({
   template: BalanceSheetTemplate;
   previewKind: "debit" | "credit";
 }) {
-  const entry = useMemo(() => sampleJournalEntry(), []);
+  const entry = useMemo(() => {
+    const sample = sampleJournalEntry();
+    if (previewKind === "debit") return sample;
+    return {
+      ...sample,
+      lines: sample.lines.map((l) => ({ ...l, debit: l.credit, credit: l.debit })),
+    };
+  }, [previewKind]);
   const vc: VoucherConfig = {
     ...defaultVoucherConfig(),
     ...(template.voucherConfig ?? {}),
   };
   const d = entry.date.slice(0, 10).split("-");
-  const items = entry.lines
-    .filter((l) => (previewKind === "debit" ? l.debit > 0 : l.credit > 0))
-    .map((l, i) => {
-      const amt = previewKind === "debit" ? l.debit : l.credit;
-      const whole = Math.floor(amt);
-      const cents = Math.round((amt - whole) * 100);
-      return {
-        id: String(i),
-        description: l.description || `${l.accountCode} · ${l.accountName}`,
-        major: whole.toLocaleString("en-US"),
-        minor: String(cents).padStart(2, "0"),
-      };
-    });
+  const items = voucherLineItems(entry, previewKind).map((item, i) => ({
+    id: String(i),
+    ...item,
+  }));
 
   return (
     <div className='tpl-voucher-preview-wrap'>
@@ -193,16 +198,14 @@ function JournalVoucherPreview({
         kind={previewKind}
         companyName={template.headerConfig.companyName}
         companySubtitle={vc.companySubtitle}
-        companyLogoUrl={template.companyLogoUrl}
+        companyAddress={voucherAddress(template)}
+        companyLogoUrl={voucherLogoUrl(template)}
         voucherNo={entry.entryNumber}
         day={d[2] ?? ""}
         month={d[1] ?? ""}
         year={d[0] ?? ""}
-        receivedBy=''
-        partyName={
-          entry.lines.find((l) => l.entityName)?.entityName ??
-          "Sample Party Ltd."
-        }
+        paymentMethod={voucherPaymentMethod(entry, previewKind)}
+        partyName={voucherPartyNames(entry, previewKind) || "Sample Party Ltd."}
         currencyLabel={vc.currencyLabel}
         majorUnitLabel={vc.majorUnitLabel}
         minorUnitLabel={vc.minorUnitLabel}
@@ -228,8 +231,8 @@ function JournalVoucherPreview({
         showWatermark={vc.showWatermark}
       />
       <p className='muted' style={{ marginTop: 12, fontSize: 12 }}>
-        Classic journal layout still applies for general / transfer journals.
-        Debit &amp; credit vouchers use this landscape template.
+        Save the template. Journal preview and download use this color, logo,
+        and sidebar text.
       </p>
     </div>
   );
@@ -424,7 +427,10 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
       );
       setDraft(saved);
       setSelectedId(saved.layoutStructure[0]?.id ?? selectedId);
-      if (kind === "journal-voucher") clearJournalVoucherTemplateCache();
+      if (kind === "journal-voucher") {
+        clearJournalVoucherTemplateCache();
+        clearCompanyBrandingCache();
+      }
       setMessage("Template saved");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -479,8 +485,18 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
               }
             />
           </label>
+          {kind === "journal-voucher" ? (
+            <div className='tpl-logo-current'>
+              <img src={voucherLogoUrl(draft)} alt='Current voucher logo' />
+              <span className='muted'>
+                {draft.companyLogoUrl
+                  ? "Uploaded logo"
+                  : "Default GBL logo — upload to change"}
+              </span>
+            </div>
+          ) : null}
           <FileUploadField
-            label='Company logo'
+            label={kind === "journal-voucher" ? "Change logo" : "Company logo"}
             accept='image/*'
             hint='Used on invoices, JV, salary slips, and other PDFs'
             onFile={(file) => void onUploadLogo(file)}
@@ -493,7 +509,7 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
                 setDraft((prev) => ({ ...prev, companyLogoUrl: null }))
               }
             >
-              Remove logo
+              {kind === "journal-voucher" ? "Use default logo" : "Remove logo"}
             </button>
           ) : null}
 
@@ -532,6 +548,9 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
             Address
             <input
               value={draft.headerConfig.address}
+              placeholder={
+                kind === "journal-voucher" ? DEFAULT_COMPANY_ADDRESS : undefined
+              }
               onChange={(e) =>
                 setDraft((prev) => ({
                   ...prev,
@@ -634,14 +653,14 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(5, 1fr)",
+                  gridTemplateColumns: "1fr 1fr",
                   gap: 8,
                   marginBottom: 12,
                 }}
               >
                 {VOUCHER_COLOR_THEMES.map((theme) => {
                   const active =
-                    (draft.voucherConfig?.theme ?? "yellow") === theme.id;
+                    (draft.voucherConfig?.theme ?? "color") === theme.id;
                   return (
                     <button
                       key={theme.id}
@@ -652,16 +671,21 @@ export function ReportTemplateBuilderPage({ kind }: { kind: Kind }) {
                           theme: theme.id as VoucherThemeId,
                         })
                       }
-                      className={theme.sidebarClass}
                       style={{
-                        height: 36,
+                        height: 40,
                         borderRadius: 8,
                         border: active
                           ? "2px solid #0f172a"
-                          : "2px solid transparent",
+                          : "2px solid #e2e8f0",
+                        background: theme.id === "bw" ? "#ffffff" : theme.accent,
+                        color: theme.id === "bw" ? "#111111" : theme.sidebarText,
                         cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 700,
                       }}
-                    />
+                    >
+                      {theme.name}
+                    </button>
                   );
                 })}
               </div>

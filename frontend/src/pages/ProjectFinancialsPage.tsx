@@ -6,6 +6,7 @@ import { money } from '../types/accounting'
 import type { BurnRateRow } from '../types/analytics'
 import { Role } from '../types/auth'
 import type { Project } from '../types/project'
+import { ClampText } from '../components/ClampText'
 import { MetricCard } from '../components/MetricCard'
 
 export function ProjectFinancialsPage() {
@@ -105,45 +106,60 @@ export function ProjectFinancialsPage() {
             <h2>Project burn rate</h2>
             <p className="muted">Daily/weekly spend vs budget runway</p>
           </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Budget</th>
-                <th>Cost</th>
-                <th>Daily</th>
-                <th>Weekly</th>
-                <th>Days left</th>
-                <th>Projected end</th>
-              </tr>
-            </thead>
-            <tbody>
-              {burnRates.map((row) => (
-                <tr key={row.projectId}>
-                  <td>
-                    <Link to={`/projects/${row.projectId}`}>
-                      {row.projectName}
-                    </Link>
-                    {row.isOverBudget ? (
-                      <span className="badge-bad budget-flag">Over</span>
-                    ) : null}
-                  </td>
-                  <td>{money(row.totalBudget)}</td>
-                  <td>{money(row.totalCost)}</td>
-                  <td>{money(row.dailyBurn)}</td>
-                  <td>{money(row.weeklyBurn)}</td>
-                  <td>
-                    {row.estimatedDaysToComplete === null
-                      ? '—'
-                      : row.estimatedDaysToComplete}
-                  </td>
-                  <td>
-                    {row.projectedEndDate ? row.projectedEndDate.slice(0, 10) : '—'}
-                  </td>
+          <div className="table-scroll">
+            <table className="fixed-table">
+              <colgroup>
+                <col style={{ width: '28%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '14%' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th className="num">Budget</th>
+                  <th className="num">Cost</th>
+                  <th className="num">Daily</th>
+                  <th className="num">Weekly</th>
+                  <th className="num">Days left</th>
+                  <th>Projected end</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {burnRates.map((row) => (
+                  <tr key={row.projectId}>
+                    <td>
+                      <div className="cell-with-flag">
+                        <ClampText title={row.projectName}>
+                          <Link to={`/projects/${row.projectId}`}>
+                            {row.projectName}
+                          </Link>
+                        </ClampText>
+                        {row.isOverBudget ? (
+                          <span className="badge-bad budget-flag">Over</span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="num">{money(row.totalBudget)}</td>
+                    <td className="num">{money(row.totalCost)}</td>
+                    <td className="num">{money(row.dailyBurn)}</td>
+                    <td className="num">{money(row.weeklyBurn)}</td>
+                    <td className="num">
+                      {row.estimatedDaysToComplete === null
+                        ? '—'
+                        : row.estimatedDaysToComplete}
+                    </td>
+                    <td>
+                      {row.projectedEndDate ? row.projectedEndDate.slice(0, 10) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : burnRates ? (
         <section className="table-card">
@@ -157,39 +173,52 @@ export function ProjectFinancialsPage() {
             <h2>Budget vs actual</h2>
             <p className="muted">Contract budget against recognized cost</p>
           </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Budget</th>
-                <th>Actual cost</th>
-                <th>Remaining</th>
-                <th>Used</th>
-              </tr>
-            </thead>
-            <tbody>
-              {projects.map((project) => (
-                <tr key={project.id}>
-                  <td>
-                    <Link to={`/projects/${project.id}`}>
-                      {project.code} · {project.name}
-                    </Link>
-                    {project.financials.isOverBudget ? (
-                      <span className="badge-bad budget-flag">Over</span>
-                    ) : null}
-                  </td>
-                  <td>{money(project.financials.totalBudget)}</td>
-                  <td>{money(project.financials.totalCost)}</td>
-                  <td>{money(project.financials.budgetRemaining)}</td>
-                  <td>
-                    {project.financials.budgetUsedPct === null
-                      ? '—'
-                      : `${project.financials.budgetUsedPct.toFixed(0)}%`}
-                  </td>
+          <div className="table-scroll">
+            <table className="fixed-table">
+              <colgroup>
+                <col style={{ width: '40%' }} />
+                <col style={{ width: '16%' }} />
+                <col style={{ width: '16%' }} />
+                <col style={{ width: '16%' }} />
+                <col style={{ width: '12%' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th className="num">Budget</th>
+                  <th className="num">Actual cost</th>
+                  <th className="num">Remaining</th>
+                  <th className="num">Used</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {projects.map((project) => (
+                  <tr key={project.id}>
+                    <td>
+                      <div className="cell-with-flag">
+                        <ClampText title={`${project.code} · ${project.name}`}>
+                          <Link to={`/projects/${project.id}`}>
+                            {project.code} · {project.name}
+                          </Link>
+                        </ClampText>
+                        {project.financials.isOverBudget ? (
+                          <span className="badge-bad budget-flag">Over</span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="num">{money(project.financials.totalBudget)}</td>
+                    <td className="num">{money(project.financials.totalCost)}</td>
+                    <td className="num">{money(project.financials.budgetRemaining)}</td>
+                    <td className="num">
+                      {project.financials.budgetUsedPct === null
+                        ? '—'
+                        : `${project.financials.budgetUsedPct.toFixed(0)}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
     </>

@@ -55,6 +55,7 @@ export const PAYMENT_STATUS_LABEL: Record<SupplierPaymentStatus, string> = {
 }
 
 export const ApLedgerEntryType = {
+  OPENING: 'opening',
   RECEIPT: 'receipt',
   RETURN: 'return',
   BILL: 'bill',
@@ -63,6 +64,7 @@ export const ApLedgerEntryType = {
 export type ApLedgerEntryType =
   (typeof ApLedgerEntryType)[keyof typeof ApLedgerEntryType]
 export const AP_LEDGER_LABEL: Record<ApLedgerEntryType, string> = {
+  opening: 'Opening balance',
   receipt: 'Goods receipt',
   return: 'Return',
   bill: 'Supplier bill',
@@ -88,6 +90,17 @@ export type ClientInvoice = {
   openAmount: number
   journalNumber: string
   isOverdue: boolean
+}
+
+/** Customer due carried in from the old books (no invoice in this app). */
+export type CustomerOpeningDue = {
+  customerId: string
+  customerName: string
+  openingDate: string
+  journalNumber: string
+  openingAmount: number
+  receivedAmount: number
+  openAmount: number
 }
 
 export type InvoiceCollection = {
@@ -187,6 +200,7 @@ export type VendorLedger = {
     name: string
     paymentTermsDays: number
   }
+  opening?: number
   purchased: number
   returned: number
   billed: number

@@ -7,6 +7,7 @@ import {
   emptyAddSupplierValues,
   type AddSupplierFormValues,
 } from '../components/AddSupplierForm'
+import { Modal } from '../components/ui'
 import { Role } from '../types/auth'
 import type { Supplier } from '../types/procurement'
 
@@ -17,6 +18,20 @@ export function VendorsPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<AddSupplierFormValues>(emptyAddSupplierValues)
+  const [addOpen, setAddOpen] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
+
+  function openAdd() {
+    setForm(emptyAddSupplierValues())
+    setAddError(null)
+    setAddOpen(true)
+  }
+
+  function closeAdd() {
+    setAddOpen(false)
+    setForm(emptyAddSupplierValues())
+    setAddError(null)
+  }
 
   async function load() {
     const rows = await api.suppliers()
@@ -32,19 +47,26 @@ export function VendorsPage() {
   async function onCreate(event: FormEvent) {
     event.preventDefault()
     if (!isFinance) return
+    if (!form.address.trim()) {
+      setAddError('Billing address is required')
+      return
+    }
     setSaving(true)
-    setError(null)
+    setAddError(null)
     try {
       await api.createSupplier({
-        name: form.name,
-        contactName: form.contactName || undefined,
-        phone: form.phone || undefined,
-        address: form.address || undefined,
+        name: form.name.trim(),
+        contactName: form.contactName.trim() || undefined,
+        phone: form.phone.trim() || undefined,
+        email: form.email.trim() || undefined,
+        address: form.address.trim(),
       })
-      setForm(emptyAddSupplierValues())
+      closeAdd()
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create supplier')
+      setAddError(
+        err instanceof Error ? err.message : 'Unable to create supplier',
+      )
     } finally {
       setSaving(false)
     }
@@ -56,34 +78,25 @@ export function VendorsPage() {
         <div>
           <h1>Vendor directory</h1>
         </div>
-        <Link to="/procurement" className="ghost-link">
-          Purchase orders
-        </Link>
+        <div className="form-actions">
+          <Link to="/procurement" className="ghost-link">
+            Purchase orders
+          </Link>
+          {isFinance ? (
+            <button type="button" onClick={openAdd}>
+              Add supplier
+            </button>
+          ) : null}
+        </div>
       </header>
 
-      {isFinance ? (
-        <section className="table-card">
-          <div className="table-head">
-            <h2>Add supplier</h2>
-            <p className="muted">Creates a vendor record for POs and payables</p>
-          </div>
-          <AddSupplierForm
-            values={form}
-            onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
-            onSubmit={(event) => void onCreate(event)}
-            saving={saving}
-            error={error}
-            submitLabel="Create supplier"
-          />
-        </section>
-      ) : null}
+      {error ? <p className="form-error">{error}</p> : null}
 
       <section className="table-card">
         <div className="table-head">
           <h2>Suppliers</h2>
           <p className="muted">Open a vendor for ledger and payment history</p>
         </div>
-        {!isFinance && error ? <p className="form-error">{error}</p> : null}
         <table>
           <thead>
             <tr>
@@ -122,6 +135,23 @@ export function VendorsPage() {
           </tbody>
         </table>
       </section>
+
+      <Modal
+        open={addOpen}
+        title="Add supplier"
+        description="Creates a vendor record for POs and payables"
+        onClose={closeAdd}
+      >
+        <AddSupplierForm
+          values={form}
+          onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
+          onSubmit={(event) => void onCreate(event)}
+          onCancel={closeAdd}
+          saving={saving}
+          error={addError}
+          submitLabel="Add supplier"
+        />
+      </Modal>
     </>
   )
 }

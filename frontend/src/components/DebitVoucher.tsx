@@ -1,12 +1,11 @@
 import type { CSSProperties } from "react";
-import { resolveAssetUrl } from "../types/report-template";
+import {
+  DEFAULT_COMPANY_ADDRESS,
+  DEFAULT_COMPANY_LOGO_URL,
+  resolveAssetUrl,
+} from "../types/report-template";
 
-export type VoucherThemeId =
-  | "yellow"
-  | "blue"
-  | "emerald"
-  | "crimson"
-  | "charcoal";
+export type VoucherThemeId = "bw" | "color";
 
 export type VoucherTheme = {
   id: VoucherThemeId;
@@ -15,6 +14,8 @@ export type VoucherTheme = {
   accent: string;
   /** Readable text/line color on the sidebar */
   sidebarText: string;
+  /** Title and accent text on the white page */
+  bodyText: string;
   sidebarClass: string;
   sidebarTextClass: string;
   sidebarMutedClass: string;
@@ -23,72 +24,45 @@ export type VoucherTheme = {
   accentBarClass: string;
 };
 
+export function normalizeVoucherTheme(id?: string | null): VoucherThemeId {
+  if (id === "bw" || id === "charcoal" || id === "black") return "bw";
+  return "color";
+}
+
 export const VOUCHER_COLOR_THEMES: VoucherTheme[] = [
   {
-    id: "yellow",
-    name: "Classic Yellow",
-    accent: "#f1b80d",
-    sidebarText: "#0f172a",
-    sidebarClass: "bg-[#f1b80d]",
-    sidebarTextClass: "text-slate-900",
-    sidebarMutedClass: "text-slate-900/60",
-    sidebarLineClass: "border-slate-950/40",
-    textClass: "text-[#f1b80d]",
-    accentBarClass: "bg-[#f1b80d]",
+    id: "bw",
+    name: "Black & White",
+    accent: "#ffffff",
+    sidebarText: "#111111",
+    bodyText: "#111111",
+    sidebarClass: "bg-white",
+    sidebarTextClass: "text-neutral-900",
+    sidebarMutedClass: "text-neutral-600",
+    sidebarLineClass: "border-neutral-900",
+    textClass: "text-neutral-900",
+    accentBarClass: "bg-neutral-900",
   },
   {
-    id: "blue",
-    name: "Royal Blue",
-    accent: "#2563eb",
+    id: "color",
+    name: "Color",
+    accent: "#1d4ed8",
     sidebarText: "#ffffff",
-    sidebarClass: "bg-blue-600",
+    bodyText: "#1d4ed8",
+    sidebarClass: "bg-blue-700",
     sidebarTextClass: "text-white",
-    sidebarMutedClass: "text-white/70",
-    sidebarLineClass: "border-white/50",
-    textClass: "text-blue-600",
-    accentBarClass: "bg-blue-600",
-  },
-  {
-    id: "emerald",
-    name: "Emerald Green",
-    accent: "#059669",
-    sidebarText: "#ffffff",
-    sidebarClass: "bg-emerald-600",
-    sidebarTextClass: "text-white",
-    sidebarMutedClass: "text-white/70",
-    sidebarLineClass: "border-white/50",
-    textClass: "text-emerald-600",
-    accentBarClass: "bg-emerald-600",
-  },
-  {
-    id: "crimson",
-    name: "Crimson Red",
-    accent: "#e11d48",
-    sidebarText: "#ffffff",
-    sidebarClass: "bg-rose-600",
-    sidebarTextClass: "text-white",
-    sidebarMutedClass: "text-white/70",
-    sidebarLineClass: "border-white/50",
-    textClass: "text-rose-600",
-    accentBarClass: "bg-rose-600",
-  },
-  {
-    id: "charcoal",
-    name: "Charcoal Dark",
-    accent: "#1e293b",
-    sidebarText: "#f8fafc",
-    sidebarClass: "bg-slate-800",
-    sidebarTextClass: "text-slate-50",
-    sidebarMutedClass: "text-slate-300/80",
-    sidebarLineClass: "border-slate-200/40",
-    textClass: "text-slate-800",
-    accentBarClass: "bg-slate-800",
+    sidebarMutedClass: "text-white/80",
+    sidebarLineClass: "border-white/70",
+    textClass: "text-blue-700",
+    accentBarClass: "bg-blue-700",
   },
 ];
 
 export function getVoucherTheme(id?: string | null): VoucherTheme {
+  const normalized = normalizeVoucherTheme(id);
   return (
-    VOUCHER_COLOR_THEMES.find((t) => t.id === id) ?? VOUCHER_COLOR_THEMES[0]!
+    VOUCHER_COLOR_THEMES.find((t) => t.id === normalized) ??
+    VOUCHER_COLOR_THEMES[1]!
   );
 }
 
@@ -109,12 +83,14 @@ export type DebitCreditVoucherProps = {
   kind: "debit" | "credit";
   companyName: string;
   companySubtitle?: string;
+  companyAddress?: string;
   companyLogoUrl?: string | null;
   voucherNo: string;
   day: string;
   month: string;
   year: string;
-  receivedBy?: string;
+  /** Hand Cash, Cash in Bank (…), Mobile Banking (…). */
+  paymentMethod?: string;
   /** Debit: Paid to; Credit: Received from */
   partyLabel?: string;
   partyName?: string;
@@ -156,6 +132,12 @@ export function voucherSidebarTextRgb(
   return hexToRgb(getVoucherTheme(themeId).sidebarText);
 }
 
+export function voucherBodyTextRgb(
+  themeId?: string | null,
+): [number, number, number] {
+  return hexToRgb(getVoucherTheme(themeId).bodyText);
+}
+
 /**
  * Print-ready Debit / Credit voucher layout (landscape paper template).
  * Used by Settings preview and mirrors the PDF output.
@@ -164,12 +146,13 @@ export function DebitCreditVoucherView({
   kind,
   companyName,
   companySubtitle = "",
+  companyAddress = DEFAULT_COMPANY_ADDRESS,
   companyLogoUrl,
   voucherNo,
   day,
   month,
   year,
-  receivedBy = "",
+  paymentMethod = "",
   partyLabel,
   partyName = "",
   currencyLabel = "Amount in BDT",
@@ -179,7 +162,7 @@ export function DebitCreditVoucherView({
   amountInWords = "",
   items,
   signatories,
-  themeId = "yellow",
+  themeId = "color",
   showWatermark = true,
   className = "",
   style,
@@ -188,7 +171,9 @@ export function DebitCreditVoucherView({
   const title = kind === "debit" ? "DEBIT VOUCHER" : "CREDIT VOUCHER";
   const resolvedPartyLabel =
     partyLabel ?? (kind === "debit" ? "Paid to:" : "Received from:");
-  const logoSrc = resolveAssetUrl(companyLogoUrl ?? null);
+  const methodLabel = kind === "credit" ? "Receiving Method:" : "Payment Method:";
+  const logoSrc =
+    resolveAssetUrl(companyLogoUrl ?? null) ?? DEFAULT_COMPANY_LOGO_URL;
 
   const totalMajor = items.reduce(
     (sum, row) =>
@@ -208,13 +193,19 @@ export function DebitCreditVoucherView({
 
   return (
     <div
-      className={`w-full max-w-[920px] bg-white overflow-hidden border border-slate-200 ${className}`}
+      className={`voucher-sheet w-full max-w-[920px] bg-white overflow-hidden border border-slate-200 ${className}`}
       style={{ minHeight: 540, ...style }}
     >
       <div className='flex flex-col md:flex-row h-full min-h-[540px]'>
         {/* Left sidebar */}
         <div
-          className={`w-full md:w-[32%]  p-6 flex flex-col justify-between relative overflow-hidden print:w-[32%]`}
+          className='w-full md:w-[32%] p-6 flex flex-col justify-between relative overflow-hidden print:w-[32%]'
+          style={{
+            backgroundColor: theme.accent,
+            color: theme.sidebarText,
+            borderRight:
+              theme.id === "bw" ? "1px solid #111111" : "none",
+          }}
         >
           <svg
             className={`absolute -left-12 -bottom-12 w-64 h-64 opacity-15 pointer-events-none ${theme.sidebarTextClass}`}
@@ -235,13 +226,11 @@ export function DebitCreditVoucherView({
 
           <div className='relative z-10'>
             <div className='w-full text-center'>
-              {logoSrc ? (
-                <img
-                  src={logoSrc}
-                  alt=''
-                  className='mx-auto mb-2 h-12 w-12 object-contain'
-                />
-              ) : null}
+              <img
+                src={logoSrc}
+                alt=''
+                className='mx-auto mb-2 h-12 w-12 object-contain'
+              />
               <h2
                 className={`font-extrabold tracking-wider text-sm sm:text-base uppercase leading-tight ${theme.sidebarTextClass}`}
               >
@@ -252,6 +241,13 @@ export function DebitCreditVoucherView({
                   className={`text-[9px] tracking-widest font-light uppercase mt-0.5 ${theme.sidebarMutedClass}`}
                 >
                   {companySubtitle}
+                </p>
+              ) : null}
+              {companyAddress ? (
+                <p
+                  className={`text-[9px] leading-snug mt-1.5 ${theme.sidebarMutedClass}`}
+                >
+                  {companyAddress}
                 </p>
               ) : null}
             </div>
@@ -332,11 +328,15 @@ export function DebitCreditVoucherView({
               </div>
 
               <div className='text-right'>
-                <h1 className='text-2xl sm:text-3xl font-black tracking-tight text-slate-900 uppercase leading-none'>
+                <h1
+                  className='text-2xl sm:text-3xl font-black tracking-tight uppercase leading-none'
+                  style={{ color: theme.bodyText }}
+                >
                   {title}
                 </h1>
                 <div
-                  className={`h-1.5 w-16 ml-auto mt-2 rounded-full ${theme.accentBarClass}`}
+                  className='h-1.5 w-16 ml-auto mt-2 rounded-full'
+                  style={{ backgroundColor: theme.id === "bw" ? "#111111" : theme.accent }}
                 />
               </div>
             </div>
@@ -352,10 +352,10 @@ export function DebitCreditVoucherView({
               </div>
               <div className='flex items-baseline space-x-2 text-xs'>
                 <span className='font-semibold text-slate-800 whitespace-nowrap'>
-                  Received By:
+                  {methodLabel}
                 </span>
-                <div className='flex-1 border-b border-slate-400 pb-0.5 font-medium text-slate-800 min-h-[1.1rem]'>
-                  {receivedBy}
+                <div className='flex-1 border-b border-slate-400 pb-0.5 font-bold text-slate-800 min-h-[1.1rem]'>
+                  {paymentMethod}
                 </div>
               </div>
             </div>
@@ -381,48 +381,40 @@ export function DebitCreditVoucherView({
                 </div>
               </div>
 
-              <div className='grid grid-cols-12 min-h-[160px]'>
-                <div className='col-span-8 p-3 space-y-2 text-xs relative'>
-                  <span className='text-[10px] font-semibold text-slate-500 block mb-1'>
-                    Being the amount
-                  </span>
-                  <div className='space-y-2.5'>
-                    {items.map((item) => (
-                      <div
-                        key={item.id}
-                        className='border-b border-slate-200 pb-1 text-slate-800 text-xs'
-                      >
+              <div className='min-h-[160px] flex flex-col text-xs'>
+                {items.map((item) => (
+                  <div key={item.id} className='grid grid-cols-12'>
+                    <div className='col-span-8 px-3 pt-2.5'>
+                      <div className='border-b border-slate-200 pb-1 text-slate-800 whitespace-normal break-words'>
                         {item.description || "—"}
                       </div>
-                    ))}
-                    {Array.from({ length: blankRows }).map((_, i) => (
-                      <div
-                        key={`blank-${i}`}
-                        className='border-b border-slate-200 h-5'
-                      />
-                    ))}
-                  </div>
-                </div>
-                <div className='col-span-4 border-l border-slate-400 grid grid-cols-2 font-mono text-xs'>
-                  <div className='border-r border-slate-300 p-2 text-right space-y-2.5'>
-                    {items.map((item) => (
-                      <div
-                        key={`${item.id}-m`}
-                        className='h-5 flex items-center justify-end font-semibold'
-                      >
+                    </div>
+                    <div className='col-span-4 border-l border-slate-400 grid grid-cols-2 font-mono'>
+                      <div className='border-r border-slate-300 px-2 pt-2.5 text-right font-semibold'>
                         {item.major || "0"}
                       </div>
-                    ))}
-                  </div>
-                  <div className='p-2 text-right space-y-2.5'>
-                    {items.map((item) => (
-                      <div
-                        key={`${item.id}-c`}
-                        className='h-5 flex items-center justify-end text-slate-600'
-                      >
+                      <div className='px-2 pt-2.5 text-right text-slate-600'>
                         {item.minor || "00"}
                       </div>
-                    ))}
+                    </div>
+                  </div>
+                ))}
+                {Array.from({ length: blankRows }).map((_, i) => (
+                  <div key={`blank-${i}`} className='grid grid-cols-12'>
+                    <div className='col-span-8 px-3 pt-2.5'>
+                      <div className='border-b border-slate-200 h-5' />
+                    </div>
+                    <div className='col-span-4 border-l border-slate-400 grid grid-cols-2'>
+                      <div className='border-r border-slate-300' />
+                      <div />
+                    </div>
+                  </div>
+                ))}
+                <div className='grid grid-cols-12 flex-1'>
+                  <div className='col-span-8' />
+                  <div className='col-span-4 border-l border-slate-400 grid grid-cols-2'>
+                    <div className='border-r border-slate-300' />
+                    <div />
                   </div>
                 </div>
               </div>

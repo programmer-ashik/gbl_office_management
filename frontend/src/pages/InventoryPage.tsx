@@ -50,6 +50,19 @@ type IssueFlatRow = {
   isFirst: boolean;
 };
 
+type IssueLineDraft = {
+  key: string;
+  itemId: string;
+  quantity: string;
+};
+
+let issueLineSeq = 0;
+
+function emptyIssueLine(itemId = ""): IssueLineDraft {
+  issueLineSeq += 1;
+  return { key: `issue-line-${issueLineSeq}`, itemId, quantity: "" };
+}
+
 function TablePager(props: {
   page: number;
   totalPages: number;
@@ -97,8 +110,9 @@ export function InventoryPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [warehouseId, setWarehouseId] = useState("");
   const [projectId, setProjectId] = useState("");
-  const [itemId, setItemId] = useState("");
-  const [quantity, setQuantity] = useState("");
+  const [issueLines, setIssueLines] = useState<IssueLineDraft[]>(() => [
+    emptyIssueLine(),
+  ]);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [itemForm, setItemForm] =
     useState<AddItemFormValues>(emptyAddItemValues());
@@ -147,8 +161,6 @@ export function InventoryPage() {
     setSuppliers(vendors);
     if (!warehouseId && warehouseList[0]) setWarehouseId(warehouseList[0].id);
     if (!projectId && projectList[0]) setProjectId(projectList[0].id);
-    if (!itemId && onHand[0]) setItemId(onHand[0].itemId);
-    else if (!itemId && catalog[0]) setItemId(catalog[0].id);
   }
 
   useEffect(() => {
@@ -164,10 +176,9 @@ export function InventoryPage() {
     setItemError(null);
     setError(null);
     try {
-      const created = await api.createItem(addItemBodyFromValues(itemForm));
+      await api.createItem(addItemBodyFromValues(itemForm));
       setItemForm(emptyAddItemValues());
       setItemModalOpen(false);
-      setItemId(created.id);
       await load();
     } catch (err) {
       setItemError(
@@ -178,9 +189,67 @@ export function InventoryPage() {
     }
   }
 
+  const warehouseStock = useMemo(
+    () => stock.filter((row) => row.warehouseId === warehouseId),
+    [stock, warehouseId],
+  );
+  const stockByItem = useMemo(
+    () => new Map(warehouseStock.map((row) => [row.itemId, row])),
+    [warehouseStock],
+  );
+
+  function lineProblem(line: IssueLineDraft): string | null {
+    if (!line.itemId) return null;
+    const row = stockByItem.get(line.itemId);
+    if (!row) return "Not in stock at this warehouse";
+    if (!line.quantity.trim()) return null;
+    const quantity = Number(line.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) return "Enter a quantity above 0";
+    if (quantity > row.quantity) {
+      return `Only ${qty(row.quantity)} ${row.unit} available`;
+    }
+    return null;
+  }
+
+  function lineEstimate(line: IssueLineDraft): number {
+    const row = stockByItem.get(line.itemId);
+    const quantity = Number(line.quantity);
+    if (!row || !row.quantity || !Number.isFinite(quantity)) return 0;
+    return (row.value / row.quantity) * quantity;
+  }
+
+  const chosenLines = issueLines.filter((line) => line.itemId);
+  const issueReady =
+    chosenLines.length > 0 &&
+    chosenLines.every(
+      (line) => Number(line.quantity) > 0 && !lineProblem(line),
+    );
+  const issueEstimate = chosenLines.reduce(
+    (sum, line) => sum + lineEstimate(line),
+    0,
+  );
+
+  function updateIssueLine(key: string, patch: Partial<IssueLineDraft>) {
+    setIssueLines((prev) =>
+      prev.map((line) => (line.key === key ? { ...line, ...patch } : line)),
+    );
+  }
+
+  function removeIssueLine(key: string) {
+    setIssueLines((prev) => {
+      const next = prev.filter((line) => line.key !== key);
+      return next.length ? next : [emptyIssueLine()];
+    });
+  }
+
+  function onWarehouseChange(next: string) {
+    setWarehouseId(next);
+    setIssueLines([emptyIssueLine()]);
+  }
+
   async function onIssue(event: FormEvent) {
     event.preventDefault();
-    if (!warehouseId || !projectId || !itemId) return;
+    if (!warehouseId || !projectId || !issueReady) return;
     setSaving(true);
     setError(null);
     try {
@@ -188,9 +257,12 @@ export function InventoryPage() {
         warehouseId,
         projectId,
         date,
-        lines: [{ itemId, quantity: Number(quantity) }],
+        lines: chosenLines.map((line) => ({
+          itemId: line.itemId,
+          quantity: Number(line.quantity),
+        })),
       });
-      setQuantity("");
+      setIssueLines([emptyIssueLine()]);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to issue stock");
@@ -200,16 +272,20 @@ export function InventoryPage() {
   }
 
   const totalValue = stock.reduce((sum, row) => sum + row.value, 0);
-  const issueItemOptions =
-    stock.length > 0
-      ? stock.map((row) => ({
-          value: row.itemId,
-          label: `${row.sku} · ${row.name} (${qty(row.quantity)} ${row.unit})`,
-        }))
-      : items.map((row) => ({
-          value: row.id,
-          label: `${row.sku} · ${row.name} (${row.unit})`,
-        }));
+
+  function issueItemOptions(line: IssueLineDraft) {
+    const taken = new Set(
+      issueLines
+        .filter((row) => row.key !== line.key && row.itemId)
+        .map((row) => row.itemId),
+    );
+    return warehouseStock
+      .filter((row) => !taken.has(row.itemId))
+      .map((row) => ({
+        value: row.itemId,
+        label: `${row.sku} · ${row.name} (${qty(row.quantity)} ${row.unit})`,
+      }));
+  }
 
   const filteredCatalog = useMemo(() => {
     const q = catalogSearch.trim().toLowerCase();
@@ -397,7 +473,7 @@ export function InventoryPage() {
                 Warehouse
                 <Select
                   value={warehouseId}
-                  onChange={setWarehouseId}
+                  onChange={onWarehouseChange}
                   options={warehouses.map((row) => ({
                     value: row.id,
                     label: `${row.code} · ${row.name}`,
@@ -429,39 +505,122 @@ export function InventoryPage() {
                 />
               </label>
             </div>
-            <div className='name-row'>
-              <label>
-                Item
-                <Select
-                  value={itemId}
-                  onChange={setItemId}
-                  options={issueItemOptions}
-                  placeholder='Select item'
-                  required
-                />
-              </label>
-              <label>
-                Quantity
-                <input
-                  inputMode='decimal'
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  required
-                />
-              </label>
+            <div className='table-head'>
+              <h3>Items</h3>
+              <button
+                type='button'
+                className='ghost'
+                disabled={chosenLines.length >= warehouseStock.length}
+                onClick={() =>
+                  setIssueLines((prev) => [...prev, emptyIssueLine()])
+                }
+              >
+                + Item
+              </button>
             </div>
+            <div className='journal-lines-scroll'>
+              <table className='journal-lines-table issue-lines-table'>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th className='num'>Available</th>
+                    <th className='num'>Quantity</th>
+                    <th className='num'>Est. cost</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {issueLines.map((line) => {
+                    const row = stockByItem.get(line.itemId);
+                    const problem = lineProblem(line);
+                    return (
+                      <tr key={line.key}>
+                        <td>
+                          <Select
+                            value={line.itemId}
+                            onChange={(next) =>
+                              updateIssueLine(line.key, { itemId: next })
+                            }
+                            options={issueItemOptions(line)}
+                            placeholder={
+                              warehouseStock.length
+                                ? "Select item"
+                                : "No stock in this warehouse"
+                            }
+                            searchable
+                            portal
+                          />
+                          {problem ? (
+                            <span className='form-error'>{problem}</span>
+                          ) : null}
+                        </td>
+                        <td className='num'>
+                          {row ? `${qty(row.quantity)} ${row.unit}` : "—"}
+                        </td>
+                        <td>
+                          <input
+                            className='inv-num'
+                            inputMode='decimal'
+                            value={line.quantity}
+                            onChange={(e) =>
+                              updateIssueLine(line.key, {
+                                quantity: e.target.value,
+                              })
+                            }
+                            placeholder='0'
+                            disabled={!line.itemId}
+                            aria-label='Quantity'
+                          />
+                        </td>
+                        <td className='num'>
+                          {line.itemId && Number(line.quantity) > 0
+                            ? money(lineEstimate(line))
+                            : "—"}
+                        </td>
+                        <td>
+                          {issueLines.length > 1 || line.itemId ? (
+                            <button
+                              type='button'
+                              className='ghost'
+                              onClick={() => removeIssueLine(line.key)}
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <th colSpan={3}>
+                      {chosenLines.length} item
+                      {chosenLines.length === 1 ? "" : "s"} selected
+                    </th>
+                    <th className='num'>{money(issueEstimate)}</th>
+                    <th />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <p className='muted'>
+              Est. cost uses the average cost on hand; the posted amount uses
+              FIFO lots.
+            </p>
+            {!itemModalOpen && error ? (
+              <p className='form-error'>{error}</p>
+            ) : null}
             <div className='form-actions'>
               <button
                 type='submit'
-                disabled={
-                  saving ||
-                  stock.length === 0 ||
-                  !warehouseId ||
-                  !projectId ||
-                  !itemId
-                }
+                disabled={saving || !warehouseId || !projectId || !issueReady}
               >
-                {saving ? "Posting…" : "Issue to project"}
+                {saving
+                  ? "Posting…"
+                  : chosenLines.length > 1
+                    ? `Issue ${chosenLines.length} items to project`
+                    : "Issue to project"}
               </button>
             </div>
           </form>
@@ -672,7 +831,7 @@ export function InventoryPage() {
         />
       </section>
 
-      {!itemModalOpen && error ? <p className='form-error'>{error}</p> : null}
+      {!isFinance && error ? <p className='form-error'>{error}</p> : null}
     </>
   );
 }

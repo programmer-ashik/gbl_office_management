@@ -4,6 +4,7 @@ import { getConfig } from '../../config';
 import { Role } from '../../common/enums/role.enum';
 import {
   conflict,
+  forbidden,
   unauthorized,
 } from '../../common/errors/app-error';
 import type {
@@ -39,13 +40,19 @@ export class AuthService {
   constructor(private readonly usersService: UsersService) {}
 
   async bootstrapAdmin(): Promise<void> {
-    const { email, password } = getConfig().bootstrapAdmin;
-    if (!email || !password) {
+    const config = getConfig();
+    const { email, password } = config.bootstrapAdmin;
+    const count = await this.usersService.count();
+    if (count > 0) {
       return;
     }
 
-    const count = await this.usersService.count();
-    if (count > 0) {
+    if (!email || !password) {
+      if (config.nodeEnv === 'production') {
+        throw new Error(
+          'Production start requires BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD when no users exist',
+        );
+      }
       return;
     }
 
@@ -61,6 +68,10 @@ export class AuthService {
   }
 
   async signup(dto: SignupDto, meta: RequestMeta): Promise<AuthResult> {
+    if (getConfig().nodeEnv === 'production') {
+      throw forbidden('Public signup is disabled');
+    }
+
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) {
       throw conflict('Email is already registered');
@@ -148,7 +159,7 @@ export class AuthService {
 
   async me(actor: AuthenticatedUser): Promise<PublicUser> {
     const user = await this.usersService.findByIdOrFail(actor.userId);
-    return this.usersService.toPublicUser(user);
+    return this.usersService.toPublicUserWithEmployee(user);
   }
 
   verifyAccessToken(token: string): JwtPayload {
@@ -183,7 +194,7 @@ export class AuthService {
     });
 
     return {
-      user: this.usersService.toPublicUser(user),
+      user: await this.usersService.toPublicUserWithEmployee(user),
       tokens: {
         accessToken,
         refreshToken,

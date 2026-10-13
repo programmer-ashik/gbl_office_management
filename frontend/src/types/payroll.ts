@@ -74,7 +74,8 @@ export type PayrollEmployee = {
   id: string
   name: string
   email: string
-  role: string
+  /** Login role; null when the employee has no software access. */
+  role: string | null
 }
 
 export type TimeLog = {
@@ -144,6 +145,21 @@ export type PayrollLine = {
   }>
 }
 
+/** A disbursed project advance that can be recovered from this run's salary. */
+export type PayrollOpenAdvance = {
+  employeeId: string
+  advanceId: string
+  advanceNumber: string
+  purpose: string
+  projectCode: string | null
+  projectName: string | null
+  disbursedAt: string | null
+  disbursed: number
+  recovered: number
+  outstanding: number
+  deducting: number
+}
+
 export type PayrollRun = {
   id: string
   sheetNumber: string
@@ -160,5 +176,14 @@ export type PayrollRun = {
   journalNumber: string | null
   disbursedAt: string | null
   treasuryAccountCode: string | null
+  /** Each reopen of a posted run: journals reversed and why. */
+  reopenHistory?: Array<{
+    reopenedAt: string
+    fromStatus: string
+    accrualJournalNumber: string | null
+    journalNumber: string | null
+    reversalJournalNumbers: string[]
+    reason: string | null
+  }>
   lines: PayrollLine[]
 }

@@ -5,6 +5,7 @@ import { Select } from '../components/ui'
 import { money } from '../types/accounting'
 import {
   TRANSFER_KIND_LABEL,
+  treasuryName,
   type FundTransfer,
   type TreasuryAccount,
 } from '../types/banking'
@@ -63,7 +64,7 @@ export function BankingTransfersPage() {
 
   const accountOptions = accounts.map((account) => ({
     value: account.id,
-    label: `${account.glAccountCode} · ${account.name}`,
+    label: `${account.glAccountCode} · ${treasuryName(account)}`,
   }))
 
   return (

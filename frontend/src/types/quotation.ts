@@ -70,6 +70,23 @@ export type CreateQuotationBody = {
   status?: QuotationStatus
 }
 
+/**
+ * Gross-up tax (back calculation): VAT is taxRate% of the grand total.
+ *   divisor    = (100 − taxRate) ÷ 100
+ *   grandTotal = subTotal ÷ divisor
+ *   taxAmount  = grandTotal − subTotal
+ * Mirrors backend quotations.service.ts grossUpTotalsMinor.
+ */
+export function quotationTotalsPreview(subTotal: number, taxRate: number) {
+  const round2 = (value: number) =>
+    Math.round((value + Number.EPSILON) * 100) / 100
+  const sub = round2(subTotal)
+  const divisor = (100 - Math.max(taxRate || 0, 0)) / 100
+  const grandTotal = divisor > 0 ? round2(sub / divisor) : sub
+  const taxAmount = round2(grandTotal - sub)
+  return { subTotal: sub, taxAmount, grandTotal }
+}
+
 export function lineTotalPreview(
   unitPrice: number,
   quantity: number,

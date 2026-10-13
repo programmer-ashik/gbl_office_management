@@ -143,6 +143,16 @@ export function createAdvancesRouter(
   );
 
   router.post(
+    '/:id/approve',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const row = await advancesService.approve(String(req.params.id), req.user!);
+      sendSuccess(res, row, 'Advance requisition approved');
+    }),
+  );
+
+  router.post(
     '/:id/reject',
     auth,
     requireRoles(...FINANCE),

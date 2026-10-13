@@ -3,19 +3,31 @@
  * Must match chart_of_accounts.json leaf codes.
  */
 export const SystemAccountCode = {
-  /** Physical cash / hand cash (single channel). */
+  /** Physical cash (1111 Cash in Hand). */
   CASH: '1111',
-  /** @deprecated Alias of CASH — Cash in Hand was a duplicate of Hand Cash. */
   CASH_IN_HAND: '1111',
-  BANK: '1112',
-  BANK_ALT: '1113',
-  MOBILE_BANKING: '1114',
-  ACCOUNTS_RECEIVABLE: '1121',
-  ALLOWANCE_DOUBTFUL: '1129',
-  EMPLOYEE_ADVANCES: '1131',
+  /** Cash in Bank header. New bank accounts are siblings under this code. */
+  CASH_IN_BANK: '1120',
+  /** DBBL Bank A/C */
+  BANK_ALT: '1121',
+  /** BRAC Bank A/C — default commercial bank treasury. */
+  BANK: '1122',
+  /** City Bank A/C */
+  CITY_BANK: '1123',
+  /** bKash. MOBILE_BANKING stays as the default mobile leaf. */
+  BKASH: '1131',
+  MOBILE_BANKING: '1131',
+  NAGAD: '1132',
+  ACCOUNTS_RECEIVABLE: '1151',
+  ALLOWANCE_DOUBTFUL: '1159',
+  /** Incoming customer cheques dated in the future (clearing account). */
+  PDC_RECEIVABLE: '1152',
+  EMPLOYEE_ADVANCES: '1161',
   INVENTORY: '1141',
   SITE_STOCK: '1142',
   ACCOUNTS_PAYABLE: '2111',
+  /** Outgoing supplier cheques dated in the future (clearing account). */
+  PDC_PAYABLE: '2112',
   SUBCONTRACTOR_PAYABLE: '2113',
   EMPLOYEE_PAYABLES: '2121',
   SOURCE_TAX_PAYABLE: '2131',
@@ -25,12 +37,16 @@ export const SystemAccountCode = {
   RETAINED_EARNINGS: '3200',
   PROJECT_REVENUE: '4110',
   OTHER_INCOME: '4200',
+  /** Direct Project Cost (COGS) header. Every head under it needs a project. */
+  DIRECT_PROJECT_COST: '5100',
   PROJECT_MATERIALS: '5110',
   PROJECT_LABOR: '5120',
   EQUIPMENT_RENTAL: '5130',
   SITE_TRANSPORT: '5140',
   OFFICE_RENT: '5210',
+  /** Utility Bills header. Post to a sub-ledger (5221–5229) instead. */
   UTILITIES: '5220',
+  OTHER_UTILITIES: '5229',
   ADMIN_SALARIES: '5230',
   OFFICE_EXPENSES: '5240',
   BANK_CHARGES: '5250',

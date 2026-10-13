@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { ActionMenu, Select } from '../components/ui'
 import { money } from '../types/accounting'
 import {
@@ -8,7 +9,8 @@ import {
   type Advance,
   type AdvanceProjectOption,
 } from '../types/advance'
-import type { PublicUser } from '../types/auth'
+import { Role } from '../types/auth'
+import type { Employee } from '../types/employee'
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -20,10 +22,12 @@ const STATUS_OPTIONS = [
 
 export function AdvancesPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isFinance = user?.role === Role.ADMIN || user?.role === Role.ACCOUNTANT
   const [rows, setRows] = useState<Advance[]>([])
   const [total, setTotal] = useState(0)
   const [projects, setProjects] = useState<AdvanceProjectOption[]>([])
-  const [employees, setEmployees] = useState<PublicUser[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
   const [projectId, setProjectId] = useState('')
   const [amount, setAmount] = useState('')
   const [purpose, setPurpose] = useState('')
@@ -40,7 +44,7 @@ export function AdvancesPage() {
     const [advances, options, staff] = await Promise.all([
       api.advances({
         projectId: projectFilter || undefined,
-        employeeId: employeeFilter || undefined,
+        employeeId: isFinance ? employeeFilter || undefined : undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         status: statusFilter || undefined,
@@ -48,15 +52,12 @@ export function AdvancesPage() {
         pageSize: 100,
       }),
       api.advanceProjects(),
-      api.employees().catch(() => [] as PublicUser[]),
+      isFinance ? api.employees().catch(() => [] as Employee[]) : Promise.resolve([] as Employee[]),
     ])
     setRows(advances.items)
     setTotal(advances.total)
     setProjects(options)
     setEmployees(staff)
-    if (!projectId && options[0]) {
-      setProjectId(options[0].id)
-    }
   }
 
   useEffect(() => {
@@ -67,12 +68,11 @@ export function AdvancesPage() {
 
   async function onCreate(event: FormEvent) {
     event.preventDefault()
-    if (!projectId) return
     setSaving(true)
     setError(null)
     try {
       await api.createAdvance({
-        projectId,
+        projectId: projectId || undefined,
         amount: Number(amount),
         purpose,
       })
@@ -128,22 +128,26 @@ export function AdvancesPage() {
           <h1>Advance requisitions</h1>
         </div>
         <div className="header-actions">
-          <button
-            type="button"
-            className="ghost"
-            disabled={exporting || !projectFilter}
-            onClick={() => void onExportProjectReport()}
-            title={
-              projectFilter
-                ? 'Export PDF for the selected project filter'
-                : 'Select a project in the filter bar first'
-            }
-          >
-            {exporting ? 'Exporting…' : 'Export Project Advance Report (PDF)'}
-          </button>
-          <Link to="/advances/settlements" className="action-link">
-            Expense settlements
-          </Link>
+          {isFinance ? (
+            <button
+              type="button"
+              className="ghost"
+              disabled={exporting || !projectFilter}
+              onClick={() => void onExportProjectReport()}
+              title={
+                projectFilter
+                  ? 'Export PDF for the selected project filter'
+                  : 'Select a project in the filter bar first'
+              }
+            >
+              {exporting ? 'Exporting…' : 'Export Project Advance Report (PDF)'}
+            </button>
+          ) : null}
+          {isFinance ? (
+            <Link to="/advances/settlements" className="action-link">
+              Expense settlements
+            </Link>
+          ) : null}
         </div>
       </header>
 
@@ -151,8 +155,9 @@ export function AdvancesPage() {
         <div className="table-head">
           <h2>Submit requisition</h2>
           <p className="muted">
-            Request cash for a project. Until settlement, the payment is an employee
-            advance asset — not a project expense.
+            Request cash for a project, or choose None for office / general
+            spending. Until settlement, the payment is an employee advance asset
+            — not an expense.
           </p>
         </div>
         <form className="stack-form" onSubmit={(event) => void onCreate(event)}>
@@ -162,10 +167,11 @@ export function AdvancesPage() {
               <Select
                 value={projectId}
                 onChange={setProjectId}
-                options={projectOptions}
+                options={[
+                  { value: '', label: 'None (office / general)' },
+                  ...projectOptions,
+                ]}
                 searchable
-                placeholder="Select project"
-                required
               />
             </label>
             <label>
@@ -188,7 +194,7 @@ export function AdvancesPage() {
             />
           </label>
           <div className="form-actions">
-            <button type="submit" disabled={saving || !projectId}>
+            <button type="submit" disabled={saving}>
               {saving ? 'Submitting…' : 'Submit requisition'}
             </button>
           </div>
@@ -200,7 +206,9 @@ export function AdvancesPage() {
         <div className="table-head">
           <h2>Requisition register</h2>
           <p className="muted">
-            {rows.length} shown · {total} total matching filters
+            {isFinance
+              ? `${rows.length} shown · ${total} total matching filters`
+              : `${rows.length} of your requisitions · status stays Pending until accountant/admin approves`}
           </p>
         </div>
         <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
@@ -216,18 +224,20 @@ export function AdvancesPage() {
               searchable
             />
           </label>
-          <label>
-            Employee
-            <Select
-              value={employeeFilter}
-              onChange={setEmployeeFilter}
-              options={[
-                { value: '', label: 'All employees' },
-                ...employeeOptions,
-              ]}
-              searchable
-            />
-          </label>
+          {isFinance ? (
+            <label>
+              Employee
+              <Select
+                value={employeeFilter}
+                onChange={setEmployeeFilter}
+                options={[
+                  { value: '', label: 'All employees' },
+                  ...employeeOptions,
+                ]}
+                searchable
+              />
+            </label>
+          ) : null}
           <label>
             From
             <input
@@ -267,12 +277,12 @@ export function AdvancesPage() {
             Clear
           </button>
         </form>
-        <table>
+        <table className="mobile-stack">
           <thead>
             <tr>
               <th>Number</th>
               <th>Project</th>
-              <th>Employee</th>
+              {isFinance ? <th>Employee</th> : null}
               <th>Requested</th>
               <th>Spent</th>
               <th>Status</th>
@@ -282,21 +292,23 @@ export function AdvancesPage() {
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
-                <td>
+                <td className="mobile-stack-title">
                   <Link to={`/advances/${row.id}`}>{row.advanceNumber}</Link>
                 </td>
-                <td>
-                  {row.projectName}
+                <td data-label="Project">{row.projectName ?? 'No project'}</td>
+                {isFinance ? (
+                  <td data-label="Employee">{row.employeeName}</td>
+                ) : null}
+                <td data-label="Requested">{money(row.requestedAmount)}</td>
+                <td data-label="Spent">
+                  {row.spentAmount === null ? '—' : money(row.spentAmount)}
                 </td>
-                <td>{row.employeeName}</td>
-                <td>{money(row.requestedAmount)}</td>
-                <td>{row.spentAmount === null ? '—' : money(row.spentAmount)}</td>
-                <td>
+                <td data-label="Status">
                   <span className={`status-pill status-${row.status}`}>
                     {ADVANCE_STATUS_LABEL[row.status]}
                   </span>
                 </td>
-                <td>
+                <td className="mobile-stack-actions">
                   <ActionMenu
                     items={[
                       {
@@ -322,7 +334,7 @@ export function AdvancesPage() {
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="muted">
+                <td colSpan={isFinance ? 7 : 6} className="muted">
                   No requisitions match the current filters.
                 </td>
               </tr>

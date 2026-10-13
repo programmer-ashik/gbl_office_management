@@ -8,6 +8,7 @@ import { requireRoles } from '../../common/middleware/roles';
 import type { AuthService } from '../auth/auth.service';
 import type { UsersService } from '../users/users.service';
 import { BalanceSheetService } from './balance-sheet.service';
+import { IncomeStatementService } from './income-statement.service';
 import type { LedgerService } from './ledger.service';
 
 const FINANCE = [Role.ADMIN, Role.ACCOUNTANT] as const;
@@ -40,6 +41,8 @@ export function createLedgersRouter(
           : undefined;
       const entityId =
         typeof req.query.entityId === 'string' ? req.query.entityId : undefined;
+      const projectId =
+        typeof req.query.projectId === 'string' ? req.query.projectId : undefined;
       const ledger = await ledgerService.listForAccount(
         String(req.params.accountCode),
         {
@@ -47,6 +50,7 @@ export function createLedgersRouter(
           fromDate,
           toDate,
           entity: { entityType, entityId },
+          projectId,
         },
       );
       sendSuccess(res, ledger, 'Ledger retrieved successfully');
@@ -61,6 +65,7 @@ export function createReportsRouter(
   authService: AuthService,
   usersService: UsersService,
   balanceSheetService = new BalanceSheetService(),
+  incomeStatementService = new IncomeStatementService(),
 ) {
   const router = Router();
   const auth = requireAuth(authService, usersService);
@@ -95,6 +100,25 @@ export function createReportsRouter(
       }
       const report = await balanceSheetService.generate(asOf);
       sendSuccess(res, report, 'Balance sheet retrieved successfully');
+    }),
+  );
+
+  router.get(
+    '/income-statement',
+    auth,
+    requireRoles(...FINANCE),
+    asyncHandler(async (req, res) => {
+      const date = (key: string) =>
+        typeof req.query[key] === 'string' && req.query[key]
+          ? new Date(String(req.query[key]))
+          : undefined;
+      const report = await incomeStatementService.generate({
+        fromDate: date('fromDate'),
+        toDate: date('toDate'),
+        projectId:
+          typeof req.query.projectId === 'string' ? req.query.projectId : undefined,
+      });
+      sendSuccess(res, report, 'Income statement retrieved successfully');
     }),
   );
 

@@ -27,6 +27,7 @@ import {
   parseStatementPdfDetailed,
 } from './pdf-statement';
 import { buildStatementParseResult } from './statement-meta';
+import { chartAccountNames, chartBankAccounts } from './chart-banks';
 import type {
   AdjustReconciliationDto,
   CreateTransferDto,
@@ -58,6 +59,9 @@ export type PublicTreasuryAccount = {
   institution: string | null;
   accountNumber: string | null;
   glAccountCode: string;
+  /** Live name of the GL head in the chart of accounts. */
+  glAccountName: string | null;
+  glAccountActive: boolean;
   currency: string;
   isActive: boolean;
   isSystem: boolean;
@@ -130,11 +134,20 @@ const DEFAULT_TREASURY: Array<{
   kind: TreasuryKind;
   glAccountCode: string;
   institution?: string;
+  /** Created when missing only; never renamed or reactivated on later boots. */
+  createOnly?: boolean;
 }> = [
   {
-    name: 'Hand Cash',
+    name: 'Cash in Hand',
     kind: TreasuryKind.CASH,
     glAccountCode: SystemAccountCode.CASH,
+  },
+  {
+    name: 'DBBL Bank',
+    kind: TreasuryKind.COMMERCIAL_BANK,
+    glAccountCode: SystemAccountCode.BANK_ALT,
+    institution: 'Dutch-Bangla Bank',
+    createOnly: true,
   },
   {
     name: 'BRAC Bank',
@@ -143,10 +156,23 @@ const DEFAULT_TREASURY: Array<{
     institution: 'BRAC Bank',
   },
   {
-    name: 'Mobile Banking (bKash / Nagad)',
+    name: 'City Bank',
+    kind: TreasuryKind.COMMERCIAL_BANK,
+    glAccountCode: SystemAccountCode.CITY_BANK,
+    institution: 'City Bank',
+    createOnly: true,
+  },
+  {
+    name: 'bKash',
     kind: TreasuryKind.MOBILE_BANKING,
-    glAccountCode: SystemAccountCode.MOBILE_BANKING,
-    institution: 'bKash / Nagad',
+    glAccountCode: SystemAccountCode.BKASH,
+    institution: 'bKash',
+  },
+  {
+    name: 'Nagad',
+    kind: TreasuryKind.MOBILE_BANKING,
+    glAccountCode: SystemAccountCode.NAGAD,
+    institution: 'Nagad',
   },
 ];
 
@@ -167,6 +193,7 @@ export class BankingService {
         glAccountCode: row.glAccountCode,
       }).exec();
       if (existing) {
+        if (row.createOnly) continue;
         let dirty = false;
         if (existing.name !== row.name) {
           existing.name = row.name;
@@ -207,39 +234,67 @@ export class BankingService {
       created += 1;
     }
 
-    // Align Hand Cash GL display name with CoA / treasury label.
-    const cashGl = await AccountModel.findOne({
-      code: SystemAccountCode.CASH,
-    }).exec();
-    if (cashGl && cashGl.name !== 'Hand Cash') {
-      cashGl.name = 'Hand Cash';
-      await cashGl.save();
-    }
-
-    // Retire duplicate "Cash in Hand" (1115) — same concept as Hand Cash (1111).
+    // 1115 was a duplicate cash account. Remove it; Cash in Hand is 1111.
     const legacyCash = await TreasuryAccountModel.findOne({
       glAccountCode: LEGACY_CASH_IN_HAND_CODE,
     }).exec();
-    if (legacyCash && legacyCash.isActive) {
-      legacyCash.isActive = false;
-      legacyCash.isSystem = false;
-      await legacyCash.save();
-      console.log(
-        'Deactivated legacy treasury "Cash in Hand" (1115); use Hand Cash (1111)',
-      );
+    if (legacyCash) {
+      await legacyCash.deleteOne();
     }
 
     const legacyGl = await AccountModel.findOne({
       code: LEGACY_CASH_IN_HAND_CODE,
     }).exec();
-    if (legacyGl && legacyGl.isActive) {
-      legacyGl.isActive = false;
-      await legacyGl.save();
+    if (legacyGl) {
+      await AccountModel.updateMany(
+        { parentCode: LEGACY_CASH_IN_HAND_CODE },
+        { $set: { parentCode: SystemAccountCode.CASH } },
+      ).exec();
+      await legacyGl.deleteOne();
     }
 
     if (created > 0) {
       console.log(`Seeded ${created} treasury account(s)`);
     }
+    await this.syncChartBanks();
+  }
+
+  /**
+   * Every postable bank head under 1120 in the chart of accounts gets a
+   * commercial-bank treasury link (additive only; existing links are untouched).
+   */
+  async syncChartBanks(): Promise<number> {
+    const banks = await chartBankAccounts();
+    if (banks.length === 0) return 0;
+    const linked = new Set(
+      (
+        await TreasuryAccountModel.find({
+          glAccountCode: { $in: banks.map((bank) => bank.code) },
+        })
+          .select('glAccountCode')
+          .lean()
+          .exec()
+      ).map((row) => row.glAccountCode),
+    );
+    let created = 0;
+    for (const bank of banks) {
+      if (linked.has(bank.code)) continue;
+      try {
+        await TreasuryAccountModel.create({
+          name: bank.name,
+          kind: TreasuryKind.COMMERCIAL_BANK,
+          glAccountId: new Types.ObjectId(bank.id),
+          glAccountCode: bank.code,
+          currency: 'BDT',
+          isActive: true,
+          isSystem: false,
+        });
+        created += 1;
+      } catch (err) {
+        if ((err as { code?: number }).code !== 11000) throw err;
+      }
+    }
+    return created;
   }
 
   async create(
@@ -273,11 +328,15 @@ export class BankingService {
         isSystem: false,
         createdBy: userId ? new Types.ObjectId(userId) : undefined,
       });
-      return this.toPublicTreasury(created, 0);
+      return this.toPublicTreasury(created, 0, gl);
     }
 
     const parentCode = TREASURY_PARENT_CODE[dto.kind];
-    glCode = await this.nextChildCode(parentCode);
+    const suggested = await this.accountsService.suggestNextCode(
+      AccountType.ASSET,
+      parentCode,
+    );
+    glCode = suggested.code;
     const gl = await this.accountsService.create({
       code: glCode,
       name: dto.name.trim(),
@@ -299,28 +358,39 @@ export class BankingService {
       isSystem: false,
       createdBy: userId ? new Types.ObjectId(userId) : undefined,
     });
-    return this.toPublicTreasury(created, 0);
+    return this.toPublicTreasury(created, 0, glDoc);
   }
 
   async list(): Promise<PublicTreasuryAccount[]> {
+    await this.syncChartBanks();
     const accounts = await TreasuryAccountModel.find({ isActive: true })
       .sort({ kind: 1, name: 1 })
       .exec();
-    const balances = await this.balancesByCode(
-      accounts.map((account) => account.glAccountCode),
-    );
+    const codes = accounts.map((account) => account.glAccountCode);
+    const [balances, names] = await Promise.all([
+      this.balancesByCode(codes),
+      chartAccountNames(codes),
+    ]);
     return accounts.map((account) =>
       this.toPublicTreasury(
         account,
         balances.get(account.glAccountCode) ?? 0,
+        names.get(account.glAccountCode),
       ),
     );
   }
 
   async getById(id: string): Promise<PublicTreasuryAccount> {
     const account = await this.findTreasuryOrFail(id);
-    const balance = await this.bookBalanceMinor(account.glAccountCode);
-    return this.toPublicTreasury(account, balance);
+    const [balance, names] = await Promise.all([
+      this.bookBalanceMinor(account.glAccountCode),
+      chartAccountNames([account.glAccountCode]),
+    ]);
+    return this.toPublicTreasury(
+      account,
+      balance,
+      names.get(account.glAccountCode),
+    );
   }
 
   async requireActive(id: string): Promise<PublicTreasuryAccount> {
@@ -761,6 +831,7 @@ export class BankingService {
   private toPublicTreasury(
     account: TreasuryAccountDocument,
     balanceMinor: number,
+    gl?: { name: string; isActive: boolean },
   ): PublicTreasuryAccount {
     return {
       id: account._id.toString(),
@@ -769,6 +840,8 @@ export class BankingService {
       institution: account.institution ?? null,
       accountNumber: account.accountNumber ?? null,
       glAccountCode: account.glAccountCode,
+      glAccountName: gl?.name ?? null,
+      glAccountActive: gl?.isActive ?? true,
       currency: account.currency,
       isActive: account.isActive,
       isSystem: account.isSystem,
@@ -1035,23 +1108,6 @@ export class BankingService {
     return new Map(
       rows.map((row) => [row._id, row.debitMinor - row.creditMinor]),
     );
-  }
-
-  private async nextChildCode(parentCode: string): Promise<string> {
-    const escaped = parentCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const existing = await AccountModel.find({
-      code: new RegExp(`^${escaped}-\\d+$`),
-    })
-      .select('code')
-      .exec();
-    let max = 0;
-    for (const account of existing) {
-      const seq = Number(account.code.slice(parentCode.length + 1));
-      if (seq > max) {
-        max = seq;
-      }
-    }
-    return `${parentCode}-${String(max + 1).padStart(2, '0')}`;
   }
 
   private async nextNumber(kind: 'transfer' | 'reconciliation', date: Date) {

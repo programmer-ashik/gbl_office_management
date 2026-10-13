@@ -82,6 +82,7 @@ export type Project = {
   code: string
   name: string
   client: ProjectClient
+  customerId: string | null
   startDate: string
   endDate: string | null
   contractValue: number
@@ -104,9 +105,23 @@ export type CreateProjectBody = {
     phone?: string
     address?: string
   }
+  /** Existing customer the project is created under. */
+  customerId?: string
   startDate: string
   endDate?: string
   contractValue: number
   totalBudget: number
   description?: string
+}
+
+/** Projects of a customer: linked by id, or (older projects) by the same client name. */
+export function projectBelongsToCustomer(
+  project: Pick<Project, 'customerId' | 'client'>,
+  customer: { id: string; name: string },
+): boolean {
+  if (project.customerId) return project.customerId === customer.id
+  return (
+    project.client.name.trim().toLowerCase() ===
+    customer.name.trim().toLowerCase()
+  )
 }

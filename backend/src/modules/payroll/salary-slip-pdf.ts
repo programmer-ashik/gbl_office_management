@@ -1,7 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { fromMinorUnits } from '../../common/utils/money';
 import { resolveCompanyLogoForPdf } from '../pdf/company-logo';
-import type { PayrollRunDocument } from './payroll-run.model';
+import type { IPayrollEarnings, PayrollRunDocument } from './payroll-run.model';
 
 function moneyLabel(minor: number): string {
   return `BDT ${fromMinorUnits(minor).toLocaleString('en-BD', {
@@ -10,11 +10,29 @@ function moneyLabel(minor: number): string {
   })}`;
 }
 
-function periodLabel(year: number, month: number): string {
-  return `${year}-${String(month).padStart(2, '0')}`;
+/** "September 2026" */
+function salaryMonthLabel(year: number, month: number): string {
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('en-GB', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/** "06 October 2026", in Bangladesh time. */
+function issueDateLabel(date: Date): string {
+  return date.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Asia/Dhaka',
+  });
 }
 
 type SlipLine = PayrollRunDocument['lines'][number];
+
+/** Earnings split keyed by employee id; employees without one print Allowances as a total. */
+export type SlipEarnings = Map<string, IPayrollEarnings>;
 
 async function drawSlip(
   doc: PDFKit.PDFDocument,
@@ -22,6 +40,7 @@ async function drawSlip(
   line: SlipLine,
   logoPath: string | null,
   companyName: string,
+  earnings: IPayrollEarnings | undefined,
 ): Promise<void> {
   const left = 48;
   const right = 547;
@@ -51,23 +70,18 @@ async function drawSlip(
     .text(run.sheetNumber, left, 44, { width, align: 'right' });
   doc
     .fillColor('#5a6578')
-    .text(periodLabel(run.periodYear, run.periodMonth), {
-      width,
-      align: 'right',
-    });
+    .text(
+      `Month of Salary: ${salaryMonthLabel(run.periodYear, run.periodMonth)}`,
+      { width, align: 'right' },
+    )
+    .text(`Issue Date: ${issueDateLabel(new Date())}`, { width, align: 'right' });
 
-  doc.moveDown(1.4);
+  doc.moveDown(1.2);
   doc.moveTo(left, doc.y).lineTo(right, doc.y).strokeColor('#1d4ed8').lineWidth(1.2).stroke();
   doc.moveDown(0.8);
 
   doc.fillColor('#0f2744').fontSize(11);
-  doc.text(`Employee: ${line.employeeName}`);
-  doc
-    .fillColor('#5a6578')
-    .fontSize(10)
-    .text(
-      `Paid via: ${run.treasuryAccountCode ?? '—'} · JE ${run.journalNumber ?? '—'}`,
-    );
+  doc.text(`Employee: ${line.employeeName}`, left);
   doc.moveDown(0.8);
 
   const startY = doc.y;
@@ -83,24 +97,45 @@ async function drawSlip(
     .text('Amount', left + 8, startY + 4, { width: colW - 16, align: 'right' });
 
   let y = startY + 22;
-  const earnings = [
-    ['Basic', line.basicMinor],
-    ['Allowances', line.allowancesMinor],
-    ['Gross', line.grossMinor],
-  ] as const;
-  earnings.forEach(([label, amount], idx) => {
-    if (idx === earnings.length - 1) {
+  const earningRows: Array<{ label: string; value: string; strong?: boolean }> =
+    earnings
+      ? [
+          { label: 'Basic', value: moneyLabel(line.basicMinor) },
+          { label: 'House Rent', value: moneyLabel(earnings.houseRentMinor) },
+          { label: 'Medical', value: moneyLabel(earnings.medicalAllowanceMinor) },
+          { label: 'Conveyance', value: moneyLabel(earnings.conveyanceAllowanceMinor) },
+          { label: 'Other', value: moneyLabel(earnings.otherAllowancesMinor) },
+        ]
+      : [
+          { label: 'Basic', value: moneyLabel(line.basicMinor) },
+          { label: 'Allowances', value: moneyLabel(line.allowancesMinor) },
+        ];
+  earningRows.push(
+    { label: 'Gross', value: moneyLabel(line.grossMinor), strong: true },
+    {
+      label: 'Net (Gross - PF / Tax)',
+      value: moneyLabel(line.grossMinor - (line.structuralDeductionMinor ?? 0)),
+    },
+  );
+  if (earnings) {
+    earningRows.push({
+      label: 'Custom override',
+      value: earnings.customBreakdownApplied ? 'Yes' : 'No',
+    });
+  }
+  for (const row of earningRows) {
+    if (row.strong) {
       doc.rect(left, y - 2, colW, 18).fill('#e8eefc');
     }
-    doc.fillColor('#152033').fontSize(10).text(label, left + 8, y, {
+    doc.fillColor('#152033').fontSize(9).text(row.label, left + 8, y, {
       width: colW - 16,
     });
-    doc.text(moneyLabel(amount), left + 8, y, {
+    doc.text(row.value, left + 8, y, {
       width: colW - 16,
       align: 'right',
     });
-    y += 18;
-  });
+    y += 16;
+  }
 
   // Deductions box
   const dLeft = left + colW + 16;
@@ -150,7 +185,8 @@ async function drawSlip(
     dy += 16;
   });
 
-  doc.y = Math.max(y, dy) + 16;
+  const netTop = Math.max(y, dy) + 16;
+  doc.y = netTop;
   doc.rect(left, doc.y, width, 36).fill('#1d4ed8');
   doc
     .fillColor('#ffffff')
@@ -163,17 +199,33 @@ async function drawSlip(
       align: 'right',
     });
 
-  doc.moveDown(3);
-  doc.fontSize(8).fillColor('#5a6578');
-  doc.text(
-    'Accrual: Dr 5120/5230 · Cr 1131 / 2133 / 2131 / 2121. Disbursement: Dr 2121 · Cr Cash/Bank.',
-  );
-  doc.text('This slip is system-generated after payroll disbursement.');
+  const signY = netTop + 36 + 70;
+  const signW = 180;
+  const signatures: Array<[string, string, number]> = [
+    ['Employee signature', line.employeeName, left],
+    ['Authorized signature', 'For the company', right - signW],
+  ];
+  doc.strokeColor('#5a6578').lineWidth(0.6);
+  for (const [label, caption, x] of signatures) {
+    doc.moveTo(x, signY).lineTo(x + signW, signY).stroke();
+    doc
+      .fillColor('#152033')
+      .fontSize(9.5)
+      .text(label, x, signY + 5, { width: signW, align: 'center' });
+    doc
+      .fillColor('#5a6578')
+      .fontSize(8)
+      .text(caption, x, signY + 18, { width: signW, align: 'center' });
+  }
+
+  doc.x = left;
+  doc.y = signY + 44;
 }
 
 export async function buildSalarySlipPdf(
   run: PayrollRunDocument,
   employeeId: string,
+  earnings: SlipEarnings = new Map(),
 ): Promise<{ buffer: Buffer; filename: string }> {
   const line = run.lines.find((row) => row.employeeId.toString() === employeeId);
   if (!line) {
@@ -193,6 +245,7 @@ export async function buildSalarySlipPdf(
       line,
       brand.absolutePath,
       brand.companyName,
+      earnings.get(employeeId) ?? line.earnings,
     ).then(() => doc.end());
   });
 
@@ -204,6 +257,7 @@ export async function buildSalarySlipPdf(
 
 export async function buildPayrollSlipsPdf(
   run: PayrollRunDocument,
+  earnings: SlipEarnings = new Map(),
 ): Promise<{ buffer: Buffer; filename: string }> {
   const brand = await resolveCompanyLogoForPdf();
 
@@ -223,6 +277,8 @@ export async function buildPayrollSlipsPdf(
           run.lines[index],
           brand.absolutePath,
           brand.companyName,
+          earnings.get(run.lines[index].employeeId.toString()) ??
+            run.lines[index].earnings,
         );
       }
       doc.end();

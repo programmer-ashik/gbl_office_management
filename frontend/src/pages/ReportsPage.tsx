@@ -13,7 +13,7 @@ export function ReportsPage() {
     <>
       <header className="workspace-header">
         <div>
-          <h1>Reports</h1>
+          <h1>All reports</h1>
         </div>
         <Link to="/journals" className="action-link">
           Add journal
@@ -21,10 +21,13 @@ export function ReportsPage() {
       </header>
 
       <JournalRegister
-        title="Journal register"
-        description="All posted journals. Filter by date range, preview or download vouchers, and manage entries."
+        title="All reports"
+        description="Every journal line oldest to newest in general-ledger format. Export previews or downloads the full filtered list as a PDF grouped by project."
         showRangeFilter
         onEdit={onEdit}
+        chronological
+        layout="ledger"
+        exportTitle="All reports — project-wise ledger"
       />
 
       <section className="table-card">

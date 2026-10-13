@@ -3,7 +3,11 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Select } from "../components/ui";
 import { money } from "../types/accounting";
-import { TREASURY_KIND_LABEL, type TreasuryAccount } from "../types/banking";
+import {
+  TREASURY_KIND_LABEL,
+  treasuryName,
+  type TreasuryAccount,
+} from "../types/banking";
 
 export function BankingReconciliationPage() {
   const [accounts, setAccounts] = useState<TreasuryAccount[]>([]);
@@ -38,7 +42,7 @@ export function BankingReconciliationPage() {
   );
   const bankOptions = banks.map((row) => ({
     value: row.id,
-    label: `${row.name} · ${row.glAccountCode}`,
+    label: `${treasuryName(row)} · ${row.glAccountCode}`,
   }));
 
   return (
@@ -105,7 +109,7 @@ export function BankingReconciliationPage() {
           <tbody>
             {banks.map((account) => (
               <tr key={account.id}>
-                <td>{account.name}</td>
+                <td>{treasuryName(account)}</td>
                 <td>{account.institution ?? "—"}</td>
                 <td>{account.glAccountCode}</td>
                 <td>{money(account.bookBalance)}</td>
@@ -144,7 +148,7 @@ export function BankingReconciliationPage() {
             <tbody>
               {others.map((account) => (
                 <tr key={account.id}>
-                  <td>{account.name}</td>
+                  <td>{treasuryName(account)}</td>
                   <td>{TREASURY_KIND_LABEL[account.kind]}</td>
                   <td>{account.glAccountCode}</td>
                   <td>{money(account.bookBalance)}</td>

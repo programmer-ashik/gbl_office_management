@@ -171,7 +171,7 @@ describe('Phase 9 RBAC, approvals, OCR and audit (e2e)', () => {
         memo: 'Large equity injection',
         projectId: assignedProjectId,
         lines: [
-          { accountCode: '1112', debit: 150_000 },
+          { accountCode: '1122', debit: 150_000 },
           { accountCode: '3100', credit: 150_000 },
         ],
       })
@@ -210,7 +210,7 @@ describe('Phase 9 RBAC, approvals, OCR and audit (e2e)', () => {
         projectId: assignedProjectId,
         approvalId,
         lines: [
-          { accountCode: '1112', debit: 150_000 },
+          { accountCode: '1122', debit: 150_000 },
           { accountCode: '3100', credit: 150_000 },
         ],
       })
@@ -226,7 +226,7 @@ describe('Phase 9 RBAC, approvals, OCR and audit (e2e)', () => {
         date: '2026-09-11',
         memo: 'Large untagged cash move',
         lines: [
-          { accountCode: '1112', debit: 120_000 },
+          { accountCode: '1122', debit: 120_000 },
           { accountCode: '3100', credit: 120_000 },
         ],
       })
@@ -266,7 +266,7 @@ describe('Phase 9 RBAC, approvals, OCR and audit (e2e)', () => {
         memo: 'Cross-PM approval gap',
         projectId: assignedProjectId,
         lines: [
-          { accountCode: '1112', debit: 110_000 },
+          { accountCode: '1122', debit: 110_000 },
           { accountCode: '3100', credit: 110_000 },
         ],
       })
