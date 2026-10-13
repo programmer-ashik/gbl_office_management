@@ -35,10 +35,32 @@ export type TreasuryAccount = {
   institution: string | null
   accountNumber: string | null
   glAccountCode: string
+  /** Live name of the GL head in the chart of accounts. */
+  glAccountName?: string | null
+  glAccountActive?: boolean
   currency: string
   isActive: boolean
   isSystem: boolean
   bookBalance: number
+}
+
+/** Bank name as it appears in the chart of accounts (treasury name as fallback). */
+export function treasuryName(row: Pick<TreasuryAccount, 'name' | 'glAccountName'>): string {
+  return row.glAccountName || row.name
+}
+
+/** Active commercial banks (heads under 1120 Cash at Bank), ordered by GL code. */
+export function chequeBanks(rows: TreasuryAccount[]): TreasuryAccount[] {
+  return rows
+    .filter(
+      (row) =>
+        row.kind === TreasuryKind.COMMERCIAL_BANK &&
+        row.isActive &&
+        row.glAccountActive !== false,
+    )
+    .sort((a, b) =>
+      a.glAccountCode.localeCompare(b.glAccountCode, undefined, { numeric: true }),
+    )
 }
 
 export type FundTransfer = {

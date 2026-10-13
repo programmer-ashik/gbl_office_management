@@ -3,6 +3,7 @@ import { TreasuryKind } from '../../common/enums/treasury-kind.enum';
 import { badRequest, conflict } from '../../common/errors/app-error';
 import { fromMinorUnits } from '../../common/utils/money';
 import { TreasuryAccountModel } from '../banking/treasury-account.model';
+import { chartAccountNames, chartBankAccounts } from '../banking/chart-banks';
 import { AccountModel } from './account.model';
 import type { JournalLineDto } from './dto/journal.dto';
 import { JournalEntryModel, type JournalEntryDocument } from './journal-entry.model';
@@ -142,23 +143,25 @@ export class PdcService {
         ]),
       ),
     ];
-    const accounts = await AccountModel.find({
-      code: { $in: codes },
-      parentCode: '1120',
-    })
-      .select('code name')
-      .lean()
-      .exec();
-    const treasury = await TreasuryAccountModel.find({
-      kind: TreasuryKind.COMMERCIAL_BANK,
-      glAccountCode: { $in: codes },
-    })
-      .select('glAccountCode name')
-      .lean()
-      .exec();
+    const [chartBanks, treasury] = await Promise.all([
+      chartBankAccounts({ includeInactive: true }),
+      TreasuryAccountModel.find({
+        kind: TreasuryKind.COMMERCIAL_BANK,
+        glAccountCode: { $in: codes },
+      })
+        .select('glAccountCode name')
+        .lean()
+        .exec(),
+    ]);
+    // Chart of accounts names win; the treasury name is only a fallback.
     const out = new Map<string, string>();
-    for (const account of accounts) out.set(account.code, account.name);
     for (const row of treasury) out.set(row.glAccountCode, row.name);
+    const linkedNames = await chartAccountNames([...out.keys()]);
+    for (const [code, account] of linkedNames) out.set(code, account.name);
+    const wanted = new Set(codes);
+    for (const bank of chartBanks) {
+      if (wanted.has(bank.code)) out.set(bank.code, bank.name);
+    }
     return out;
   }
 

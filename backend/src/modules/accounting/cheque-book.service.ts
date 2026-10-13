@@ -3,6 +3,7 @@ import { badRequest, conflict, notFound } from '../../common/errors/app-error';
 import { TreasuryKind } from '../../common/enums/treasury-kind.enum';
 import { fromMinorUnits, toMinorUnits } from '../../common/utils/money';
 import type { BankingService } from '../banking/banking.service';
+import { chartAccountNames } from '../banking/chart-banks';
 import {
   ChequeBookModel,
   ChequeLeafModel,
@@ -113,7 +114,7 @@ export class ChequeBookService {
     const book = await ChequeBookModel.create({
       treasuryId: new Types.ObjectId(treasury.id),
       bankAccountCode: treasury.glAccountCode,
-      bankName: treasury.name,
+      bankName: treasury.glAccountName ?? treasury.name,
       bookName: dto.bookName?.trim() || `${numbers[0]} – ${numbers[numbers.length - 1]}`,
       prefix,
       startNumber: numbers[0],
@@ -368,7 +369,7 @@ export class ChequeBookService {
   private async withCounts(books: ChequeBookDocument[]): Promise<PublicChequeBook[]> {
     if (books.length === 0) return [];
     const ids = books.map((book) => book._id);
-    const [counts, next] = await Promise.all([
+    const [counts, next, names] = await Promise.all([
       ChequeLeafModel.aggregate<{ _id: { bookId: Types.ObjectId; status: string }; n: number }>([
         { $match: { bookId: { $in: ids } } },
         { $group: { _id: { bookId: '$bookId', status: '$status' }, n: { $sum: 1 } } },
@@ -378,6 +379,7 @@ export class ChequeBookService {
         { $sort: { sequence: 1 } },
         { $group: { _id: '$bookId', chequeNumber: { $first: '$chequeNumber' } } },
       ]).exec(),
+      chartAccountNames(books.map((book) => book.bankAccountCode)),
     ]);
     const countOf = (bookId: Types.ObjectId, status: string) =>
       counts.find((row) => row._id.bookId.equals(bookId) && row._id.status === status)?.n ?? 0;
@@ -385,7 +387,7 @@ export class ChequeBookService {
       id: book.id,
       treasuryId: book.treasuryId.toString(),
       bankAccountCode: book.bankAccountCode,
-      bankName: book.bankName,
+      bankName: names.get(book.bankAccountCode)?.name ?? book.bankName,
       bookName: book.bookName,
       prefix: book.prefix ?? '',
       startNumber: book.startNumber,
@@ -407,7 +409,7 @@ export class ChequeBookService {
     const journalIds = leaves
       .map((leaf) => leaf.journalId)
       .filter((id): id is Types.ObjectId => Boolean(id));
-    const [books, journals] = await Promise.all([
+    const [books, journals, names] = await Promise.all([
       ChequeBookModel.find({ _id: { $in: bookIds } })
         .select('bookName bankName')
         .lean()
@@ -418,6 +420,7 @@ export class ChequeBookService {
             .lean()
             .exec()
         : Promise.resolve([]),
+      chartAccountNames(leaves.map((leaf) => leaf.bankAccountCode)),
     ]);
     const bookById = new Map(books.map((book) => [book._id.toString(), book]));
     const journalById = new Map(
@@ -432,7 +435,8 @@ export class ChequeBookService {
         bookName: book?.bookName ?? '',
         treasuryId: leaf.treasuryId.toString(),
         bankAccountCode: leaf.bankAccountCode,
-        bankName: book?.bankName ?? leaf.bankAccountCode,
+        bankName:
+          names.get(leaf.bankAccountCode)?.name ?? book?.bankName ?? leaf.bankAccountCode,
         chequeNumber: leaf.chequeNumber,
         sequence: leaf.sequence,
         status: leaf.status,

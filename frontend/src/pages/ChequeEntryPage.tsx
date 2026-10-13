@@ -14,7 +14,7 @@ import {
   type PdcDirection,
 } from '../types/accounting'
 import { Role } from '../types/auth'
-import type { TreasuryAccount } from '../types/banking'
+import { chequeBanks, treasuryName, type TreasuryAccount } from '../types/banking'
 import type { Supplier } from '../types/procurement'
 import { projectBelongsToCustomer, type Project } from '../types/project'
 import {
@@ -92,7 +92,7 @@ export function ChequeEntryPage() {
       api.projects(),
     ])
       .then(([treasury, customerRows, supplierRows, accountRows, projectRows]) => {
-        const bankRows = treasury.filter((row) => row.kind === 'commercial_bank' && row.isActive)
+        const bankRows = chequeBanks(treasury)
         setBanks(bankRows)
         setBankId((current) => current || bankRows[0]?.id || '')
         setCustomers(customerRows)
@@ -196,7 +196,8 @@ export function ChequeEntryPage() {
         : '2111 · Supplier Payables'
       : counterOptions.find((row) => row.value === counterCode)?.label ?? 'Counter account'
 
-  const bankLabel = bank ? `${bank.glAccountCode} · ${bank.name}` : 'Bank'
+  const bankName = bank ? treasuryName(bank) : null
+  const bankLabel = bank ? `${bank.glAccountCode} · ${bankName}` : 'Bank'
   const holdLabel = isReceipt
     ? `${PDC_RECEIVABLE_CODE} · PDC Receivable`
     : `${PDC_PAYABLE_CODE} · PDC Payable`
@@ -323,7 +324,8 @@ export function ChequeEntryPage() {
 
   const bankOptions = banks.map((row) => ({
     value: row.id,
-    label: `${row.glAccountCode} · ${row.name}${row.accountNumber ? ` · ${row.accountNumber}` : ''}`,
+    label: `${row.glAccountCode} · ${treasuryName(row)}${row.accountNumber ? ` · ${row.accountNumber}` : ''}`,
+    keywords: `${row.name} ${row.institution ?? ''}`,
   }))
 
   return (
@@ -410,7 +412,7 @@ export function ChequeEntryPage() {
                   ) : usesLeaf ? (
                     <>
                       {leaves.length} unused leaf{leaves.length === 1 ? '' : 'ves'} in{' '}
-                      {bank?.name ?? 'this bank'} ·{' '}
+                      {bankName ?? 'this bank'} ·{' '}
                       <button type="button" className="ghost link-button" onClick={() => setManualNumber(true)}>
                         type a number instead
                       </button>
@@ -562,8 +564,8 @@ export function ChequeEntryPage() {
               <strong>{postDated ? 'Post-dated cheque (PDC)' : 'Current cheque'}</strong>
               <span className="muted">
                 {postDated
-                  ? `Held until ${chequeDate}. ${bank?.name ?? 'The bank'} balance changes only when you clear it in the register.`
-                  : `Posts straight to ${bank?.name ?? 'the bank'} today.`}
+                  ? `Held until ${chequeDate}. ${bankName ?? 'The bank'} balance changes only when you clear it in the register.`
+                  : `Posts straight to ${bankName ?? 'the bank'} today.`}
               </span>
             </div>
             <table className="cheque-preview-lines">

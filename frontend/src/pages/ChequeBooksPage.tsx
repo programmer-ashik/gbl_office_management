@@ -10,7 +10,7 @@ import {
   type ChequeLeaf,
   type ChequeLeafStatus,
 } from '../types/accounting'
-import type { TreasuryAccount } from '../types/banking'
+import { chequeBanks, treasuryName, type TreasuryAccount } from '../types/banking'
 import { localToday } from '../utils/cheque'
 
 const LEAF_STATUS_LABEL: Record<ChequeLeafStatus, string> = {
@@ -98,7 +98,7 @@ export function ChequeBooksPage() {
     api
       .treasury()
       .then((rows) => {
-        const bankRows = rows.filter((row) => row.kind === 'commercial_bank' && row.isActive)
+        const bankRows = chequeBanks(rows)
         setBanks(bankRows)
         setTreasuryId((current) => current || bankRows[0]?.id || '')
       })
@@ -154,8 +154,10 @@ export function ChequeBooksPage() {
 
   const bankOptions = banks.map((row) => ({
     value: row.id,
-    label: `${row.glAccountCode} · ${row.name}${row.accountNumber ? ` · ${row.accountNumber}` : ''}`,
+    label: `${row.glAccountCode} · ${treasuryName(row)}${row.accountNumber ? ` · ${row.accountNumber}` : ''}`,
+    keywords: `${row.name} ${row.institution ?? ''}`,
   }))
+  const selectedBank = banks.find((row) => row.id === treasuryId)
 
   function resetForm() {
     setBookName('')
@@ -608,7 +610,7 @@ export function ChequeBooksPage() {
               <span className="muted">
                 {range
                   ? `${Number(leafCount)} leaves will be available to issue from ${
-                      banks.find((row) => row.id === treasuryId)?.name ?? 'the selected bank'
+                      selectedBank ? treasuryName(selectedBank) : 'the selected bank'
                     }.`
                   : 'Enter the first number to see the full range.'}
               </span>

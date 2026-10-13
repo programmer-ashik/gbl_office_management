@@ -27,6 +27,7 @@ import {
   parseStatementPdfDetailed,
 } from './pdf-statement';
 import { buildStatementParseResult } from './statement-meta';
+import { chartAccountNames, chartBankAccounts } from './chart-banks';
 import type {
   AdjustReconciliationDto,
   CreateTransferDto,
@@ -58,6 +59,9 @@ export type PublicTreasuryAccount = {
   institution: string | null;
   accountNumber: string | null;
   glAccountCode: string;
+  /** Live name of the GL head in the chart of accounts. */
+  glAccountName: string | null;
+  glAccountActive: boolean;
   currency: string;
   isActive: boolean;
   isSystem: boolean;
@@ -252,6 +256,45 @@ export class BankingService {
     if (created > 0) {
       console.log(`Seeded ${created} treasury account(s)`);
     }
+    await this.syncChartBanks();
+  }
+
+  /**
+   * Every postable bank head under 1120 in the chart of accounts gets a
+   * commercial-bank treasury link (additive only; existing links are untouched).
+   */
+  async syncChartBanks(): Promise<number> {
+    const banks = await chartBankAccounts();
+    if (banks.length === 0) return 0;
+    const linked = new Set(
+      (
+        await TreasuryAccountModel.find({
+          glAccountCode: { $in: banks.map((bank) => bank.code) },
+        })
+          .select('glAccountCode')
+          .lean()
+          .exec()
+      ).map((row) => row.glAccountCode),
+    );
+    let created = 0;
+    for (const bank of banks) {
+      if (linked.has(bank.code)) continue;
+      try {
+        await TreasuryAccountModel.create({
+          name: bank.name,
+          kind: TreasuryKind.COMMERCIAL_BANK,
+          glAccountId: new Types.ObjectId(bank.id),
+          glAccountCode: bank.code,
+          currency: 'BDT',
+          isActive: true,
+          isSystem: false,
+        });
+        created += 1;
+      } catch (err) {
+        if ((err as { code?: number }).code !== 11000) throw err;
+      }
+    }
+    return created;
   }
 
   async create(
@@ -285,7 +328,7 @@ export class BankingService {
         isSystem: false,
         createdBy: userId ? new Types.ObjectId(userId) : undefined,
       });
-      return this.toPublicTreasury(created, 0);
+      return this.toPublicTreasury(created, 0, gl);
     }
 
     const parentCode = TREASURY_PARENT_CODE[dto.kind];
@@ -315,28 +358,39 @@ export class BankingService {
       isSystem: false,
       createdBy: userId ? new Types.ObjectId(userId) : undefined,
     });
-    return this.toPublicTreasury(created, 0);
+    return this.toPublicTreasury(created, 0, glDoc);
   }
 
   async list(): Promise<PublicTreasuryAccount[]> {
+    await this.syncChartBanks();
     const accounts = await TreasuryAccountModel.find({ isActive: true })
       .sort({ kind: 1, name: 1 })
       .exec();
-    const balances = await this.balancesByCode(
-      accounts.map((account) => account.glAccountCode),
-    );
+    const codes = accounts.map((account) => account.glAccountCode);
+    const [balances, names] = await Promise.all([
+      this.balancesByCode(codes),
+      chartAccountNames(codes),
+    ]);
     return accounts.map((account) =>
       this.toPublicTreasury(
         account,
         balances.get(account.glAccountCode) ?? 0,
+        names.get(account.glAccountCode),
       ),
     );
   }
 
   async getById(id: string): Promise<PublicTreasuryAccount> {
     const account = await this.findTreasuryOrFail(id);
-    const balance = await this.bookBalanceMinor(account.glAccountCode);
-    return this.toPublicTreasury(account, balance);
+    const [balance, names] = await Promise.all([
+      this.bookBalanceMinor(account.glAccountCode),
+      chartAccountNames([account.glAccountCode]),
+    ]);
+    return this.toPublicTreasury(
+      account,
+      balance,
+      names.get(account.glAccountCode),
+    );
   }
 
   async requireActive(id: string): Promise<PublicTreasuryAccount> {
@@ -777,6 +831,7 @@ export class BankingService {
   private toPublicTreasury(
     account: TreasuryAccountDocument,
     balanceMinor: number,
+    gl?: { name: string; isActive: boolean },
   ): PublicTreasuryAccount {
     return {
       id: account._id.toString(),
@@ -785,6 +840,8 @@ export class BankingService {
       institution: account.institution ?? null,
       accountNumber: account.accountNumber ?? null,
       glAccountCode: account.glAccountCode,
+      glAccountName: gl?.name ?? null,
+      glAccountActive: gl?.isActive ?? true,
       currency: account.currency,
       isActive: account.isActive,
       isSystem: account.isSystem,

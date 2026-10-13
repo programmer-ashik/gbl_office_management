@@ -1617,7 +1617,11 @@ export class JournalService {
       if (!treasury || !treasury.isActive) {
         throw notFound('Treasury account not found');
       }
-      return { entityType: type, entityId, entityName: treasury.name };
+      const gl = await AccountModel.findOne({ code: treasury.glAccountCode })
+        .select('name')
+        .lean()
+        .exec();
+      return { entityType: type, entityId, entityName: gl?.name ?? treasury.name };
     }
 
     throw badRequest(`Unsupported entity type: ${type}`);
