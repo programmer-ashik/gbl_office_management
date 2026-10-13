@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
-import { useAuth } from '../auth/AuthContext'
-import { Select } from '../components/ui'
-import { money } from '../types/accounting'
-import { Role } from '../types/auth'
-import type { Project } from '../types/project'
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { api } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { Select } from "../components/ui";
+import { money } from "../types/accounting";
+import { Role } from "../types/auth";
+import type { Project } from "../types/project";
 import {
   PURCHASE_DESTINATION_LABEL,
   PurchaseDestination,
   type Supplier,
   type Warehouse,
-} from '../types/procurement'
+} from "../types/procurement";
 import {
   clearPoCreateDraft,
   clearPoProductSelection,
@@ -19,82 +19,81 @@ import {
   readPoProductSelection,
   writePoCreateDraft,
   type PoSelectedProduct,
-} from '../utils/poProductSelection'
+} from "../utils/poProductSelection";
 
 type PoLine = {
-  key: string
-  itemId: string
-  productName: string
-  quantity: string
-  unitCost: string
-}
+  key: string;
+  itemId: string;
+  productName: string;
+  quantity: string;
+  unitCost: string;
+};
 
 function emptyLine(product?: PoSelectedProduct): PoLine {
   return {
     key: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    itemId: product?.productId ?? '',
-    productName: product?.productName ?? '',
-    quantity: '1',
+    itemId: product?.productId ?? "",
+    productName: product?.productName ?? "",
+    quantity: "1",
     unitCost:
       product?.unitPrice != null && product.unitPrice > 0
         ? String(product.unitPrice)
-        : '',
-  }
+        : "",
+  };
 }
 
 export function PurchaseOrderCreatePage() {
-  const { user } = useAuth()
-  const navigate = useNavigate()
-  const canCreate =
-    user?.role === Role.ADMIN ||
-    user?.role === Role.ACCOUNTANT ||
-    user?.role === Role.PROJECT_MANAGER
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const isFinance =
+    user?.role === Role.ADMIN || user?.role === Role.ACCOUNTANT;
+  const canCreate = isFinance || user?.role === Role.PROJECT_MANAGER;
 
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const [supplierId, setSupplierId] = useState('')
+  const [supplierId, setSupplierId] = useState("");
   const [destination, setDestination] = useState<
     (typeof PurchaseDestination)[keyof typeof PurchaseDestination]
-  >(PurchaseDestination.WAREHOUSE)
-  const [projectId, setProjectId] = useState('')
-  const [warehouseId, setWarehouseId] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [notes, setNotes] = useState('')
-  const [poLines, setPoLines] = useState<PoLine[]>([emptyLine()])
+  >(PurchaseDestination.WAREHOUSE);
+  const [projectId, setProjectId] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [notes, setNotes] = useState("");
+  const [poLines, setPoLines] = useState<PoLine[]>([emptyLine()]);
 
   useEffect(() => {
-    if (!canCreate) return
+    if (!canCreate) return;
     Promise.all([
       api.suppliers(),
       api.warehouses(),
       api.projects().catch(() => [] as Project[]),
     ])
       .then(([vendorRows, warehouseRows, projectRows]) => {
-        setSuppliers(vendorRows)
-        setWarehouses(warehouseRows)
-        setProjects(projectRows)
+        setSuppliers(vendorRows);
+        setWarehouses(warehouseRows);
+        setProjects(projectRows);
 
-        const draft = readPoCreateDraft()
+        const draft = readPoCreateDraft();
         if (draft) {
-          setSupplierId(draft.supplierId || vendorRows[0]?.id || '')
+          setSupplierId(draft.supplierId || vendorRows[0]?.id || "");
           if (
             draft.destination === PurchaseDestination.WAREHOUSE ||
             draft.destination === PurchaseDestination.DIRECT_TO_SITE
           ) {
-            setDestination(draft.destination)
+            setDestination(draft.destination);
           }
-          setProjectId(draft.projectId || projectRows[0]?.id || '')
-          setWarehouseId(draft.warehouseId || warehouseRows[0]?.id || '')
-          setDate(draft.date || new Date().toISOString().slice(0, 10))
-          setNotes(draft.notes || '')
+          setProjectId(draft.projectId || projectRows[0]?.id || "");
+          setWarehouseId(draft.warehouseId || warehouseRows[0]?.id || "");
+          setDate(draft.date || new Date().toISOString().slice(0, 10));
+          setNotes(draft.notes || "");
         } else {
-          if (vendorRows[0]) setSupplierId(vendorRows[0].id)
-          if (warehouseRows[0]) setWarehouseId(warehouseRows[0].id)
-          if (projectRows[0]) setProjectId(projectRows[0].id)
+          if (vendorRows[0]) setSupplierId(vendorRows[0].id);
+          if (warehouseRows[0]) setWarehouseId(warehouseRows[0].id);
+          if (projectRows[0]) setProjectId(projectRows[0].id);
         }
 
         let nextLines =
@@ -102,42 +101,46 @@ export function PurchaseOrderCreatePage() {
             ? draft.lines.map((row) => ({
                 key: row.key,
                 itemId: row.itemId,
-                productName: row.productName || '',
+                productName: row.productName || "",
                 quantity: row.quantity,
                 unitCost: row.unitCost,
               }))
-            : [emptyLine()]
+            : [emptyLine()];
 
-        const payload = readPoProductSelection()
+        const payload = readPoProductSelection();
         if (payload?.products?.length) {
           const blankOnly =
             nextLines.length === 1 &&
             !nextLines[0]?.itemId &&
-            !nextLines[0]?.productName
-          const base = blankOnly ? [] : nextLines
-          const existing = new Set(base.map((row) => row.itemId).filter(Boolean))
+            !nextLines[0]?.productName;
+          const base = blankOnly ? [] : nextLines;
+          const existing = new Set(
+            base.map((row) => row.itemId).filter(Boolean),
+          );
           const additions = payload.products
             .filter((row) => !existing.has(row.productId))
-            .map((row) => emptyLine(row))
-          nextLines = [...base, ...additions]
-          clearPoProductSelection()
+            .map((row) => emptyLine(row));
+          nextLines = [...base, ...additions];
+          clearPoProductSelection();
           writePoCreateDraft({
-            supplierId: draft?.supplierId || vendorRows[0]?.id || '',
+            supplierId: draft?.supplierId || vendorRows[0]?.id || "",
             destination: draft?.destination || PurchaseDestination.WAREHOUSE,
-            projectId: draft?.projectId || projectRows[0]?.id || '',
-            warehouseId: draft?.warehouseId || warehouseRows[0]?.id || '',
+            projectId: draft?.projectId || projectRows[0]?.id || "",
+            warehouseId: draft?.warehouseId || warehouseRows[0]?.id || "",
             date: draft?.date || new Date().toISOString().slice(0, 10),
-            notes: draft?.notes || '',
+            notes: draft?.notes || "",
             lines: nextLines,
-          })
+          });
         }
 
-        setPoLines(nextLines.length > 0 ? nextLines : [emptyLine()])
+        setPoLines(nextLines.length > 0 ? nextLines : [emptyLine()]);
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : 'Unable to load form data')
-      })
-  }, [canCreate])
+        setError(
+          err instanceof Error ? err.message : "Unable to load form data",
+        );
+      });
+  }, [canCreate]);
 
   function openProductPicker() {
     writePoCreateDraft({
@@ -148,47 +151,112 @@ export function PurchaseOrderCreatePage() {
       date,
       notes,
       lines: poLines,
-    })
-    navigate('/procurement/products/select')
+    });
+    navigate("/procurement/products/select");
   }
 
   const previewTotals = useMemo(() => {
     const subTotal = poLines.reduce((sum, line) => {
-      const qty = Number(line.quantity) || 0
-      const cost = Number(line.unitCost) || 0
-      return sum + qty * cost
-    }, 0)
-    return { subTotal: Number(subTotal.toFixed(2)) }
-  }, [poLines])
+      const qty = Number(line.quantity) || 0;
+      const cost = Number(line.unitCost) || 0;
+      return sum + qty * cost;
+    }, 0);
+    return { subTotal: Number(subTotal.toFixed(2)) };
+  }, [poLines]);
+
+  /**
+   * Manual lines carry only a typed product name. Match it to a catalog item
+   * (by "SKU · name", SKU, or name); finance users get a new catalog item
+   * created when nothing matches.
+   */
+  async function resolveManualItemIds(
+    manual: PoLine[],
+  ): Promise<Map<string, string>> {
+    const resolved = new Map<string, string>();
+    if (manual.length === 0) return resolved;
+    const catalog = await api.items();
+    const normalize = (value: string) =>
+      value.trim().replace(/\s+/g, " ").toLowerCase();
+    const missing: string[] = [];
+    for (const line of manual) {
+      const typed = normalize(line.productName);
+      const match = catalog.find(
+        (item) =>
+          normalize(`${item.sku} · ${item.name}`) === typed ||
+          normalize(item.sku) === typed ||
+          normalize(item.name) === typed,
+      );
+      if (match) {
+        resolved.set(line.key, match.id);
+        continue;
+      }
+      if (!isFinance) {
+        missing.push(line.productName.trim());
+        continue;
+      }
+      const created = await api.createItem({
+        name: line.productName.trim(),
+        unit: "pcs",
+        unitPrice: Number(line.unitCost) || undefined,
+        supplierId: supplierId || undefined,
+      });
+      catalog.push(created);
+      resolved.set(line.key, created.id);
+    }
+    if (missing.length > 0) {
+      throw new Error(
+        `Not in the product catalog: ${missing.join(", ")}. Pick it with "Add products" or ask an admin/accountant to add it.`,
+      );
+    }
+    return resolved;
+  }
 
   async function onSubmit(event: FormEvent) {
-    event.preventDefault()
-    if (!canCreate) return
-    const lines = poLines
-      .filter(
-        (line) =>
-          line.itemId && Number(line.quantity) > 0 && Number(line.unitCost) > 0,
-      )
-      .map((line) => ({
-        itemId: line.itemId,
-        quantity: Number(line.quantity),
-        unitCost: Number(line.unitCost),
-      }))
-    if (!supplierId || lines.length === 0) {
-      setError('Add at least one line with product, qty, and unit cost')
-      return
+    event.preventDefault();
+    if (!canCreate) return;
+    const filled = poLines.filter(
+      (line) =>
+        line.itemId || line.productName.trim() || line.unitCost.trim(),
+    );
+    if (!supplierId) {
+      setError("Select a supplier");
+      return;
+    }
+    if (filled.length === 0) {
+      setError("Add at least one line with product, qty, and unit cost");
+      return;
+    }
+    const invalid = filled.findIndex(
+      (line) =>
+        (!line.itemId && !line.productName.trim()) ||
+        !(Number(line.quantity) > 0) ||
+        !(Number(line.unitCost) > 0),
+    );
+    if (invalid >= 0) {
+      setError(
+        `Line ${invalid + 1}: enter a product, a quantity above 0, and a unit cost above 0`,
+      );
+      return;
     }
     if (destination === PurchaseDestination.DIRECT_TO_SITE && !projectId) {
-      setError('Select a project for direct-to-site')
-      return
+      setError("Select a project for direct-to-site");
+      return;
     }
     if (destination === PurchaseDestination.WAREHOUSE && !warehouseId) {
-      setError('Select a warehouse')
-      return
+      setError("Select a warehouse");
+      return;
     }
-    setSaving(true)
-    setError(null)
+    setSaving(true);
+    setError(null);
     try {
+      const manualIds = await resolveManualItemIds(
+        filled.filter((line) => !line.itemId),
+      );
+      const lines = filled.map((line) => ({
+        itemId: line.itemId || manualIds.get(line.key) || "",
+        quantity: Number(line.quantity),
+        unitCost: Number(line.unitCost),
+      }));
       const created = await api.createPurchaseOrder({
         supplierId,
         destination,
@@ -203,48 +271,48 @@ export function PurchaseOrderCreatePage() {
             ? warehouseId
             : undefined,
         lines,
-      })
-      clearPoCreateDraft()
-      clearPoProductSelection()
-      navigate(`/procurement/${created.id}`)
+      });
+      clearPoCreateDraft();
+      clearPoProductSelection();
+      navigate(`/procurement/${created.id}`);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Unable to create purchase order',
-      )
+        err instanceof Error ? err.message : "Unable to create purchase order",
+      );
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
   }
 
   if (!canCreate) {
     return (
-      <section className="table-card">
-        <p className="form-error">You cannot create purchase orders.</p>
+      <section className='table-card'>
+        <p className='form-error'>You cannot create purchase orders.</p>
       </section>
-    )
+    );
   }
 
   return (
     <>
-      <header className="workspace-header">
+      <header className='workspace-header'>
         <div>
           <h1>New purchase order</h1>
-          <p className="muted">
+          <p className='muted'>
             Select existing catalog products. Warehouse receive increases stock
             lots; direct-to-site costs the project on receipt.
           </p>
         </div>
-        <Link to="/procurement" className="ghost-link">
+        <Link to='/procurement' className='ghost-link'>
           Back to POs
         </Link>
       </header>
 
-      <section className="table-card">
+      <section className='table-card'>
         <form
-          className="stack-form stack-form-compact quotation-create-form"
+          className='stack-form stack-form-compact quotation-create-form'
           onSubmit={(e) => void onSubmit(e)}
         >
-          <div className="filter-grid-2">
+          <div className='filter-grid-2'>
             <label>
               Supplier
               <Select
@@ -256,7 +324,7 @@ export function PurchaseOrderCreatePage() {
                 }))}
                 searchable
                 portal
-                placeholder="Select supplier"
+                placeholder='Select supplier'
               />
             </label>
             <label>
@@ -275,7 +343,7 @@ export function PurchaseOrderCreatePage() {
             <label>
               Date
               <input
-                type="date"
+                type='date'
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 required
@@ -293,7 +361,7 @@ export function PurchaseOrderCreatePage() {
                   }))}
                   searchable
                   portal
-                  placeholder="Select project"
+                  placeholder='Select project'
                 />
               </label>
             ) : (
@@ -308,21 +376,21 @@ export function PurchaseOrderCreatePage() {
                   }))}
                   searchable
                   portal
-                  placeholder="Select warehouse"
+                  placeholder='Select warehouse'
                 />
               </label>
             )}
-            <div className="form-actions compact-actions filter-actions">
+            <div className='form-actions compact-actions filter-actions'>
               <button
-                type="button"
-                className="ghost"
+                type='button'
+                className='ghost'
                 onClick={openProductPicker}
               >
                 Add products
               </button>
               <button
-                type="button"
-                className="ghost"
+                type='button'
+                className='ghost'
                 onClick={() => setPoLines((prev) => [...prev, emptyLine()])}
               >
                 + Line
@@ -330,14 +398,14 @@ export function PurchaseOrderCreatePage() {
             </div>
           </div>
 
-          <div className="journal-lines-scroll quotation-table-desktop">
-            <table className="journal-lines-table">
+          <div className='journal-lines-scroll quotation-table-desktop'>
+            <table className='journal-lines-table'>
               <thead>
                 <tr>
                   <th>Product</th>
-                  <th className="num">Qty</th>
-                  <th className="num">Unit cost</th>
-                  <th className="num">Line total</th>
+                  <th className='num'>Qty</th>
+                  <th className='num'>Unit cost</th>
+                  <th className='num'>Line total</th>
                   <th />
                 </tr>
               </thead>
@@ -356,15 +424,14 @@ export function PurchaseOrderCreatePage() {
                             ),
                           )
                         }
-                        placeholder="Product name"
+                        placeholder='Product name or SKU'
                         readOnly={Boolean(line.itemId)}
-                        required
                       />
                     </td>
                     <td>
                       <input
-                        className="inv-num"
-                        inputMode="decimal"
+                        className='inv-num'
+                        inputMode='decimal'
                         value={line.quantity}
                         onChange={(e) =>
                           setPoLines((prev) =>
@@ -375,13 +442,12 @@ export function PurchaseOrderCreatePage() {
                             ),
                           )
                         }
-                        required
                       />
                     </td>
                     <td>
                       <input
-                        className="inv-num"
-                        inputMode="decimal"
+                        className='inv-num'
+                        inputMode='decimal'
                         value={line.unitCost}
                         onChange={(e) =>
                           setPoLines((prev) =>
@@ -392,10 +458,9 @@ export function PurchaseOrderCreatePage() {
                             ),
                           )
                         }
-                        required
                       />
                     </td>
-                    <td className="num">
+                    <td className='num'>
                       {money(
                         (Number(line.quantity) || 0) *
                           (Number(line.unitCost) || 0),
@@ -404,8 +469,8 @@ export function PurchaseOrderCreatePage() {
                     <td>
                       {poLines.length > 1 ? (
                         <button
-                          type="button"
-                          className="ghost"
+                          type='button'
+                          className='ghost'
                           onClick={() =>
                             setPoLines((prev) =>
                               prev.filter((row) => row.key !== line.key),
@@ -422,9 +487,9 @@ export function PurchaseOrderCreatePage() {
             </table>
           </div>
 
-          <div className="quotation-cards-mobile">
+          <div className='quotation-cards-mobile'>
             {poLines.map((line) => (
-              <article key={line.key} className="quotation-line-card">
+              <article key={line.key} className='quotation-line-card'>
                 <label>
                   Product
                   <input
@@ -438,16 +503,15 @@ export function PurchaseOrderCreatePage() {
                         ),
                       )
                     }
-                    placeholder="Product name"
+                    placeholder='Product name or SKU'
                     readOnly={Boolean(line.itemId)}
-                    required
                   />
                 </label>
-                <div className="name-row">
+                <div className='name-row'>
                   <label>
                     Qty
                     <input
-                      inputMode="decimal"
+                      inputMode='decimal'
                       value={line.quantity}
                       onChange={(e) =>
                         setPoLines((prev) =>
@@ -458,13 +522,12 @@ export function PurchaseOrderCreatePage() {
                           ),
                         )
                       }
-                      required
                     />
                   </label>
                   <label>
                     Unit cost
                     <input
-                      inputMode="decimal"
+                      inputMode='decimal'
                       value={line.unitCost}
                       onChange={(e) =>
                         setPoLines((prev) =>
@@ -475,12 +538,11 @@ export function PurchaseOrderCreatePage() {
                           ),
                         )
                       }
-                      required
                     />
                   </label>
                 </div>
                 <p>
-                  Line total{' '}
+                  Line total{" "}
                   <strong>
                     {money(
                       (Number(line.quantity) || 0) *
@@ -490,8 +552,8 @@ export function PurchaseOrderCreatePage() {
                 </p>
                 {poLines.length > 1 ? (
                   <button
-                    type="button"
-                    className="ghost"
+                    type='button'
+                    className='ghost'
                     onClick={() =>
                       setPoLines((prev) =>
                         prev.filter((row) => row.key !== line.key),
@@ -514,28 +576,28 @@ export function PurchaseOrderCreatePage() {
             />
           </label>
 
-          <p className="muted">
+          <p className='muted'>
             Subtotal <strong>{money(previewTotals.subTotal)}</strong>
           </p>
 
-          <div className="form-actions">
-            <button type="submit" disabled={saving || !supplierId}>
-              {saving ? 'Saving…' : 'Create purchase order'}
+          <div className='form-actions'>
+            <button type='submit' disabled={saving || !supplierId}>
+              {saving ? "Saving…" : "Create purchase order"}
             </button>
             <Link
-              to="/procurement"
-              className="ghost-link"
+              to='/procurement'
+              className='ghost-link'
               onClick={() => {
-                clearPoCreateDraft()
-                clearPoProductSelection()
+                clearPoCreateDraft();
+                clearPoProductSelection();
               }}
             >
               Cancel
             </Link>
           </div>
-          {error ? <p className="form-error">{error}</p> : null}
+          {error ? <p className='form-error'>{error}</p> : null}
         </form>
       </section>
     </>
-  )
+  );
 }

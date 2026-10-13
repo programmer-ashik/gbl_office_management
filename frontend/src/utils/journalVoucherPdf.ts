@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf'
-import { voucherAccentRgb, voucherSidebarTextRgb } from '../components/DebitVoucher'
+import { normalizeVoucherTheme, voucherAccentRgb, voucherBodyTextRgb, voucherSidebarTextRgb } from '../components/DebitVoucher'
 import {
   JOURNAL_TYPE_LABEL,
   JournalType,
@@ -10,10 +10,13 @@ import {
   defaultJournalVoucherTemplate,
   defaultVoucherConfig,
   hydrateClientTemplate,
-  resolveAssetUrl,
+  DEFAULT_COMPANY_LOGO_URL,
+  voucherAddress,
+  voucherLogoUrl,
   type BalanceSheetTemplate,
   type VoucherConfig,
 } from '../types/report-template'
+import { imageFormatFromDataUrl, loadPdfImage } from './pdfImage'
 
 const MUTED: [number, number, number] = [90, 101, 120]
 const INK: [number, number, number] = [33, 37, 41]
@@ -22,9 +25,24 @@ const TOTAL_GRAY: [number, number, number] = [180, 180, 180]
 
 export type VoucherKind = 'debit' | 'credit' | 'journal'
 
+/** Cash, bank and mobile-banking heads sit under 1110 (1111 / 112x / 113x). */
+function isTreasuryAccount(code: string, name: string): boolean {
+  if (/^11[123]/.test(code.trim())) return true
+  return (
+    code.trim().startsWith('1') &&
+    /cash|bank|bkash|nagad|mobile|treasury|petty/i.test(name)
+  )
+}
+
+function isAdvanceSettlement(entry: JournalEntry): boolean {
+  return entry.journalType === JournalType.EMPLOYEE_SETTLEMENT
+}
+
 /** Payment / outflow → Debit Voucher; receipt / inflow → Credit Voucher. */
 export function resolveVoucherKind(entry: JournalEntry): VoucherKind {
   switch (entry.journalType) {
+    case JournalType.EMPLOYEE_SETTLEMENT:
+      return 'journal'
     case JournalType.CASH_PAYMENT:
     case JournalType.BANK_WITHDRAWAL:
     case JournalType.SUPPLIER_PAYMENT:
@@ -49,8 +67,7 @@ export function resolveVoucherKind(entry: JournalEntry): VoucherKind {
   let cashDebit = 0
   let cashCredit = 0
   for (const line of entry.lines) {
-    const label = `${line.accountCode} ${line.accountName}`.toLowerCase()
-    if (!/cash|bank|treasury|petty/.test(label)) continue
+    if (!isTreasuryLine(line)) continue
     cashDebit += line.debit || 0
     cashCredit += line.credit || 0
   }
@@ -63,6 +80,12 @@ export function voucherKindTitle(kind: VoucherKind): string {
   if (kind === 'debit') return 'Debit Voucher'
   if (kind === 'credit') return 'Credit Voucher'
   return 'Journal Voucher'
+}
+
+export function voucherTitle(entry: JournalEntry): string {
+  return isAdvanceSettlement(entry)
+    ? 'Advance Settlement Voucher'
+    : voucherKindTitle(resolveVoucherKind(entry))
 }
 
 const ONES = [
@@ -138,36 +161,6 @@ export function amountInWords(amount: number): string {
   return `${text} Only`
 }
 
-function imageFormatFromDataUrl(
-  dataUrl: string,
-): 'PNG' | 'JPEG' | 'WEBP' | null {
-  if (
-    dataUrl.startsWith('data:image/jpeg') ||
-    dataUrl.startsWith('data:image/jpg')
-  ) {
-    return 'JPEG'
-  }
-  if (dataUrl.startsWith('data:image/png')) return 'PNG'
-  if (dataUrl.startsWith('data:image/webp')) return 'WEBP'
-  return null
-}
-
-async function loadImageDataUrl(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, { credentials: 'include' })
-    if (!res.ok) return null
-    const blob = await res.blob()
-    return await new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result))
-      reader.onerror = () => resolve(null)
-      reader.readAsDataURL(blob)
-    })
-  } catch {
-    return null
-  }
-}
-
 function parseVoucherDate(iso: string): { day: string; month: string; year: string } {
   const d = iso.slice(0, 10)
   const [y, m, day] = d.split('-')
@@ -186,44 +179,233 @@ function partyLabel(entry: JournalEntry, kind: 'debit' | 'credit'): string {
   if (preferred) return preferred
   const any = entry.lines.find((l) => l.entityName)?.entityName
   if (any) return any
-  const expenseLike = entry.lines.find(
-    (l) =>
-      l.debit > 0 &&
-      !/cash|bank|treasury/i.test(`${l.accountCode} ${l.accountName}`),
-  )
+  const expenseLike = entry.lines.find((l) => l.debit > 0 && !isTreasuryLine(l))
   if (kind === 'debit' && expenseLike) {
     return `${expenseLike.accountCode} · ${expenseLike.accountName}`
   }
-  const incomeLike = entry.lines.find(
-    (l) =>
-      l.credit > 0 &&
-      !/cash|bank|treasury/i.test(`${l.accountCode} ${l.accountName}`),
-  )
+  const incomeLike = entry.lines.find((l) => l.credit > 0 && !isTreasuryLine(l))
   if (kind === 'credit' && incomeLike) {
     return `${incomeLike.accountCode} · ${incomeLike.accountName}`
   }
   return ''
 }
 
-function voucherLineItems(
+function isTreasuryLine(line: JournalLine): boolean {
+  return isTreasuryAccount(line.accountCode, line.accountName)
+}
+
+/** Hand Cash, Cash in Bank (named account), or Mobile Banking (bKash / Nagad). */
+function channelLabel(line: JournalLine): string {
+  const name = line.accountName.trim()
+  const code = line.accountCode.trim()
+  if (code === '1111' || /hand cash|cash in hand/i.test(name)) return 'Hand Cash'
+  if (
+    code === '1131' ||
+    code === '1132' ||
+    /bkash|nagad|mobile/i.test(name)
+  ) {
+    return `Mobile Banking (${name})`
+  }
+  if (code.startsWith('112') || /bank/i.test(name)) {
+    return `Cash in Bank (${name})`
+  }
+  return name
+}
+
+function paymentChannels(entry: JournalEntry, kind: 'debit' | 'credit'): string[] {
+  const lines = entry.lines.filter((line) => {
+    const amount = kind === 'debit' ? line.credit : line.debit
+    return amount > 0 && isTreasuryLine(line)
+  })
+  return [...new Set(lines.map(channelLabel))]
+}
+
+function chequeDateLabel(value: string): string {
+  const [year, month, day] = value.slice(0, 10).split('-')
+  return year && month && day ? `${day}/${month}/${year}` : value
+}
+
+/** "Cheque No. 000101, dated 20/10/2026 (post-dated)" — empty when no cheque. */
+export function voucherChequeText(entry: JournalEntry): string {
+  const number = entry.chequeNumber?.trim()
+  if (!number) return ''
+  const date = entry.chequeDate ? `, dated ${chequeDateLabel(entry.chequeDate)}` : ''
+  return `Cheque No. ${number}${date}${entry.isPdc ? ' (post-dated)' : ''}`
+}
+
+/** Payment Method field: Hand Cash, Cash in Bank (…), Mobile Banking (…), plus the cheque. */
+export function voucherPaymentMethod(
   entry: JournalEntry,
   kind: 'debit' | 'credit',
-): Array<{ description: string; major: string; minor: string }> {
+): string {
+  return [paymentChannels(entry, kind).join(', '), voucherChequeText(entry)]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** Auto memo numbers from the Journals form (gbl-YYMMDD-…) are not narrative. */
+function isMemoNumber(text: string): boolean {
+  return /^gbl-\d{6}/i.test(text.trim())
+}
+
+function userText(text?: string | null): string {
+  const value = text?.trim() ?? ''
+  return value && !isMemoNumber(value) ? value : ''
+}
+
+/**
+ * Narrative for a printed row: its own line description, else descriptions
+ * typed on the counterpart lines (e.g. the Hand Cash / bank line, which is
+ * not printed as a row), else a non-auto memo.
+ */
+function lineNarrative(
+  entry: JournalEntry,
+  line: JournalLine,
+  printed: JournalLine[],
+): string {
+  const own = userText(line.description)
+  const counterpart = own
+    ? ''
+    : [
+        ...new Set(
+          entry.lines
+            .filter((other) => !printed.includes(other))
+            .map((other) => userText(other.description))
+            .filter(Boolean),
+        ),
+      ].join('; ')
+  const text = own || counterpart || userText(entry.memo)
+  const detail = text.replace(/^being the amount of\s+/i, '').trim()
+  const account = line.accountName.trim()
+  const extras = [account, line.entityName?.trim()].filter(
+    (part): part is string =>
+      Boolean(part) && !detail.toLowerCase().includes(part!.toLowerCase()),
+  )
+  if (!detail) return extras.join(' · ') || line.accountCode
+  return extras.length ? `${detail} (${extras.join(' · ')})` : detail
+}
+
+/** Lines printed as voucher rows: the non-cash/bank side of the payment or receipt. */
+function voucherRows(entry: JournalEntry, kind: 'debit' | 'credit'): JournalLine[] {
+  // Settlement: every bill plus any unspent cash returned, so the rows add up to the advance.
+  if (isAdvanceSettlement(entry)) return entry.lines.filter((l) => l.debit > 0)
   const lines: JournalLine[] =
     kind === 'debit'
       ? entry.lines.filter((l) => l.debit > 0)
       : entry.lines.filter((l) => l.credit > 0)
-  const source = lines.length > 0 ? lines : entry.lines
-  return source.map((line) => {
+  const source = (lines.length > 0 ? lines : entry.lines).filter(
+    (line) => !isTreasuryLine(line),
+  )
+  return source.length > 0 ? source : lines.length > 0 ? lines : entry.lines
+}
+
+/** "Paid to" / "Received from": every printed head (party name, else account name), comma-separated. */
+export function voucherPartyNames(
+  entry: JournalEntry,
+  kind: 'debit' | 'credit',
+): string {
+  if (isAdvanceSettlement(entry)) {
+    const employees = [
+      ...new Set(
+        entry.lines
+          .filter((line) => line.credit > 0)
+          .map((line) => line.entityName?.trim())
+          .filter(Boolean),
+      ),
+    ]
+    if (employees.length > 0) return employees.join(', ')
+  }
+  const names = [
+    ...new Set(
+      voucherRows(entry, kind)
+        .map((line) => line.entityName?.trim() || line.accountName.trim())
+        .filter(Boolean),
+    ),
+  ]
+  return names.length > 0 ? names.join(', ') : partyLabel(entry, kind)
+}
+
+export function voucherMethodLabel(kind: 'debit' | 'credit'): string {
+  return kind === 'credit' ? 'Receiving Method:' : 'Payment Method:'
+}
+
+function amountLabel(value: number): string {
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
+}
+
+function sumLines(lines: JournalLine[], side: 'debit' | 'credit'): number {
+  return Math.round(lines.reduce((sum, line) => sum + (line[side] || 0), 0) * 100) / 100
+}
+
+/** "Against advance ADV-… (Advance to Staff · Rahim) of 100: spent 90, returned 10 to Hand Cash" */
+function settlementSummary(entry: JournalEntry): string {
+  const advanceLines = entry.lines.filter((l) => l.credit > 0 && l.accountCode === '1161')
+  const dueLines = entry.lines.filter((l) => l.credit > 0 && l.accountCode !== '1161')
+  const returnLines = entry.lines.filter((l) => l.debit > 0 && isTreasuryLine(l))
+  const spentLines = entry.lines.filter((l) => l.debit > 0 && !isTreasuryLine(l))
+  const holder = advanceLines.find((l) => l.entityName)?.entityName?.trim()
+  const head = advanceLines[0]?.accountName || 'Advance to Staff'
+  const parts = [`spent ${amountLabel(sumLines(spentLines, 'debit'))}`]
+  const returned = sumLines(returnLines, 'debit')
+  if (returned > 0) {
+    parts.push(
+      `returned ${amountLabel(returned)} to ${[...new Set(returnLines.map(channelLabel))].join(', ')}`,
+    )
+  }
+  const due = sumLines(dueLines, 'credit')
+  if (due > 0) parts.push(`${amountLabel(due)} payable to the employee`)
+  const reference = entry.reference ? ` ${entry.reference}` : ''
+  return `Settled against advance${reference} (${head}${holder ? ` · ${holder}` : ''}) of ${amountLabel(sumLines(advanceLines, 'credit'))}: ${parts.join(', ')}.`
+}
+
+function settlementLineItems(
+  entry: JournalEntry,
+): Array<{ description: string; major: string; minor: string }> {
+  const rows = voucherRows(entry, 'debit')
+  const items = rows.map((line) => {
+    const whole = Math.floor(Math.abs(line.debit))
+    const cents = Math.round((Math.abs(line.debit) - whole) * 100)
+    const description = isTreasuryLine(line)
+      ? `Being the amount of unspent advance returned to ${channelLabel(line)}`
+      : `Being the amount of ${lineNarrative(entry, line, rows)}`
+    return {
+      description,
+      major: whole.toLocaleString('en-US'),
+      minor: String(cents).padStart(2, '0'),
+    }
+  })
+  return [...items, { description: settlementSummary(entry), major: '', minor: '' }]
+}
+
+/** Settlement: where unspent cash came back; plain journals have no payment method. */
+export function voucherSettlementMethod(entry: JournalEntry): string {
+  const returned = entry.lines.filter((l) => l.debit > 0 && isTreasuryLine(l))
+  return returned.length
+    ? `Unspent returned to ${[...new Set(returned.map(channelLabel))].join(', ')}`
+    : 'Adjusted against employee advance'
+}
+
+export function voucherLineItems(
+  entry: JournalEntry,
+  kind: 'debit' | 'credit',
+): Array<{ description: string; major: string; minor: string }> {
+  if (isAdvanceSettlement(entry)) return settlementLineItems(entry)
+  const rows = voucherRows(entry, kind)
+  const channels = paymentChannels(entry, kind)
+  const chequeNo = entry.chequeNumber?.trim()
+  const vide = chequeNo ? ` vide cheque no. ${chequeNo}` : ''
+  const pay = channels.length
+    ? ` ${kind === 'debit' ? 'paid by' : 'received in'} ${channels.join(' and ')}${vide}`
+    : vide
+  return rows.map((line) => {
     const amt = kind === 'debit' ? line.debit || line.credit : line.credit || line.debit
     const whole = Math.floor(Math.abs(amt))
     const cents = Math.round((Math.abs(amt) - whole) * 100)
-    const desc =
-      line.description?.trim() ||
-      `${line.accountCode} · ${line.accountName}` ||
-      entry.memo
     return {
-      description: desc,
+      description: `Being the amount of ${lineNarrative(entry, line, rows)}${pay}`,
       major: whole.toLocaleString('en-US'),
       minor: String(cents).padStart(2, '0'),
     }
@@ -264,36 +446,49 @@ async function buildDebitCreditVoucherPdf(
   const vc = resolveVoucherConfig(template)
   const accent = voucherAccentRgb(vc.theme)
   const sidebarText = voucherSidebarTextRgb(vc.theme)
+  const bodyText = voucherBodyTextRgb(vc.theme)
   const company = header.companyName || 'GBL Enterprise'
   const { day, month, year } = parseVoucherDate(entry.date)
   const amount = entry.totalDebit
-  const party = partyLabel(entry, kind)
+  const party = voucherPartyNames(entry, kind)
   const items = voucherLineItems(entry, kind)
+  const settlement = isAdvanceSettlement(entry)
   const title =
     options?.forceTitle ??
     (kind === 'debit' ? 'DEBIT VOUCHER' : 'CREDIT VOUCHER')
-  const partyField = kind === 'debit' ? 'Paid to:' : 'Received from:'
+  const partyField = settlement
+    ? 'Employee:'
+    : kind === 'debit'
+      ? 'Paid to:'
+      : 'Received from:'
 
   // —— Accent left sidebar ——
+  const monochrome = normalizeVoucherTheme(vc.theme) === 'bw'
   doc.setFillColor(...accent)
   doc.rect(0, 0, SIDEBAR_W, pageH, 'F')
+  if (monochrome) {
+    doc.setDrawColor(...bodyText)
+    doc.setLineWidth(0.6)
+    doc.line(SIDEBAR_W, 0, SIDEBAR_W, pageH)
+  }
 
   // Logo only — no background box (matches DebitVoucher.tsx preview)
   // h-12 w-12 ≈ 12.7mm square
   const logoSize = 12.7
-  const logoUrl = resolveAssetUrl(template.companyLogoUrl)
   let logoDrawn = false
-  if (logoUrl) {
-    const dataUrl = await loadImageDataUrl(logoUrl)
-    const format = dataUrl ? imageFormatFromDataUrl(dataUrl) : null
-    if (dataUrl && format) {
-      try {
-        const logoX = (SIDEBAR_W - logoSize) / 2
-        doc.addImage(dataUrl, format, logoX, 10, logoSize, logoSize)
-        logoDrawn = true
-      } catch {
-        logoDrawn = false
-      }
+  const logoData =
+    (await loadPdfImage(voucherLogoUrl(template))) ??
+    (template.companyLogoUrl
+      ? await loadPdfImage(DEFAULT_COMPANY_LOGO_URL)
+      : null)
+  const logoFormat = logoData ? imageFormatFromDataUrl(logoData) : null
+  if (logoData && logoFormat) {
+    try {
+      const logoX = (SIDEBAR_W - logoSize) / 2
+      doc.addImage(logoData, logoFormat, logoX, 10, logoSize, logoSize, undefined, 'FAST')
+      logoDrawn = true
+    } catch {
+      logoDrawn = false
     }
   }
   doc.setFont('helvetica', 'bold')
@@ -301,17 +496,32 @@ async function buildDebitCreditVoucherPdf(
   doc.setTextColor(...sidebarText)
   const nameY = logoDrawn ? 10 + logoSize + 5 : 16
   doc.text(company.toUpperCase(), SIDEBAR_W / 2, nameY, { align: 'center' })
+  let headY = nameY
   if (vc.companySubtitle) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(6)
     doc.setTextColor(...sidebarText)
-    doc.text(vc.companySubtitle.toUpperCase(), SIDEBAR_W / 2, nameY + 4, {
+    headY += 4
+    doc.text(vc.companySubtitle.toUpperCase(), SIDEBAR_W / 2, headY, {
       align: 'center',
     })
   }
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(6.5)
+  doc.setTextColor(...sidebarText)
+  const addressLines = doc.splitTextToSize(
+    voucherAddress(template),
+    SIDEBAR_W - 12,
+  ) as string[]
+  headY += 4
+  doc.text(addressLines, SIDEBAR_W / 2, headY, {
+    align: 'center',
+    lineHeightFactor: 1.3,
+  })
+  headY += (addressLines.length - 1) * 3
 
   // Signatories
-  let sigY = Math.max(nameY + (vc.companySubtitle ? 12 : 8), 42)
+  let sigY = Math.max(headY + 8, 42)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(8)
   doc.setTextColor(...sidebarText)
@@ -360,14 +570,14 @@ async function buildDebitCreditVoucherPdf(
   // Title + accent underline
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(20)
-  doc.setTextColor(...INK)
+  doc.setTextColor(...bodyText)
   doc.text(title, contentRight, 22, { align: 'right' })
   const titleW = doc.getTextWidth(title)
-  doc.setDrawColor(...accent)
+  doc.setDrawColor(...(monochrome ? bodyText : accent))
   doc.setLineWidth(1.6)
   doc.line(contentRight - Math.min(titleW, 42), 24.5, contentRight, 24.5)
 
-  // Voucher Nu# + Received By
+  // Voucher Nu# + Payment Method
   let y = 38
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
@@ -378,10 +588,23 @@ async function buildDebitCreditVoucherPdf(
   y = 46
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
-  doc.text('Received By:', contentX, y)
+  const methodLabel = settlement ? 'Settlement:' : voucherMethodLabel(kind)
+  doc.text(methodLabel, contentX, y)
+  const methodX = contentX + doc.getTextWidth(methodLabel) + 3
+  const method = settlement
+    ? voucherSettlementMethod(entry)
+    : voucherPaymentMethod(entry, kind)
+  if (method) {
+    const methodW = contentRight - methodX - 2
+    doc.setFont('helvetica', 'bold')
+    if (doc.getTextWidth(method) > methodW) doc.setFontSize(8)
+    doc.text(method, methodX + 1, y, { maxWidth: methodW })
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+  }
   doc.setDrawColor(...INK)
   doc.setLineWidth(0.35)
-  doc.line(contentX + 28, y + 1, contentRight, y + 1)
+  doc.line(methodX, y + 1, contentRight, y + 1)
 
   // Detail table
   y = 52
@@ -389,9 +612,27 @@ async function buildDebitCreditVoucherPdf(
   const amountColW = 52
   const amtX = contentRight - amountColW
   const descW = amtX - contentX
-  const headerH = 14
-  const bodyH = Math.max(42, 10 + items.length * 7)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(9)
+  const partyX = contentX + 2 + doc.getTextWidth(partyField) + 2
+  doc.setFont('helvetica', 'normal')
+  const partyLines = party
+    ? (doc.splitTextToSize(party, amtX - partyX - 2) as string[]).slice(0, 4)
+    : []
+  const headerH = Math.max(14, 6 + partyLines.length * 4)
   const totalH = 14
+  const LINE_H = 4
+  const ROW_GAP = 3
+  doc.setFontSize(8.5)
+  const wrappedItems = items.map(
+    (item) => doc.splitTextToSize(item.description, descW - 6) as string[],
+  )
+  const rowsH = wrappedItems.reduce(
+    (sum, lines) => sum + lines.length * LINE_H + ROW_GAP,
+    0,
+  )
+  const maxBodyH = pageH - 12 - tableTop - headerH - totalH
+  const bodyH = Math.min(maxBodyH, Math.max(42, 8 + rowsH))
   const tableH = headerH + bodyH + totalH
   const half = amountColW / 2
 
@@ -412,9 +653,9 @@ async function buildDebitCreditVoucherPdf(
   doc.setFontSize(9)
   doc.setTextColor(...INK)
   doc.text(partyField, contentX + 2, tableTop + 6)
-  if (party) {
+  if (partyLines.length > 0) {
     doc.setFont('helvetica', 'normal')
-    doc.text(party, contentX + 22, tableTop + 6, { maxWidth: descW - 24 })
+    doc.text(partyLines, partyX, tableTop + 6, { lineHeightFactor: 1.25 })
   }
   doc.setFillColor(248, 248, 248)
   doc.rect(amtX, tableTop, amountColW, 7, 'F')
@@ -435,38 +676,33 @@ async function buildDebitCreditVoucherPdf(
     align: 'center',
   })
 
-  // Body rows
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8)
-  doc.setTextColor(...MUTED)
-  doc.text('Being the amount', contentX + 2, tableTop + headerH + 5)
-
-  doc.setDrawColor(...LIGHT_GRAY)
-  doc.setLineWidth(0.2)
-  for (let i = 0; i < 5; i++) {
-    const ly = tableTop + headerH + 10 + i * 6.5
-    if (ly < tableTop + headerH + bodyH - 2) {
-      doc.setLineDashPattern([0.7, 0.7], 0)
-      doc.line(contentX + 2, ly, amtX - 3, ly)
-      doc.setLineDashPattern([], 0)
-    }
-  }
-
+  // Body rows: each description wraps in full; amounts sit on its first line.
+  const bodyBottom = tableTop + headerH + bodyH - 2
   doc.setTextColor(...INK)
   doc.setFontSize(8.5)
+  let rowY = tableTop + headerH + 7
   items.forEach((item, idx) => {
-    const ly = tableTop + headerH + 10 + idx * 6.5
-    if (ly >= tableTop + headerH + bodyH - 2) return
-    doc.setFillColor(255, 255, 255)
-    const tw = Math.min(doc.getTextWidth(item.description) + 2, descW - 4)
-    doc.rect(contentX + 1.5, ly - 3.5, tw, 4.5, 'F')
-    doc.text(item.description, contentX + 2, ly, { maxWidth: descW - 6 })
+    const lines = wrappedItems[idx] ?? []
+    if (rowY >= bodyBottom) return
+    const fit = Math.max(1, Math.floor((bodyBottom - rowY) / LINE_H) + 1)
+    doc.setFont('helvetica', 'normal')
+    doc.text(lines.slice(0, fit), contentX + 2, rowY)
     doc.setFont('helvetica', 'bold')
-    doc.text(item.major, amtX + half - 2, ly, { align: 'right' })
+    doc.text(item.major, amtX + half - 2, rowY, { align: 'right' })
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(...MUTED)
-    doc.text(item.minor, contentRight - 2, ly, { align: 'right' })
+    doc.text(item.minor, contentRight - 2, rowY, { align: 'right' })
     doc.setTextColor(...INK)
+
+    const underline = rowY + (Math.min(lines.length, fit) - 1) * LINE_H + 1.8
+    rowY += lines.length * LINE_H + ROW_GAP
+    if (underline < bodyBottom) {
+      doc.setDrawColor(...LIGHT_GRAY)
+      doc.setLineWidth(0.2)
+      doc.setLineDashPattern([0.7, 0.7], 0)
+      doc.line(contentX + 2, underline, amtX - 3, underline)
+      doc.setLineDashPattern([], 0)
+    }
   })
 
   // TOTAL + words
@@ -535,7 +771,7 @@ export async function buildJournalVoucherPdf(
     // Neutral journals: still landscape, titled as Journal via debit layout
     // with kind overridden in PDF title when needed.
     return buildDebitCreditVoucherPdf(entry, landscapeKind, template, {
-      forceTitle: 'JOURNAL VOUCHER',
+      forceTitle: voucherTitle(entry).toUpperCase(),
     })
   }
   return buildDebitCreditVoucherPdf(entry, kind, template)
@@ -555,7 +791,8 @@ export async function loadJournalVoucherTemplate(
       await fetcher(),
       defaultJournalVoucherTemplate(),
     )
-  } catch {
+  } catch (error) {
+    if (options?.force) throw error
     cachedJournalTemplate = defaultJournalVoucherTemplate()
   }
   return cachedJournalTemplate
@@ -574,13 +811,14 @@ export async function downloadJournalVoucher(
   doc.save(`${entry.entryNumber}-${kind}-voucher.pdf`)
 }
 
-export async function previewJournalVoucher(
+export async function journalVoucherPreviewUrl(
   entry: JournalEntry,
   template?: BalanceSheetTemplate | null,
-): Promise<void> {
+): Promise<string> {
   const doc = await buildJournalVoucherPdf(entry, template)
   const blob = doc.output('blob')
-  const url = URL.createObjectURL(blob)
-  window.open(url, '_blank', 'noopener,noreferrer')
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  if (!(blob instanceof Blob) || blob.size < 500) {
+    throw new Error('The voucher PDF was empty. Save the template and try again.')
+  }
+  return URL.createObjectURL(blob)
 }

@@ -8,10 +8,10 @@ export enum TreasuryKind {
 export const ALL_TREASURY_KINDS = Object.values(TreasuryKind);
 
 export const TREASURY_PARENT_CODE: Record<TreasuryKind, string> = {
-  [TreasuryKind.COMMERCIAL_BANK]: '1112',
-  [TreasuryKind.CASH]: '1111',
-  [TreasuryKind.PETTY_CASH]: '1111',
-  [TreasuryKind.MOBILE_BANKING]: '1114',
+  [TreasuryKind.COMMERCIAL_BANK]: '1120',
+  [TreasuryKind.CASH]: '1110',
+  [TreasuryKind.PETTY_CASH]: '1110',
+  [TreasuryKind.MOBILE_BANKING]: '1110',
 };
 
 export function isCashLike(kind: TreasuryKind): boolean {

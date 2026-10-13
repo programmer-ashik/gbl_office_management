@@ -54,7 +54,7 @@ export type FooterConfig = {
 };
 
 export type VoucherConfig = {
-  theme: 'yellow' | 'blue' | 'emerald' | 'crimson' | 'charcoal';
+  theme: 'bw' | 'color';
   companySubtitle: string;
   currencyLabel: string;
   majorUnitLabel: string;
@@ -77,6 +77,9 @@ export type PublicReportTemplate = {
   updatedBy: string | null;
   updatedAt: string | null;
 };
+
+export const DEFAULT_COMPANY_ADDRESS =
+  'Plot No# B/49, Block No# E, Zakir Hossain Road, Mohammadpur, Dhaka-1207.';
 
 const defaultHeader = (
   companyName: string,
@@ -102,7 +105,7 @@ const defaultFooter = (): FooterConfig => ({
 
 export function defaultVoucherConfig(): VoucherConfig {
   return {
-    theme: 'yellow',
+    theme: 'color',
     companySubtitle: '',
     currencyLabel: 'Amount in BDT',
     majorUnitLabel: 'TAKA',
@@ -194,7 +197,10 @@ export function defaultJournalVoucherTemplate(): PublicReportTemplate {
     templateName: 'Default Journal Voucher',
     reportType: REPORT_TYPE_JOURNAL_VOUCHER,
     companyLogoUrl: null,
-    headerConfig: defaultHeader('GBL Enterprise', 'Journal Voucher'),
+    headerConfig: {
+      ...defaultHeader('GBL Enterprise', 'Journal Voucher'),
+      address: DEFAULT_COMPANY_ADDRESS,
+    },
     layoutStructure: [
       {
         id: 'logo',
@@ -326,7 +332,8 @@ export function hydrateTemplate(
       reportTitle:
         partial.headerConfig?.reportTitle?.trim() ||
         base.headerConfig.reportTitle,
-      address: partial.headerConfig?.address ?? base.headerConfig.address,
+      address:
+        partial.headerConfig?.address?.trim() || base.headerConfig.address,
       taxId: partial.headerConfig?.taxId ?? base.headerConfig.taxId,
       showDate: partial.headerConfig?.showDate ?? base.headerConfig.showDate,
       showStatusBadge:
@@ -342,6 +349,11 @@ export function hydrateTemplate(
       ...defaultVoucherConfig(),
       ...(base.voucherConfig ?? {}),
       ...(partial.voucherConfig ?? {}),
+      theme: ['bw', 'charcoal'].includes(
+        String(partial.voucherConfig?.theme ?? base.voucherConfig?.theme ?? ''),
+      )
+        ? 'bw'
+        : 'color',
       signatoryTitles:
         partial.voucherConfig?.signatoryTitles?.length
           ? partial.voucherConfig.signatoryTitles

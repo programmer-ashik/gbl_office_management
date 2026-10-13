@@ -2,6 +2,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { resolveAssetUrl } from "../types/report-template";
 import {
   formatInvoiceMoney,
+  invoiceSummaryRows,
   invoiceTotals,
   lineTotal,
   type InvoiceLine,
@@ -37,12 +38,12 @@ export function ProjectInvoiceDocument({
   const totals = invoiceTotals(draft);
   const logo = resolveAssetUrl(draft.logoUrl);
 
-  function startDrag(boxId: string, event: ReactMouseEvent<HTMLDivElement>) {
+  function startDrag(boxId: string, event: ReactMouseEvent<HTMLElement>) {
     if (!editable) return;
     event.preventDefault();
     event.stopPropagation();
     onSelect(boxId);
-    const sheet = event.currentTarget.parentElement;
+    const sheet = event.currentTarget.closest(".inv-sheet");
     if (!sheet) return;
     const rect = sheet.getBoundingClientRect();
     const startX = event.clientX;
@@ -75,6 +76,21 @@ export function ProjectInvoiceDocument({
       onClick={() => onSelect(null)}
       id='project-invoice-sheet'
     >
+      <div className='inv-doc-title'>
+        {editable ? (
+          <input
+            className='inv-inline-input'
+            value={draft.documentTitle}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => onPatchDraft({ documentTitle: e.target.value })}
+            placeholder='INVOICE / BILL'
+            aria-label='Document title'
+          />
+        ) : (
+          <h2>{draft.documentTitle}</h2>
+        )}
+      </div>
+
       <header className='inv-header'>
         <div className='inv-brand'>
           {logo ? (
@@ -305,47 +321,33 @@ export function ProjectInvoiceDocument({
           <label className='inv-percent-mode'>
             Percentage calculation
             <select
-              value={draft.percentMode === 'reverse' ? 'reverse' : 'flat'}
+              value={draft.percentMode === 'flat' ? 'flat' : 'reverse'}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) =>
                 onPatchDraft({
-                  percentMode:
-                    e.target.value === 'reverse' ? 'reverse' : 'flat',
+                  percentMode: e.target.value === 'flat' ? 'flat' : 'reverse',
                 })
               }
             >
-              <option value='flat'>Flat percentage (base × rate%)</option>
               <option value='reverse'>
-                Reverse percentage (base × rate ÷ (100 + rate))
+                Reverse percentage (gross-up: amount ÷ ((100 − rate) ÷ 100))
+              </option>
+              <option value='flat'>
+                Flat percentage (VAT added on top: amount × rate%)
               </option>
             </select>
           </label>
         ) : null}
         <div className='inv-summary-rows'>
-          <div>
-            <span>SUBTOTAL</span>
-            <strong>
-              {formatInvoiceMoney(totals.subtotal, draft.currencyCode)}
-            </strong>
-          </div>
-          <div>
-            <span>
-              Tax (VAT @ {draft.taxRate}%
-              {draft.percentMode === 'reverse' ? ', reverse' : ''})
-            </span>
-            <strong>
-              {formatInvoiceMoney(totals.tax, draft.currencyCode)}
-            </strong>
-          </div>
-          <div>
-            <span>
-              Discount ({draft.discountRate}%
-              {draft.percentMode === 'reverse' ? ', reverse' : ''})
-            </span>
-            <strong>
-              -{formatInvoiceMoney(totals.discount, draft.currencyCode)}
-            </strong>
-          </div>
+          {invoiceSummaryRows(draft).map((row) => (
+            <div key={row.label}>
+              <span>{row.label}</span>
+              <strong>
+                {row.negative ? '-' : ''}
+                {formatInvoiceMoney(row.amount, draft.currencyCode)}
+              </strong>
+            </div>
+          ))}
           <div className='inv-grand'>
             <span>Grand Total</span>
             <strong>
@@ -413,6 +415,7 @@ export function ProjectInvoiceDocument({
       {draft.textBoxes.map((box) => (
         <div
           key={box.id}
+          data-textbox-id={box.id}
           className={`inv-textbox${selectedId === box.id ? " is-selected" : ""}`}
           style={{
             left: `${box.x}%`,
@@ -423,22 +426,32 @@ export function ProjectInvoiceDocument({
             color: box.color,
             textAlign: box.align,
           }}
-          onMouseDown={(e) => startDrag(box.id, e)}
           onClick={(e) => {
             e.stopPropagation();
             onSelect(box.id);
           }}
         >
           {editable ? (
-            <textarea
-              value={box.text}
-              onChange={(e) =>
-                onChangeTextBox(box.id, { text: e.target.value })
-              }
-              rows={2}
-            />
+            <>
+              <span
+                className='inv-textbox-handle'
+                title='Drag to move'
+                onMouseDown={(e) => startDrag(box.id, e)}
+              >
+                ⠿ Move
+              </span>
+              <textarea
+                value={box.text}
+                placeholder='Type here…'
+                onFocus={() => onSelect(box.id)}
+                onChange={(e) =>
+                  onChangeTextBox(box.id, { text: e.target.value })
+                }
+                rows={2}
+              />
+            </>
           ) : (
-            box.text
+            <span className='inv-textbox-text'>{box.text}</span>
           )}
         </div>
       ))}

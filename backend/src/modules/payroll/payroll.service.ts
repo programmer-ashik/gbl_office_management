@@ -11,6 +11,9 @@ import type { JournalService } from '../accounting/journal.service';
 import { AdvanceModel } from '../advances/advance.model';
 import type { BankingService } from '../banking/banking.service';
 import type { ProjectsService } from '../projects/projects.service';
+import { EmployeeModel } from '../employees/employee.model';
+import { findEmployeeOrFail } from '../employees/employee-records';
+import { UserModel } from '../users/user.model';
 import type { UsersService } from '../users/users.service';
 import {
   ADMIN_SALARY_CODE,
@@ -23,6 +26,7 @@ import {
 import {
   buildPayrollSlipsPdf,
   buildSalarySlipPdf,
+  type SlipEarnings,
 } from './salary-slip-pdf';
 import type {
   CreateSalaryFacilityDto,
@@ -31,13 +35,15 @@ import type {
   GeneratePayrollDto,
   PostPayrollDto,
   PreviewSalaryBreakdownDto,
+  ReopenPayrollDto,
+  SetPayrollAdvanceDeductionsDto,
   UpdatePayrollSettingsDto,
   UpsertSalaryStructureDto,
 } from './dto/payroll.dto';
 import { AccountType } from '../../common/enums/account-type.enum';
 import { AccountModel } from '../accounting/account.model';
 import { SystemAccountCode } from '../accounting/system-account-codes';
-import { JournalEntityType } from '../accounting/journal.enums';
+import { JournalEntityType, JournalStatus } from '../accounting/journal.enums';
 import {
   SalaryFacilityKind,
   SalaryFacilityModel,
@@ -61,6 +67,7 @@ import {
   breakdownToLegacyComponents,
   calculateSalaryBreakdown,
   DEFAULT_PAYROLL_RULE_CONFIG,
+  payrollEarningsFromStructure,
   type PayrollRuleConfig,
   type SalaryBreakdownResult,
 } from './salary-breakdown';
@@ -149,6 +156,14 @@ export type PublicPayrollRun = {
   journalNumber: string | null;
   disbursedAt: string | null;
   treasuryAccountCode: string | null;
+  reopenHistory: Array<{
+    reopenedAt: string;
+    fromStatus: string;
+    accrualJournalNumber: string | null;
+    journalNumber: string | null;
+    reversalJournalNumbers: string[];
+    reason: string | null;
+  }>;
   lines: Array<{
     employeeId: string;
     employeeName: string;
@@ -184,6 +199,43 @@ export type PublicPayrollRun = {
   }>;
 };
 
+/** Run header totals; the advance total includes salary-facility installments. */
+function runTotals(
+  lines: Array<{
+    grossMinor: number;
+    structuralDeductionMinor: number;
+    totalAdvanceDeductionMinor: number;
+    totalFacilityDeductionMinor?: number;
+    netPayMinor: number;
+  }>,
+) {
+  const sum = (pick: (row: (typeof lines)[number]) => number) =>
+    lines.reduce((total, row) => total + pick(row), 0);
+  return {
+    totalGrossMinor: sum((row) => row.grossMinor),
+    totalStructuralDeductionMinor: sum((row) => row.structuralDeductionMinor),
+    totalAdvanceDeductionMinor: sum(
+      (row) => row.totalAdvanceDeductionMinor + (row.totalFacilityDeductionMinor ?? 0),
+    ),
+    totalNetPayMinor: sum((row) => row.netPayMinor),
+  };
+}
+
+export type PayrollOpenAdvance = {
+  employeeId: string;
+  advanceId: string;
+  advanceNumber: string;
+  purpose: string;
+  projectCode: string | null;
+  projectName: string | null;
+  disbursedAt: string | null;
+  disbursed: number;
+  recovered: number;
+  outstanding: number;
+  /** Amount this run recovers from salary (0 when not chosen). */
+  deducting: number;
+};
+
 export class PayrollService {
   constructor(
     private readonly journalService: JournalService,
@@ -194,15 +246,22 @@ export class PayrollService {
 
   async listEmployees(actor: AuthenticatedUser) {
     this.assertFinance(actor);
-    const users = await this.usersService.findAll(500);
-    return users
-      .filter((row) => row.isActive)
-      .map((row) => ({
-        id: row.id,
-        name: `${row.firstName} ${row.lastName}`,
-        email: row.email,
-        role: row.role,
-      }));
+    const rows = await EmployeeModel.find({ isActive: true })
+      .sort({ firstName: 1, lastName: 1 })
+      .limit(1000)
+      .exec();
+    const users = await UserModel.find({
+      _id: { $in: rows.map((row) => row.userId).filter(Boolean) },
+    }).exec();
+    return rows.map((row) => {
+      const user = users.find((item) => row.userId && item._id.equals(row.userId));
+      return {
+        id: row._id.toString(),
+        name: `${row.firstName} ${row.lastName}`.trim(),
+        email: row.email || user?.email || '',
+        role: user?.role ?? null,
+      };
+    });
   }
 
   async getPayrollSettings(
@@ -259,7 +318,7 @@ export class PayrollService {
     actor: AuthenticatedUser,
   ): Promise<PublicSalaryStructure> {
     this.assertFinance(actor);
-    const employee = await this.usersService.findByIdOrFail(dto.employeeId);
+    const employee = await findEmployeeOrFail(dto.employeeId);
     const employeeName = `${employee.firstName} ${employee.lastName}`;
     const config = await this.loadPayrollSettings();
 
@@ -441,7 +500,7 @@ export class PayrollService {
     actor: AuthenticatedUser,
   ): Promise<PublicTimeLog> {
     this.assertFinance(actor);
-    const employee = await this.usersService.findByIdOrFail(dto.employeeId);
+    const employee = await findEmployeeOrFail(dto.employeeId);
     const kind = dto.kind === 'administrative' ? 'administrative' : 'project';
     const quantityMilli = toMilliQty(dto.quantity);
 
@@ -498,7 +557,7 @@ export class PayrollService {
     actor: AuthenticatedUser,
   ): Promise<PublicSalaryFacility> {
     this.assertFinance(actor);
-    const employee = await this.usersService.findByIdOrFail(dto.employeeId);
+    const employee = await findEmployeeOrFail(dto.employeeId);
     if (!employee.isActive) {
       throw badRequest('Employee is inactive');
     }
@@ -581,6 +640,170 @@ export class PayrollService {
     return this.toPublicPayrollRun(await this.findRunOrFail(id));
   }
 
+  /** Disbursed project advances of the run's employees, with this run's recovery. */
+  async listOpenAdvances(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<PayrollOpenAdvance[]> {
+    this.assertFinance(actor);
+    const run = await this.findRunOrFail(id);
+    const deducting = new Map<string, number>();
+    for (const line of run.lines) {
+      for (const row of line.advanceDeductions) {
+        const key = row.advanceId.toString();
+        deducting.set(key, (deducting.get(key) ?? 0) + row.amountMinor);
+      }
+    }
+    const advances = await AdvanceModel.find({
+      $or: [
+        {
+          employeeId: { $in: run.lines.map((line) => line.employeeId) },
+          status: AdvanceStatus.DISBURSED,
+        },
+        { _id: { $in: [...deducting.keys()].map((key) => new Types.ObjectId(key)) } },
+      ],
+    })
+      .sort({ disbursedAt: 1, advanceNumber: 1 })
+      .exec();
+    return advances.map((row) => {
+      const disbursedMinor = row.disbursedMinor ?? 0;
+      const recoveredMinor = row.payrollDeductedMinor ?? 0;
+      return {
+        employeeId: row.employeeId.toString(),
+        advanceId: row._id.toString(),
+        advanceNumber: row.advanceNumber,
+        purpose: row.purpose,
+        projectCode: row.projectCode ?? null,
+        projectName: row.projectName ?? null,
+        disbursedAt: row.disbursedAt ? row.disbursedAt.toISOString() : null,
+        disbursed: fromMinorUnits(disbursedMinor),
+        recovered: fromMinorUnits(recoveredMinor),
+        outstanding: fromMinorUnits(Math.max(0, disbursedMinor - recoveredMinor)),
+        deducting: fromMinorUnits(deducting.get(row._id.toString()) ?? 0),
+      };
+    });
+  }
+
+  /** Manual project-advance recovery for one employee on a draft run. */
+  async setAdvanceDeductions(
+    id: string,
+    dto: SetPayrollAdvanceDeductionsDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicPayrollRun> {
+    this.assertFinance(actor);
+    const run = await this.findRunOrFail(id);
+    if (run.status !== PayrollRunStatus.DRAFT) {
+      throw badRequest(
+        'Advance deductions can only be changed before the payroll is posted',
+      );
+    }
+    const line = run.lines.find(
+      (row) => row.employeeId.toString() === dto.employeeId,
+    );
+    if (!line) {
+      throw notFound('Employee is not on this payroll run');
+    }
+
+    const amountByAdvance = new Map<string, number>();
+    for (const row of dto.deductions ?? []) {
+      const amountMinor = toMinorUnits(row.amount);
+      if (amountMinor <= 0) continue;
+      amountByAdvance.set(
+        row.advanceId,
+        (amountByAdvance.get(row.advanceId) ?? 0) + amountMinor,
+      );
+    }
+
+    const advances = amountByAdvance.size
+      ? await AdvanceModel.find({
+          _id: {
+            $in: [...amountByAdvance.keys()].map((key) => new Types.ObjectId(key)),
+          },
+        }).exec()
+      : [];
+    const byId = new Map(advances.map((row) => [row._id.toString(), row]));
+    const deductions = [];
+    for (const [advanceId, amountMinor] of amountByAdvance) {
+      const advance = byId.get(advanceId);
+      if (!advance || advance.employeeId.toString() !== dto.employeeId) {
+        throw badRequest('Advance does not belong to this employee');
+      }
+      if (advance.status !== AdvanceStatus.DISBURSED) {
+        throw badRequest(
+          `${advance.advanceNumber} is not open — only a disbursed advance can be recovered from salary`,
+        );
+      }
+      const outstandingMinor =
+        (advance.disbursedMinor ?? 0) - (advance.payrollDeductedMinor ?? 0);
+      if (amountMinor > outstandingMinor) {
+        throw badRequest(
+          `${advance.advanceNumber} has only ${fromMinorUnits(Math.max(0, outstandingMinor)).toFixed(2)} left to recover`,
+        );
+      }
+      deductions.push({
+        advanceId: advance._id,
+        advanceNumber: advance.advanceNumber,
+        ...(advance.projectId ? { projectId: advance.projectId } : {}),
+        amountMinor,
+      });
+    }
+
+    const totalMinor = deductions.reduce((sum, row) => sum + row.amountMinor, 0);
+    const availableMinor =
+      line.grossMinor -
+      line.structuralDeductionMinor -
+      (line.totalFacilityDeductionMinor ?? 0);
+    if (totalMinor > availableMinor) {
+      throw badRequest(
+        `Advance recovery ${fromMinorUnits(totalMinor).toFixed(2)} is more than ${line.employeeName}'s salary left after PF, tax and installments (${fromMinorUnits(Math.max(0, availableMinor)).toFixed(2)})`,
+      );
+    }
+
+    line.advanceDeductions = deductions;
+    line.totalAdvanceDeductionMinor = totalMinor;
+    line.netPayMinor = availableMinor - totalMinor;
+    run.markModified('lines');
+
+    run.set(runTotals(run.lines));
+    await run.save();
+    return this.toPublicPayrollRun(run);
+  }
+
+  /** A draft can sit while advances get settled by vouchers; re-check before posting. */
+  private async assertAdvanceDeductionsOpen(run: PayrollRunDocument): Promise<void> {
+    const totals = new Map<string, { amountMinor: number; employeeName: string }>();
+    for (const line of run.lines) {
+      for (const row of line.advanceDeductions) {
+        const key = row.advanceId.toString();
+        const current = totals.get(key);
+        totals.set(key, {
+          amountMinor: (current?.amountMinor ?? 0) + row.amountMinor,
+          employeeName: line.employeeName,
+        });
+      }
+    }
+    if (!totals.size) return;
+    const advances = await AdvanceModel.find({
+      _id: { $in: [...totals.keys()].map((key) => new Types.ObjectId(key)) },
+    }).exec();
+    const byId = new Map(advances.map((row) => [row._id.toString(), row]));
+    for (const [advanceId, { amountMinor, employeeName }] of totals) {
+      const advance = byId.get(advanceId);
+      const outstandingMinor = advance
+        ? (advance.disbursedMinor ?? 0) - (advance.payrollDeductedMinor ?? 0)
+        : 0;
+      if (
+        !advance ||
+        advance.status !== AdvanceStatus.DISBURSED ||
+        amountMinor > outstandingMinor
+      ) {
+        throw badRequest(
+          `${advance?.advanceNumber ?? 'An advance'} is no longer open for salary recovery. Adjust ${employeeName}'s advance deduction, then post again.`,
+        );
+      }
+    }
+  }
+
   async generateRun(
     dto: GeneratePayrollDto,
     actor: AuthenticatedUser,
@@ -594,45 +817,219 @@ export class PayrollService {
       throw badRequest('Payroll for this period already exists');
     }
 
-    const structures = await SalaryStructureModel.find({ isActive: true }).exec();
-    if (structures.length === 0) {
-      throw badRequest('No active salary structures found');
-    }
-
-    const lines = [];
-    for (const structure of structures) {
-      lines.push(await this.buildPayrollLine(structure, dto.periodYear, dto.periodMonth));
-    }
-
-    const totalGrossMinor = lines.reduce((sum, row) => sum + row.grossMinor, 0);
-    const totalStructuralDeductionMinor = lines.reduce(
-      (sum, row) => sum + row.structuralDeductionMinor,
-      0,
-    );
-    const totalAdvanceDeductionMinor = lines.reduce(
-      (sum, row) => sum + row.totalAdvanceDeductionMinor,
-      0,
-    );
-    const totalFacilityDeductionMinor = lines.reduce(
-      (sum, row) => sum + (row.totalFacilityDeductionMinor ?? 0),
-      0,
-    );
-    const totalNetPayMinor = lines.reduce((sum, row) => sum + row.netPayMinor, 0);
-
+    const lines = await this.buildRunLines(dto.periodYear, dto.periodMonth);
     const created = await PayrollRunModel.create({
       sheetNumber: await this.nextNumber('payroll', 'PAY'),
       status: PayrollRunStatus.DRAFT,
       periodYear: dto.periodYear,
       periodMonth: dto.periodMonth,
       lines,
-      totalGrossMinor,
-      totalStructuralDeductionMinor,
-      totalAdvanceDeductionMinor:
-        totalAdvanceDeductionMinor + totalFacilityDeductionMinor,
-      totalNetPayMinor,
+      ...runTotals(lines),
       createdBy: new Types.ObjectId(actor.userId),
     });
     return this.toPublicPayrollRun(created);
+  }
+
+  private async buildRunLines(periodYear: number, periodMonth: number) {
+    const structures = await SalaryStructureModel.find({ isActive: true }).exec();
+    if (structures.length === 0) {
+      throw badRequest('No active salary structures found');
+    }
+    const lines = [];
+    for (const structure of structures) {
+      lines.push(await this.buildPayrollLine(structure, periodYear, periodMonth));
+    }
+    return lines;
+  }
+
+  /**
+   * Rebuild a draft from the current salary structures, time logs and
+   * installments — picks up an employee added (or removed) since generating.
+   * Manual advance recovery is kept where it is still valid.
+   */
+  async regenerateRun(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<PublicPayrollRun> {
+    this.assertFinance(actor);
+    const run = await this.findRunOrFail(id);
+    if (run.status !== PayrollRunStatus.DRAFT) {
+      throw badRequest('Only a draft payroll can be refreshed — reopen it first');
+    }
+    const kept = new Map(
+      run.lines.map((line) => [
+        line.employeeId.toString(),
+        line.advanceDeductions.map((row) => ({
+          advanceId: row.advanceId,
+          amountMinor: row.amountMinor,
+        })),
+      ]),
+    );
+
+    const lines = await this.buildRunLines(run.periodYear, run.periodMonth);
+    const advanceIds = [...kept.values()].flat().map((row) => row.advanceId);
+    const advances = advanceIds.length
+      ? await AdvanceModel.find({
+          _id: { $in: advanceIds },
+          status: AdvanceStatus.DISBURSED,
+        }).exec()
+      : [];
+    const openById = new Map(advances.map((row) => [row._id.toString(), row]));
+    for (const line of lines) {
+      const available =
+        line.grossMinor - line.structuralDeductionMinor - line.totalFacilityDeductionMinor;
+      let total = 0;
+      const deductions = [];
+      for (const row of kept.get(line.employeeId.toString()) ?? []) {
+        const advance = openById.get(row.advanceId.toString());
+        if (!advance) continue;
+        const outstanding =
+          (advance.disbursedMinor ?? 0) - (advance.payrollDeductedMinor ?? 0);
+        if (row.amountMinor > outstanding || total + row.amountMinor > available) continue;
+        total += row.amountMinor;
+        deductions.push({
+          advanceId: advance._id,
+          advanceNumber: advance.advanceNumber,
+          ...(advance.projectId ? { projectId: advance.projectId } : {}),
+          amountMinor: row.amountMinor,
+        });
+      }
+      line.advanceDeductions = deductions;
+      line.totalAdvanceDeductionMinor = total;
+      line.netPayMinor = available - total;
+    }
+
+    run.set('lines', lines);
+    run.set(runTotals(lines));
+    await run.save();
+    return this.toPublicPayrollRun(run);
+  }
+
+  /**
+   * Back a posted / disbursed run out to draft: reverse its journals (they
+   * stay in the books with their reversals) and undo the advance and
+   * installment recoveries it applied.
+   */
+  async reopenRun(
+    id: string,
+    dto: ReopenPayrollDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicPayrollRun> {
+    this.assertAdmin(actor);
+    const run = await this.findRunOrFail(id);
+    if (run.status === PayrollRunStatus.DRAFT) {
+      throw badRequest('This payroll is already a draft');
+    }
+    await this.unwindPostedRun(run, actor, dto.reason);
+    await run.save();
+    return this.toPublicPayrollRun(run);
+  }
+
+  async deleteRun(
+    id: string,
+    dto: ReopenPayrollDto,
+    actor: AuthenticatedUser,
+  ): Promise<{ id: string; sheetNumber: string; reversalJournalNumbers: string[] }> {
+    this.assertFinance(actor);
+    const run = await this.findRunOrFail(id);
+    let reversalJournalNumbers: string[] = [];
+    if (run.status !== PayrollRunStatus.DRAFT) {
+      this.assertAdmin(actor);
+      reversalJournalNumbers = await this.unwindPostedRun(run, actor, dto.reason);
+    }
+    await PayrollRunModel.deleteOne({ _id: run._id }).exec();
+    return { id: run._id.toString(), sheetNumber: run.sheetNumber, reversalJournalNumbers };
+  }
+
+  private async unwindPostedRun(
+    run: PayrollRunDocument,
+    actor: AuthenticatedUser,
+    reason?: string,
+  ): Promise<string[]> {
+    const advanceAmounts = new Map<string, number>();
+    const facilityAmounts = new Map<string, number>();
+    for (const line of run.lines) {
+      for (const row of line.advanceDeductions) {
+        const key = row.advanceId.toString();
+        advanceAmounts.set(key, (advanceAmounts.get(key) ?? 0) + row.amountMinor);
+      }
+      for (const row of line.facilityDeductions ?? []) {
+        const key = row.facilityId.toString();
+        facilityAmounts.set(key, (facilityAmounts.get(key) ?? 0) + row.amountMinor);
+      }
+    }
+    const advances = advanceAmounts.size
+      ? await AdvanceModel.find({
+          _id: { $in: [...advanceAmounts.keys()].map((key) => new Types.ObjectId(key)) },
+        }).exec()
+      : [];
+    for (const advance of advances) {
+      if (advance.status === AdvanceStatus.SETTLED && advance.settlementJournalId) {
+        throw badRequest(
+          `${advance.advanceNumber} was settled by vouchers after this payroll recovered part of it, so this payroll cannot be reopened`,
+        );
+      }
+    }
+
+    const reversalJournalNumbers: string[] = [];
+    for (const journalId of [run.journalId, run.accrualJournalId]) {
+      if (!journalId) continue;
+      const journal = await this.journalService.findByIdOrFail(journalId.toString());
+      if (journal.status !== JournalStatus.POSTED) continue;
+      const reversal = await this.journalService.reverse(journal._id.toString(), actor.userId);
+      reversalJournalNumbers.push(reversal.entryNumber);
+    }
+
+    for (const advance of advances) {
+      const amount = advanceAmounts.get(advance._id.toString()) ?? 0;
+      advance.payrollDeductedMinor = Math.max(0, (advance.payrollDeductedMinor ?? 0) - amount);
+      if (advance.status === AdvanceStatus.SETTLED) {
+        advance.status = AdvanceStatus.DISBURSED;
+        advance.spentMinor = undefined;
+        advance.settledAt = undefined;
+        advance.settledBy = undefined;
+      }
+      await advance.save();
+    }
+    const facilities = facilityAmounts.size
+      ? await SalaryFacilityModel.find({
+          _id: { $in: [...facilityAmounts.keys()].map((key) => new Types.ObjectId(key)) },
+        }).exec()
+      : [];
+    for (const facility of facilities) {
+      const amount = facilityAmounts.get(facility._id.toString()) ?? 0;
+      facility.repaidMinor = Math.max(0, (facility.repaidMinor ?? 0) - amount);
+      if (facility.status === SalaryFacilityStatus.SETTLED && facility.repaidMinor < facility.principalMinor) {
+        facility.status = SalaryFacilityStatus.ACTIVE;
+        facility.settledAt = undefined;
+      }
+      await facility.save();
+    }
+
+    run.reopenHistory = [
+      ...(run.reopenHistory ?? []),
+      {
+        reopenedAt: new Date(),
+        reopenedBy: new Types.ObjectId(actor.userId),
+        fromStatus: run.status,
+        accrualJournalNumber: run.accrualJournalNumber,
+        journalNumber: run.journalNumber,
+        reversalJournalNumbers,
+        reason: reason?.trim() || undefined,
+      },
+    ];
+    run.status = PayrollRunStatus.DRAFT;
+    run.accrualJournalId = undefined;
+    run.accrualJournalNumber = undefined;
+    run.postedAt = undefined;
+    run.postedBy = undefined;
+    run.treasuryId = undefined;
+    run.treasuryAccountCode = undefined;
+    run.journalId = undefined;
+    run.journalNumber = undefined;
+    run.disbursedAt = undefined;
+    run.disbursedBy = undefined;
+    return reversalJournalNumbers;
   }
 
   /** Step 1 — Post accrual journal (draft → posted). */
@@ -646,6 +1043,7 @@ export class PayrollService {
     if (run.status !== PayrollRunStatus.DRAFT) {
       throw badRequest('Only draft payroll runs can be posted');
     }
+    await this.assertAdvanceDeductionsOpen(run);
 
     const adminSalaryAccountCode = await this.resolveSalaryExpenseAccount(
       dto?.salaryExpenseAccountCode,
@@ -666,7 +1064,7 @@ export class PayrollService {
         advanceDeductions: line.advanceDeductions.map((row) => ({
           advanceId: row.advanceId.toString(),
           advanceNumber: row.advanceNumber,
-          projectId: row.projectId.toString(),
+          projectId: row.projectId?.toString(),
           amountMinor: row.amountMinor,
         })),
         facilityDeductions: (line.facilityDeductions ?? []).map((row) => ({
@@ -799,10 +1197,46 @@ export class PayrollService {
     if (run.status !== PayrollRunStatus.DISBURSED) {
       throw badRequest('Salary slips are available after disbursement');
     }
+    const earnings = await this.slipEarnings(run);
     if (employeeId) {
-      return buildSalarySlipPdf(run, employeeId);
+      return buildSalarySlipPdf(run, employeeId, earnings);
     }
-    return buildPayrollSlipsPdf(run);
+    return buildPayrollSlipsPdf(run, earnings);
+  }
+
+  /**
+   * Earnings split per employee. Older runs did not store it, so it is taken from
+   * the employee's salary structure, but only while that structure still matches
+   * the basic and allowances that were paid.
+   */
+  private async slipEarnings(run: PayrollRunDocument): Promise<SlipEarnings> {
+    const result: SlipEarnings = new Map();
+    const missing = run.lines.filter((line) => !line.earnings);
+    for (const line of run.lines) {
+      if (line.earnings) result.set(line.employeeId.toString(), line.earnings);
+    }
+    if (!missing.length) return result;
+    const structures = await SalaryStructureModel.find({
+      employeeId: { $in: missing.map((line) => line.employeeId) },
+    })
+      .sort({ isActive: 1 })
+      .exec();
+    const byEmployee = new Map(
+      structures.map((row) => [row.employeeId.toString(), row]),
+    );
+    for (const line of missing) {
+      const structure = byEmployee.get(line.employeeId.toString());
+      const allowancesMinor =
+        structure?.allowances.reduce((sum, row) => sum + row.amountMinor, 0) ?? -1;
+      if (
+        structure &&
+        structure.basicMinor === line.basicMinor &&
+        allowancesMinor === line.allowancesMinor
+      ) {
+        result.set(line.employeeId.toString(), payrollEarningsFromStructure(structure));
+      }
+    }
+    return result;
   }
 
   private async buildPayrollLine(
@@ -852,25 +1286,12 @@ export class PayrollService {
       })),
     });
 
-    const advances = await AdvanceModel.find({
-      employeeId: structure.employeeId,
-      status: AdvanceStatus.DISBURSED,
-    })
-      .sort({ disbursedAt: 1 })
-      .exec();
-
+    // Project advances are settled by vouchers; salary recovery is chosen
+    // per run in the draft (see setAdvanceDeductions), never automatic.
     const advanceProposal = proposeAdvanceDeductions({
       grossMinor,
       structuralDeductionMinor,
-      advances: advances
-        .map((row) => ({
-          advanceId: row._id.toString(),
-          advanceNumber: row.advanceNumber,
-          projectId: row.projectId.toString(),
-          outstandingMinor:
-            (row.disbursedMinor ?? 0) - (row.payrollDeductedMinor ?? 0),
-        }))
-        .filter((row) => row.outstandingMinor > 0),
+      advances: [],
     });
 
     const facilities = await SalaryFacilityModel.find({
@@ -898,6 +1319,7 @@ export class PayrollService {
       employeeName: structure.employeeName,
       basicMinor: structure.basicMinor,
       allowancesMinor,
+      earnings: payrollEarningsFromStructure(structure),
       structuralDeductionMinor,
       providentFundMinor,
       taxDeductionMinor,
@@ -906,7 +1328,9 @@ export class PayrollService {
       advanceDeductions: advanceProposal.deductions.map((row) => ({
         advanceId: new Types.ObjectId(row.advanceId),
         advanceNumber: row.advanceNumber,
-        projectId: new Types.ObjectId(row.projectId),
+        ...(row.projectId
+          ? { projectId: new Types.ObjectId(row.projectId) }
+          : {}),
         amountMinor: row.amountMinor,
       })),
       facilityDeductions: facilityProposal.deductions.map((row) => ({
@@ -1071,6 +1495,14 @@ export class PayrollService {
       journalNumber: row.journalNumber ?? null,
       disbursedAt: row.disbursedAt ? row.disbursedAt.toISOString() : null,
       treasuryAccountCode: row.treasuryAccountCode ?? null,
+      reopenHistory: (row.reopenHistory ?? []).map((item) => ({
+        reopenedAt: item.reopenedAt.toISOString(),
+        fromStatus: item.fromStatus,
+        accrualJournalNumber: item.accrualJournalNumber ?? null,
+        journalNumber: item.journalNumber ?? null,
+        reversalJournalNumbers: item.reversalJournalNumbers ?? [],
+        reason: item.reason ?? null,
+      })),
       lines: row.lines.map((line) => ({
         employeeId: line.employeeId.toString(),
         employeeName: line.employeeName,
@@ -1112,6 +1544,12 @@ export class PayrollService {
   private assertFinance(actor: AuthenticatedUser): void {
     if (!FINANCE_ROLES.has(actor.role)) {
       throw forbidden('Finance role required');
+    }
+  }
+
+  private assertAdmin(actor: AuthenticatedUser): void {
+    if (actor.role !== Role.ADMIN) {
+      throw forbidden('Only an admin can reopen or delete a posted payroll');
     }
   }
 

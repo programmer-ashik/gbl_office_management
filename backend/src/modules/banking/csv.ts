@@ -1,4 +1,5 @@
 import { badRequest } from '../../common/errors/app-error';
+import { isWholeAfterScaling } from '../../common/utils/money';
 import {
   buildStatementParseResult,
   type StatementParseResult,
@@ -23,7 +24,7 @@ export function toSignedMinorUnits(amount: number): number {
   }
   const scaled = amount * 100;
   const minor = Math.round(scaled);
-  if (Math.abs(scaled - minor) > 1e-8) {
+  if (!isWholeAfterScaling(scaled)) {
     throw badRequest('Amount cannot have more than 2 decimal places');
   }
   return minor;

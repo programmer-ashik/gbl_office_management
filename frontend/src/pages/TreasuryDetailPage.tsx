@@ -7,6 +7,7 @@ import { Select } from "../components/ui";
 import { money } from "../types/accounting";
 import {
   TREASURY_KIND_LABEL,
+  treasuryName,
   type BankAdjustKind,
   type Reconciliation,
   type StatementLine,
@@ -374,7 +375,7 @@ export function TreasuryDetailPage() {
       <header className='workspace-header'>
         <div>
           <p className='eyebrow'>{account.glAccountCode}</p>
-          <h1>{account.name}</h1>
+          <h1>{treasuryName(account)}</h1>
           <p className='muted'>
             {TREASURY_KIND_LABEL[account.kind]}
             {account.institution ? ` · ${account.institution}` : ""}

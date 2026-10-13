@@ -1,44 +1,29 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { resolveAssetUrl } from '../types/report-template'
+import {
+  DEFAULT_COMPANY_LOGO_URL,
+  DEFAULT_COMPANY_NAME,
+  resolveAssetUrl,
+} from '../types/report-template'
 import {
   formatInvoiceMoneyForPdf,
+  invoiceSummaryRows,
   invoiceTotals,
   lineTotal,
   type ProjectInvoiceDraft,
 } from '../types/project-invoice'
+import {
+  PDF_SIGNATURE_MAX_PX,
+  fitImageSize,
+  imageFormatFromDataUrl,
+  loadPdfImage,
+  shrinkImageDataUrl,
+} from './pdfImage'
 
 const YELLOW: [number, number, number] = [235, 184, 45]
 const INK: [number, number, number] = [26, 26, 26]
 const MUTED: [number, number, number] = [120, 120, 120]
 const FOOTER_H = 18
-
-async function loadImageDataUrl(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return null
-    const blob = await res.blob()
-    return await new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result || ''))
-      reader.onerror = () => resolve(null)
-      reader.readAsDataURL(blob)
-    })
-  } catch {
-    return null
-  }
-}
-
-function imageFormatFromDataUrl(dataUrl: string): 'PNG' | 'JPEG' | null {
-  if (dataUrl.startsWith('data:image/png')) return 'PNG'
-  if (
-    dataUrl.startsWith('data:image/jpeg') ||
-    dataUrl.startsWith('data:image/jpg')
-  ) {
-    return 'JPEG'
-  }
-  return 'PNG'
-}
 
 function drawColoredNoteFooter(doc: jsPDF, note: string) {
   const pageWidth = doc.internal.pageSize.getWidth()
@@ -67,23 +52,39 @@ export async function downloadProjectInvoicePdf(
   let y = margin
   const totals = invoiceTotals(draft)
 
-  const logoUrl = resolveAssetUrl(draft.logoUrl)
-  if (logoUrl) {
-    const dataUrl = await loadImageDataUrl(logoUrl)
-    const format = dataUrl ? imageFormatFromDataUrl(dataUrl) : null
-    if (dataUrl && format) {
-      try {
-        doc.addImage(dataUrl, format, margin, y, 22, 12)
-      } catch {
-        // ignore
-      }
+  const title = draft.documentTitle?.trim()
+  if (title) {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(18)
+    doc.setTextColor(...INK)
+    doc.text(title.toUpperCase(), pageWidth / 2, y + 4, { align: 'center' })
+    const titleW = doc.getTextWidth(title.toUpperCase())
+    doc.setDrawColor(...YELLOW)
+    doc.setLineWidth(1.2)
+    doc.line(pageWidth / 2 - titleW / 2, y + 7, pageWidth / 2 + titleW / 2, y + 7)
+    y += 14
+  }
+
+  const logoUrl = resolveAssetUrl(draft.logoUrl) ?? DEFAULT_COMPANY_LOGO_URL
+  const logoData =
+    (await loadPdfImage(logoUrl)) ??
+    (logoUrl !== DEFAULT_COMPANY_LOGO_URL
+      ? await loadPdfImage(DEFAULT_COMPANY_LOGO_URL)
+      : null)
+  const logoFormat = logoData ? imageFormatFromDataUrl(logoData) : null
+  if (logoData && logoFormat) {
+    try {
+      const { w, h } = fitImageSize(doc, logoData, 22, 12)
+      doc.addImage(logoData, logoFormat, margin, y, w, h, undefined, 'FAST')
+    } catch {
+      // ignore
     }
   }
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(14)
   doc.setTextColor(...INK)
-  doc.text(draft.companyName, margin + 26, y + 8)
+  doc.text(draft.companyName || DEFAULT_COMPANY_NAME, margin + 26, y + 8)
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
@@ -95,6 +96,21 @@ export async function downloadProjectInvoicePdf(
   ].filter(Boolean)
   doc.text(contact.join('\n') || ' ', pageWidth - margin, y, { align: 'right' })
   y += 22
+
+  const metaY = y
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9)
+  doc.setTextColor(...INK)
+  doc.text(
+    [
+      `No: ${draft.invoiceNumber}`,
+      `Date: ${draft.date.slice(0, 10)}`,
+      `Due: ${draft.dueDate.slice(0, 10)}`,
+    ],
+    pageWidth - margin,
+    metaY,
+    { align: 'right' },
+  )
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
@@ -160,18 +176,10 @@ export async function downloadProjectInvoicePdf(
   }
 
   doc.setTextColor(...INK)
-  drawSummaryRow(
-    'SUBTOTAL',
-    formatInvoiceMoneyForPdf(totals.subtotal, draft.currencyCode),
-  )
-  drawSummaryRow(
-    `Tax (VAT @ ${draft.taxRate}%)`,
-    formatInvoiceMoneyForPdf(totals.tax, draft.currencyCode),
-  )
-  drawSummaryRow(
-    `Discount (${draft.discountRate}%)`,
-    `-${formatInvoiceMoneyForPdf(totals.discount, draft.currencyCode)}`,
-  )
+  for (const row of invoiceSummaryRows(draft)) {
+    const amount = formatInvoiceMoneyForPdf(row.amount, draft.currencyCode)
+    drawSummaryRow(row.label, row.negative ? `-${amount}` : amount)
+  }
 
   y += 1
   doc.setFillColor(...YELLOW)
@@ -230,20 +238,25 @@ export async function downloadProjectInvoicePdf(
   doc.setFontSize(9)
   doc.text(draft.authorizedLabel || 'Authorized Signature', sigX, y)
 
-  if (
-    draft.useDigitalSignature &&
-    draft.digitalSignatureDataUrl &&
-    imageFormatFromDataUrl(draft.digitalSignatureDataUrl)
-  ) {
-    const format = imageFormatFromDataUrl(draft.digitalSignatureDataUrl)!
+  const signature =
+    draft.useDigitalSignature && draft.digitalSignatureDataUrl
+      ? await shrinkImageDataUrl(
+          draft.digitalSignatureDataUrl,
+          PDF_SIGNATURE_MAX_PX,
+        )
+      : null
+  if (signature && imageFormatFromDataUrl(signature)) {
+    const format = imageFormatFromDataUrl(signature)!
     try {
       doc.addImage(
-        draft.digitalSignatureDataUrl,
+        signature,
         format,
         sigX,
         y + 2,
         55,
         18,
+        undefined,
+        'FAST',
       )
       y += 22
     } catch {
@@ -274,6 +287,21 @@ export async function downloadProjectInvoicePdf(
   for (let page = 1; page <= pageCount; page += 1) {
     doc.setPage(page)
     drawColoredNoteFooter(doc, draft.note)
+  }
+
+  // Free text boxes sit where they were placed on the first page (x/y are % of the sheet).
+  doc.setPage(1)
+  for (const box of draft.textBoxes) {
+    const text = box.text.trim()
+    if (!text) continue
+    const boxW = (pageWidth * box.width) / 100
+    const left = (pageWidth * box.x) / 100
+    const top = (pageHeight * box.y) / 100
+    const x = box.align === 'center' ? left + boxW / 2 : box.align === 'right' ? left + boxW : left
+    doc.setFont('helvetica', box.bold ? 'bold' : 'normal')
+    doc.setFontSize(Math.max(6, box.fontSize * 0.75))
+    doc.setTextColor(box.color || '#333333')
+    doc.text(doc.splitTextToSize(text, boxW) as string[], x, top + 4, { align: box.align })
   }
 
   doc.save(`${draft.invoiceNumber || 'invoice'}.pdf`)

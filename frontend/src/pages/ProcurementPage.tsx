@@ -78,10 +78,11 @@ export function ProcurementPage() {
     setError(null);
     try {
       await api.createSupplier({
-        name: supplierForm.name,
-        contactName: supplierForm.contactName || undefined,
-        phone: supplierForm.phone || undefined,
-        address: supplierForm.address || undefined,
+        name: supplierForm.name.trim(),
+        contactName: supplierForm.contactName.trim() || undefined,
+        phone: supplierForm.phone.trim() || undefined,
+        email: supplierForm.email.trim() || undefined,
+        address: supplierForm.address.trim() || undefined,
       });
       setSupplierForm(emptyAddSupplierValues());
       setSupplierModalOpen(false);
@@ -188,6 +189,10 @@ export function ProcurementPage() {
             setSupplierForm((prev) => ({ ...prev, ...patch }))
           }
           onSubmit={(event) => void onCreateSupplier(event)}
+          onCancel={() => {
+            setSupplierModalOpen(false);
+            setSupplierError(null);
+          }}
           saving={saving}
           error={supplierError}
           submitLabel='Create supplier'

@@ -78,7 +78,7 @@ async function main(): Promise<void> {
     (row) => row.glAccountCode === SystemAccountCode.BANK,
   );
   if (!bank) {
-    throw new Error('Bank treasury account (1112) missing');
+    throw new Error('Bank treasury account (1122) missing');
   }
 
   console.log(`Parsing ${pdfPath}…`);

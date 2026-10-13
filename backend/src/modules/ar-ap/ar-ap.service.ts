@@ -8,6 +8,7 @@ import {
   InvoiceType,
   SupplierPaymentStatus,
 } from '../../common/enums/ar-ap.enum';
+import { AuditAction } from '../../common/enums/governance.enum';
 import { VendorLedgerType } from '../../common/enums/procurement.enum';
 import { Role } from '../../common/enums/role.enum';
 import { badRequest, forbidden, notFound } from '../../common/errors/app-error';
@@ -15,13 +16,18 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 import { fromMinorUnits, toMinorUnits } from '../../common/utils/money';
 import { AccountsService } from '../accounting/accounts.service';
 import { CounterModel } from '../accounting/counter.model';
+import { JournalEntryModel } from '../accounting/journal-entry.model';
 import type {
   JournalService,
   PublicJournal,
 } from '../accounting/journal.service';
+import type { PostJournalDto } from '../accounting/dto/journal.dto';
+import { JournalEntityType } from '../accounting/journal.enums';
 import { SystemAccountCode } from '../accounting/system-account-codes';
 import type { BankingService } from '../banking/banking.service';
 import { CustomerModel } from '../customers/customer.model';
+import { customerForProject } from '../customers/customer-projects';
+import type { AuditService } from '../governance/audit.service';
 import { GoodsMovementModel } from '../procurement/goods-movement.model';
 import { SupplierModel, type SupplierDocument } from '../procurement/supplier.model';
 import type { ProjectsService } from '../projects/projects.service';
@@ -30,13 +36,19 @@ import {
   ClientInvoiceModel,
   type ClientInvoiceDocument,
 } from './client-invoice.model';
+import {
+  CustomerOpeningReceiptModel,
+  CustomerOpeningReceiptStatus,
+} from './customer-opening-receipt.model';
 import type {
   CollectInvoiceDto,
   CreateInvoiceDto,
   CreateSupplierBillDto,
   CreateSupplierPaymentDto,
   ExecuteSupplierPaymentDto,
+  ReceiveOpeningDueDto,
 } from './dto/ar-ap.dto';
+import { openingPartyRows, sumOpeningByEntity } from './opening-dues';
 import {
   InvoiceCollectionModel,
   type InvoiceCollectionDocument,
@@ -59,6 +71,50 @@ import {
 } from './supplier-payment.model';
 
 const FINANCE_ROLES = new Set([Role.ADMIN, Role.ACCOUNTANT]);
+
+/** Roles allowed to override supplier payable checks (Managing Director is not an RBAC role yet). */
+const PAYABLE_OVERRIDE_ROLES = new Set([Role.ADMIN]);
+
+const AP_PAYMENT_ACCOUNT_CODES = new Set<string>([
+  SystemAccountCode.ACCOUNTS_PAYABLE,
+  SystemAccountCode.SUBCONTRACTOR_PAYABLE,
+]);
+
+const AP_OPENING_CODES = [
+  SystemAccountCode.ACCOUNTS_PAYABLE,
+  SystemAccountCode.SUBCONTRACTOR_PAYABLE,
+] as const;
+
+const AR_OPENING_CODES = [SystemAccountCode.ACCOUNTS_RECEIVABLE] as const;
+
+export type PublicCustomerOpeningDue = {
+  customerId: string;
+  customerName: string;
+  openingDate: string;
+  journalNumber: string;
+  openingAmount: number;
+  receivedAmount: number;
+  openAmount: number;
+};
+
+export type PublicCustomerOpeningReceipt = {
+  id: string;
+  receiptNumber: string;
+  customerId: string;
+  customerName: string;
+  amount: number;
+  date: string;
+  treasuryAccountCode: string;
+  journalNumber: string;
+  memo: string | null;
+};
+
+export type SupplierOutstandingSnapshot = {
+  supplierId: string;
+  supplierName: string;
+  outstanding: number;
+  outstandingMinor: number;
+};
 
 export type PublicInvoice = {
   id: string;
@@ -135,6 +191,7 @@ export type PublicVendorLedger = {
     name: string;
     paymentTermsDays: number;
   };
+  opening: number;
   purchased: number;
   returned: number;
   billed: number;
@@ -169,6 +226,7 @@ export class ArApService {
     private readonly projectsService: ProjectsService,
     private readonly accountsService: AccountsService,
     private readonly bankingService: BankingService,
+    private readonly auditService?: AuditService,
   ) {}
 
   async listInvoices(actor: AuthenticatedUser): Promise<PublicInvoice[]> {
@@ -199,6 +257,7 @@ export class ArApService {
     }
     const amountMinor = toMinorUnits(dto.amount);
     const invoiceNumber = await this.nextNumber('invoice', 'INV', date);
+    const customer = await customerForProject(project.id);
     const journal = await this.journalService.post(
       {
         date: date.toISOString(),
@@ -209,6 +268,7 @@ export class ArApService {
           amountMinor,
           projectId: project.id,
           description: dto.description.trim(),
+          customerId: customer?.id,
         }),
       },
       actor.userId,
@@ -258,6 +318,7 @@ export class ArApService {
     const treasury = await this.bankingService.requireActive(dto.treasuryId);
     const date = this.parseDate(dto.date);
     const collectionNumber = await this.nextNumber('collection', 'RC', date);
+    const customer = await customerForProject(invoice.projectId.toString());
     const journal = await this.journalService.post(
       {
         date: date.toISOString(),
@@ -269,6 +330,7 @@ export class ArApService {
           treasuryAccountCode: treasury.glAccountCode,
           projectId: invoice.projectId.toString(),
           description: `Collection ${invoice.invoiceNumber}`,
+          customerId: customer?.id,
         }),
       },
       actor.userId,
@@ -382,7 +444,200 @@ export class ArApService {
       })
       .filter((row) => row !== null);
 
+    const openingDues = await this.computeCustomerOpeningDues();
+    for (const due of openingDues) {
+      if (due.openMinor <= 0) continue;
+      lines.push({
+        id: `opening-${due.customerId}`,
+        reference: `Opening ${due.journalNumber}`,
+        partyName: due.customerName,
+        date: due.date.toISOString(),
+        dueDate: due.date.toISOString(),
+        openAmount: fromMinorUnits(due.openMinor),
+      });
+    }
+
     return buildAgingReport(asOf, lines);
+  }
+
+  async listCustomerOpeningDues(
+    actor: AuthenticatedUser,
+  ): Promise<PublicCustomerOpeningDue[]> {
+    this.assertFinance(actor);
+    return this.publicOpeningDues();
+  }
+
+  async listCustomerOpeningReceipts(
+    actor: AuthenticatedUser,
+  ): Promise<PublicCustomerOpeningReceipt[]> {
+    this.assertFinance(actor);
+    const rows = await CustomerOpeningReceiptModel.find({
+      status: CustomerOpeningReceiptStatus.EXECUTED,
+    })
+      .sort({ date: -1, receiptNumber: -1 })
+      .exec();
+    return rows.map((row) => ({
+      id: row._id.toString(),
+      receiptNumber: row.receiptNumber,
+      customerId: row.customerId.toString(),
+      customerName: row.customerName,
+      amount: fromMinorUnits(row.amountMinor),
+      date: row.date.toISOString(),
+      treasuryAccountCode: row.treasuryAccountCode,
+      journalNumber: row.journalNumber,
+      memo: row.memo ?? null,
+    }));
+  }
+
+  /**
+   * Cash/bank received against a customer's opening due (no invoice exists).
+   * Posts Dr treasury / Cr Accounts Receivable tagged with the customer.
+   */
+  async receiveCustomerOpeningDue(
+    customerId: string,
+    dto: ReceiveOpeningDueDto,
+    actor: AuthenticatedUser,
+  ): Promise<PublicCustomerOpeningDue> {
+    this.assertFinance(actor);
+    if (!Types.ObjectId.isValid(customerId)) {
+      throw notFound('Customer not found');
+    }
+    const customer = await CustomerModel.findById(customerId).exec();
+    if (!customer) {
+      throw notFound('Customer not found');
+    }
+
+    const due = (await this.computeCustomerOpeningDues(customer._id))[0];
+    const openMinor = due ? due.openMinor : 0;
+    const amountMinor = toMinorUnits(dto.amount);
+    if (openMinor <= 0) {
+      throw badRequest(`${customer.name} has no open opening balance to receive`);
+    }
+    if (amountMinor > openMinor) {
+      throw badRequest(
+        `Receipt ${fromMinorUnits(amountMinor).toFixed(2)} exceeds the open opening balance ${fromMinorUnits(openMinor).toFixed(2)}`,
+      );
+    }
+
+    const treasury = await this.bankingService.requireActive(dto.treasuryId);
+    const date = this.parseDate(dto.date);
+    const receiptNumber = await this.nextNumber('collection', 'RC', date);
+    const memo =
+      dto.memo?.trim() || `Opening balance receipt from ${customer.name}`;
+    const journal = await this.journalService.post(
+      {
+        date: date.toISOString(),
+        memo,
+        reference: receiptNumber,
+        journalType: 'customer_receipt',
+        lines: [
+          {
+            accountCode: treasury.glAccountCode,
+            debit: fromMinorUnits(amountMinor),
+            description: `Opening due received · ${customer.name}`,
+          },
+          {
+            accountCode: SystemAccountCode.ACCOUNTS_RECEIVABLE,
+            credit: fromMinorUnits(amountMinor),
+            description: `Opening due received · ${receiptNumber}`,
+            entityType: JournalEntityType.CUSTOMER,
+            entityId: customer._id.toString(),
+          },
+        ],
+      },
+      actor.userId,
+      'system',
+    );
+
+    await CustomerOpeningReceiptModel.create({
+      receiptNumber,
+      status: CustomerOpeningReceiptStatus.EXECUTED,
+      customerId: customer._id,
+      customerName: customer.name,
+      amountMinor,
+      date,
+      treasuryId: new Types.ObjectId(treasury.id),
+      treasuryAccountCode: treasury.glAccountCode,
+      memo,
+      journalId: new Types.ObjectId(journal.id),
+      journalNumber: journal.entryNumber,
+      createdBy: new Types.ObjectId(actor.userId),
+    });
+
+    const [updated] = await this.publicOpeningDues(customer._id);
+    return updated!;
+  }
+
+  private async publicOpeningDues(
+    customerId?: Types.ObjectId,
+  ): Promise<PublicCustomerOpeningDue[]> {
+    const dues = await this.computeCustomerOpeningDues(customerId);
+    return dues.map((due) => ({
+      customerId: due.customerId,
+      customerName: due.customerName,
+      openingDate: due.date.toISOString(),
+      journalNumber: due.journalNumber,
+      openingAmount: fromMinorUnits(due.openingMinor),
+      receivedAmount: fromMinorUnits(due.receivedMinor),
+      openAmount: fromMinorUnits(Math.max(0, due.openMinor)),
+    }));
+  }
+
+  private async computeCustomerOpeningDues(customerId?: Types.ObjectId): Promise<
+    Array<{
+      customerId: string;
+      customerName: string;
+      date: Date;
+      journalNumber: string;
+      openingMinor: number;
+      receivedMinor: number;
+      openMinor: number;
+    }>
+  > {
+    const [rows, receipts] = await Promise.all([
+      openingPartyRows({
+        entityType: JournalEntityType.CUSTOMER,
+        accountCodes: AR_OPENING_CODES,
+        normal: 'debit',
+        entityId: customerId,
+      }),
+      CustomerOpeningReceiptModel.find({
+        status: CustomerOpeningReceiptStatus.EXECUTED,
+        ...(customerId ? { customerId } : {}),
+      }).exec(),
+    ]);
+
+    const openingByCustomer = sumOpeningByEntity(rows);
+    const receivedByCustomer = new Map<string, number>();
+    for (const receipt of receipts) {
+      const key = receipt.customerId.toString();
+      receivedByCustomer.set(
+        key,
+        (receivedByCustomer.get(key) ?? 0) + receipt.amountMinor,
+      );
+    }
+
+    const firstRow = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      if (!firstRow.has(row.entityId)) firstRow.set(row.entityId, row);
+    }
+
+    const result = [];
+    for (const [id, openingMinor] of openingByCustomer) {
+      if (openingMinor <= 0) continue;
+      const first = firstRow.get(id)!;
+      const receivedMinor = receivedByCustomer.get(id) ?? 0;
+      result.push({
+        customerId: id,
+        customerName: first.entityName,
+        date: first.date,
+        journalNumber: first.journalNumber,
+        openingMinor,
+        receivedMinor,
+        openMinor: openingMinor - receivedMinor,
+      });
+    }
+    return result.sort((a, b) => a.customerName.localeCompare(b.customerName));
   }
 
   async listBills(actor: AuthenticatedUser): Promise<PublicSupplierBill[]> {
@@ -529,10 +784,15 @@ export class ArApService {
     const supplier = await this.findSupplierOrFail(dto.supplierId);
     const treasury = await this.bankingService.requireActive(dto.treasuryId);
     const amountMinor = toMinorUnits(dto.amount);
-    const outstandingMinor = await this.supplierOutstandingMinor(supplier._id);
-    if (amountMinor > outstandingMinor) {
-      throw badRequest('Payment exceeds supplier outstanding balance');
-    }
+    await this.assertSupplierPayableAmount({
+      supplierId: supplier._id,
+      supplierName: supplier.name,
+      amountMinor,
+      actor,
+      context: 'payment',
+      override: dto.overridePayable,
+      overrideReason: dto.overrideReason,
+    });
     const paymentNumber = await this.nextNumber('ap-payment', 'PAY');
     const created = await SupplierPaymentModel.create({
       paymentNumber,
@@ -563,10 +823,15 @@ export class ArApService {
       throw badRequest('Only scheduled payments can be executed');
     }
     const supplier = await this.findSupplierOrFail(payment.supplierId.toString());
-    const outstandingMinor = await this.supplierOutstandingMinor(supplier._id);
-    if (payment.amountMinor > outstandingMinor) {
-      throw badRequest('Payment exceeds supplier outstanding balance');
-    }
+    await this.assertSupplierPayableAmount({
+      supplierId: supplier._id,
+      supplierName: supplier.name,
+      amountMinor: payment.amountMinor,
+      actor,
+      context: 'payment',
+      override: dto.overridePayable,
+      overrideReason: dto.overrideReason,
+    });
     const treasury = await this.bankingService.requireActive(
       payment.treasuryId.toString(),
     );
@@ -645,6 +910,12 @@ export class ArApService {
         .sort({ executedDate: 1, paymentNumber: 1 })
         .exec(),
     ]);
+    const openingRows = await openingPartyRows({
+      entityType: JournalEntityType.SUPPLIER,
+      accountCodes: AP_OPENING_CODES,
+      normal: 'credit',
+      entityId: supplierOid,
+    });
 
     type LedgerRow = {
       id: string;
@@ -658,6 +929,16 @@ export class ArApService {
     };
 
     const rows: LedgerRow[] = [
+      ...openingRows.map((row) => ({
+        id: `opening-${row.journalId}`,
+        date: row.date,
+        type: ApLedgerEntryType.OPENING,
+        reference: 'Opening balance',
+        poNumber: null,
+        journalNumber: row.journalNumber,
+        amountMinor: Math.abs(row.signedMinor),
+        signedMinor: row.signedMinor,
+      })),
       ...movements.map((row) => ({
         id: row._id.toString(),
         date: row.date,
@@ -705,17 +986,23 @@ export class ArApService {
       if (diff !== 0) {
         return diff;
       }
+      // Opening balance always leads its day so running totals start from it.
+      if (a.type === ApLedgerEntryType.OPENING) return -1;
+      if (b.type === ApLedgerEntryType.OPENING) return 1;
       return a.reference.localeCompare(b.reference);
     });
 
     let running = 0;
+    let opening = 0;
     let purchased = 0;
     let returned = 0;
     let billed = 0;
     let paid = 0;
     const entries = rows.map((row) => {
       running += row.signedMinor;
-      if (row.type === ApLedgerEntryType.RECEIPT) {
+      if (row.type === ApLedgerEntryType.OPENING) {
+        opening += row.signedMinor;
+      } else if (row.type === ApLedgerEntryType.RECEIPT) {
         purchased += row.amountMinor;
       } else if (row.type === ApLedgerEntryType.RETURN) {
         returned += row.amountMinor;
@@ -747,6 +1034,7 @@ export class ArApService {
         name: supplier.name,
         paymentTermsDays: supplier.paymentTermsDays,
       },
+      opening: fromMinorUnits(opening),
       purchased: fromMinorUnits(purchased),
       returned: fromMinorUnits(returned),
       billed: fromMinorUnits(billed),
@@ -764,7 +1052,7 @@ export class ArApService {
       suppliers.map((row) => [row._id.toString(), row.paymentTermsDays]),
     );
 
-    const [movements, bills, payments] = await Promise.all([
+    const [movements, bills, payments, openingRows] = await Promise.all([
       GoodsMovementModel.find().exec(),
       SupplierBillModel.find({
         paymentType: BillPaymentType.CREDIT,
@@ -773,6 +1061,11 @@ export class ArApService {
       SupplierPaymentModel.find({
         status: SupplierPaymentStatus.EXECUTED,
       }).exec(),
+      openingPartyRows({
+        entityType: JournalEntityType.SUPPLIER,
+        accountCodes: AP_OPENING_CODES,
+        normal: 'credit',
+      }),
     ]);
 
     const paidBySupplier = new Map<string, number>();
@@ -789,6 +1082,19 @@ export class ArApService {
       dueDate: string;
       openAmount: number;
     }> = [];
+
+    // Oldest first, so payments settle go-live dues before newer purchases.
+    for (const row of openingRows) {
+      if (row.signedMinor <= 0) continue;
+      lines.push({
+        id: `opening-${row.journalId}-${row.entityId}`,
+        reference: `Opening ${row.journalNumber}`,
+        partyName: row.entityName,
+        date: row.date.toISOString(),
+        dueDate: row.date.toISOString(),
+        openAmount: fromMinorUnits(row.signedMinor),
+      });
+    }
 
     for (const row of movements) {
       const supplierKey = row.supplierId.toString();
@@ -868,20 +1174,161 @@ export class ArApService {
     ).exec();
   }
 
+  /**
+   * Validate supplier AP payment / journal debit against live outstanding.
+   * Used by Payables schedule/execute and manual journal posts that Dr 2111/2113.
+   */
+  async assertSupplierPayableAmount(input: {
+    supplierId: Types.ObjectId | string;
+    supplierName: string;
+    amountMinor: number;
+    actor: AuthenticatedUser;
+    context: 'payment' | 'journal';
+    override?: boolean;
+    overrideReason?: string;
+  }): Promise<SupplierOutstandingSnapshot> {
+    const supplierOid =
+      typeof input.supplierId === 'string'
+        ? new Types.ObjectId(input.supplierId)
+        : input.supplierId;
+    const outstandingMinor = await this.supplierOutstandingMinor(supplierOid);
+    const outstanding = fromMinorUnits(outstandingMinor);
+    const amount = fromMinorUnits(input.amountMinor);
+    const snapshot: SupplierOutstandingSnapshot = {
+      supplierId: supplierOid.toString(),
+      supplierName: input.supplierName,
+      outstanding,
+      outstandingMinor,
+    };
+
+    const label = input.context === 'journal' ? 'journal entry' : 'Payment';
+    const zeroMessage =
+      'This supplier has no outstanding payable to us. Payment/journal entry cannot be made without an outstanding payable.';
+    const overMessage = `Supplier's outstanding payable is ${outstanding.toFixed(2)}, but you are entering ${amount.toFixed(2)}. You cannot pay more than the outstanding payable.`;
+
+    const violates = outstandingMinor <= 0 || input.amountMinor > outstandingMinor;
+    if (!violates) {
+      return snapshot;
+    }
+
+    const wantsOverride = Boolean(input.override);
+    if (!wantsOverride) {
+      throw badRequest(outstandingMinor <= 0 ? zeroMessage : overMessage);
+    }
+
+    if (!PAYABLE_OVERRIDE_ROLES.has(input.actor.role)) {
+      throw forbidden(
+        'Only an Admin can override supplier outstanding payable validation.',
+      );
+    }
+    const reason = input.overrideReason?.trim();
+    if (!reason || reason.length < 5) {
+      throw badRequest(
+        'Override reason is required (at least 5 characters) when overriding payable validation.',
+      );
+    }
+
+    if (this.auditService) {
+      await this.auditService.record({
+        action: AuditAction.UPDATE,
+        entityType: 'supplier_payable',
+        entityId: snapshot.supplierId,
+        actor: input.actor,
+        summary: `Override supplier payable check for ${input.supplierName}: ${reason}`.slice(
+          0,
+          500,
+        ),
+        before: {
+          outstanding,
+          outstandingMinor,
+        },
+        after: {
+          entryAmount: amount,
+          entryAmountMinor: input.amountMinor,
+          remainingAfter: fromMinorUnits(
+            Math.max(0, outstandingMinor - input.amountMinor),
+          ),
+          context: input.context,
+          overrideReason: reason,
+          label,
+        },
+      });
+    }
+
+    return snapshot;
+  }
+
+  /**
+   * Before posting a manual journal: validate AP debit lines vs supplier outstanding.
+   * Skips drafts, opening balances, and system journals (caller should only use for manual post).
+   */
+  async assertManualJournalSupplierPayments(
+    dto: PostJournalDto,
+    actor: AuthenticatedUser,
+  ): Promise<void> {
+    if (dto.journalType === 'opening_balance') {
+      return;
+    }
+    if ((dto.intent ?? 'post') === 'draft') {
+      return;
+    }
+
+    const bySupplier = new Map<string, number>();
+    for (const line of dto.lines ?? []) {
+      const code = line.accountCode?.trim().toUpperCase();
+      if (!code || !AP_PAYMENT_ACCOUNT_CODES.has(code)) continue;
+      const debit = Number(line.debit ?? 0);
+      if (!(debit > 0)) continue;
+      if (line.entityType !== JournalEntityType.SUPPLIER || !line.entityId) {
+        continue;
+      }
+      bySupplier.set(
+        line.entityId,
+        (bySupplier.get(line.entityId) ?? 0) + toMinorUnits(debit),
+      );
+    }
+
+    for (const [supplierId, amountMinor] of bySupplier) {
+      const supplier = await this.findSupplierOrFail(supplierId);
+      await this.assertSupplierPayableAmount({
+        supplierId: supplier._id,
+        supplierName: supplier.name,
+        amountMinor,
+        actor,
+        context: 'journal',
+        override: dto.overrideSupplierPayable,
+        overrideReason: dto.overrideReason,
+      });
+    }
+  }
+
   private async supplierOutstandingMinor(supplierId: Types.ObjectId): Promise<number> {
-    const [movements, bills, payments] = await Promise.all([
-      GoodsMovementModel.find({ supplierId }).exec(),
+    const supplierIdFilter = {
+      $or: [{ supplierId }, { supplierId: supplierId.toString() }],
+    };
+    const [movements, bills, payments, openingRows] = await Promise.all([
+      GoodsMovementModel.find({
+        $or: [{ supplierId }, { supplierId: supplierId.toString() }],
+      }).exec(),
+      // Align with vendorLedger: only open credit bills raise outstanding.
       SupplierBillModel.find({
-        supplierId,
+        ...supplierIdFilter,
         paymentType: BillPaymentType.CREDIT,
+        status: BillStatus.OPEN,
       }).exec(),
       SupplierPaymentModel.find({
-        supplierId,
+        ...supplierIdFilter,
         status: SupplierPaymentStatus.EXECUTED,
       }).exec(),
+      openingPartyRows({
+        entityType: JournalEntityType.SUPPLIER,
+        accountCodes: AP_OPENING_CODES,
+        normal: 'credit',
+        entityId: supplierId,
+      }),
     ]);
 
-    let outstanding = 0;
+    let outstanding = openingRows.reduce((sum, row) => sum + row.signedMinor, 0);
     for (const row of movements) {
       outstanding +=
         row.type === VendorLedgerType.RECEIPT
@@ -990,7 +1437,7 @@ export class ArApService {
   }
 
   /**
-   * After a manual journal is posted: create/update AR invoice (1121 debit)
+   * After a manual journal is posted: create/update AR invoice (1151 debit)
    * and/or AP credit bill (2111 credit). Does not post another journal.
    * Module "Add invoice / Add bill" flows remain separate (system journals).
    */
@@ -1016,12 +1463,22 @@ export class ArApService {
         line.accountCode === SystemAccountCode.ACCOUNTS_PAYABLE &&
         (line.credit ?? 0) > 0,
     );
+    const apDebits = journal.lines.filter(
+      (line) =>
+        AP_PAYMENT_ACCOUNT_CODES.has(line.accountCode) &&
+        (line.debit ?? 0) > 0 &&
+        line.entityType === JournalEntityType.SUPPLIER &&
+        Boolean(line.entityId),
+    );
 
     if (arDebits.length > 0) {
       await this.upsertInvoiceFromManualJournal(journal, arDebits, userId);
     }
     if (apCredits.length > 0) {
       await this.upsertBillFromManualJournal(journal, apCredits, userId);
+    }
+    if (apDebits.length > 0) {
+      await this.upsertPaymentsFromManualJournal(journal, apDebits, userId);
     }
   }
 
@@ -1051,6 +1508,32 @@ export class ArApService {
       throw badRequest(
         `Cannot reverse journal: bill ${bill.billNumber} is paid.`,
       );
+    }
+
+    const journal = await JournalEntryModel.findById(journalObjectId)
+      .select('journalType lines.entityType lines.entityId lines.accountCode')
+      .lean()
+      .exec();
+    if (journal?.journalType === 'opening_balance') {
+      const customerIds = journal.lines
+        .filter(
+          (line) =>
+            line.entityType === JournalEntityType.CUSTOMER &&
+            line.entityId &&
+            line.accountCode === SystemAccountCode.ACCOUNTS_RECEIVABLE,
+        )
+        .map((line) => line.entityId!);
+      if (customerIds.length > 0) {
+        const receipt = await CustomerOpeningReceiptModel.findOne({
+          customerId: { $in: customerIds },
+          status: CustomerOpeningReceiptStatus.EXECUTED,
+        }).exec();
+        if (receipt) {
+          throw badRequest(
+            `Cannot reverse opening balance: ${receipt.customerName} already has opening receipt ${receipt.receiptNumber}. Reverse that receipt first.`,
+          );
+        }
+      }
     }
   }
 
@@ -1085,6 +1568,108 @@ export class ArApService {
       bill.status = BillStatus.VOID;
       await bill.save();
     }
+
+    await SupplierPaymentModel.updateMany(
+      {
+        journalId: journalObjectId,
+        status: SupplierPaymentStatus.EXECUTED,
+      },
+      { $set: { status: SupplierPaymentStatus.CANCELLED } },
+    ).exec();
+
+    await CustomerOpeningReceiptModel.updateMany(
+      {
+        journalId: journalObjectId,
+        status: CustomerOpeningReceiptStatus.EXECUTED,
+      },
+      { $set: { status: CustomerOpeningReceiptStatus.CANCELLED } },
+    ).exec();
+  }
+
+  /**
+   * Manual Dr AP (2111/2113) + supplier → executed SupplierPayment so vendor
+   * outstanding stays in sync with the GL (mirrors Payables execute).
+   */
+  private async upsertPaymentsFromManualJournal(
+    journal: PublicJournal,
+    apDebits: PublicJournal['lines'],
+    userId: string,
+  ): Promise<void> {
+    const bySupplier = new Map<string, number>();
+    for (const line of apDebits) {
+      if (!line.entityId) continue;
+      bySupplier.set(
+        line.entityId,
+        (bySupplier.get(line.entityId) ?? 0) + toMinorUnits(line.debit ?? 0),
+      );
+    }
+
+    const treasuryAccounts = await this.bankingService.list();
+    const creditCodes = new Set(
+      journal.lines
+        .filter((line) => (line.credit ?? 0) > 0)
+        .map((line) => line.accountCode.trim().toUpperCase()),
+    );
+    if (journal.isPdc && journal.intendedBankAccountCode) {
+      creditCodes.add(journal.intendedBankAccountCode.toUpperCase());
+    }
+    const treasury =
+      treasuryAccounts.find((row) =>
+        creditCodes.has(row.glAccountCode.toUpperCase()),
+      ) ?? treasuryAccounts.find((row) => row.isActive);
+
+    if (!treasury) {
+      throw badRequest(
+        'Supplier payment journal needs a cash/bank credit line linked to a treasury account',
+      );
+    }
+
+    const journalObjectId = new Types.ObjectId(journal.id);
+    const date = this.parseDate(journal.date);
+
+    for (const [supplierId, amountMinor] of bySupplier) {
+      if (amountMinor <= 0) continue;
+      const supplier = await this.findSupplierOrFail(supplierId);
+      const existing = await SupplierPaymentModel.findOne({
+        journalId: journalObjectId,
+        supplierId: supplier._id,
+      }).exec();
+
+      if (existing) {
+        existing.amountMinor = amountMinor;
+        existing.status = SupplierPaymentStatus.EXECUTED;
+        existing.executedDate = date;
+        existing.treasuryId = new Types.ObjectId(treasury.id);
+        existing.treasuryAccountCode = treasury.glAccountCode;
+        existing.journalNumber = journal.entryNumber;
+        existing.memo =
+          journal.memo?.trim() ||
+          `Manual payment journal ${journal.entryNumber}`;
+        await existing.save();
+        continue;
+      }
+
+      const paymentNumber = await this.nextNumber('ap-payment', 'PAY', date);
+      await SupplierPaymentModel.create({
+        paymentNumber,
+        status: SupplierPaymentStatus.EXECUTED,
+        supplierId: supplier._id,
+        supplierNumber: supplier.supplierNumber,
+        supplierName: supplier.name,
+        amountMinor,
+        scheduledDate: date,
+        executedDate: date,
+        treasuryId: new Types.ObjectId(treasury.id),
+        treasuryAccountCode: treasury.glAccountCode,
+        memo:
+          journal.memo?.trim() ||
+          `Manual payment journal ${journal.entryNumber}`,
+        journalId: journalObjectId,
+        journalNumber: journal.entryNumber,
+        createdBy: new Types.ObjectId(userId),
+        executedBy: new Types.ObjectId(userId),
+      });
+    }
   }
 
   private async upsertInvoiceFromManualJournal(
@@ -1101,7 +1686,7 @@ export class ArApService {
     ];
     if (customerIds.length !== 1) {
       throw badRequest(
-        'Manual Client Receivable (1121) journals need exactly one customer entity to create an AR invoice',
+        'Manual Client Receivable (1151) journals need exactly one customer entity to create an AR invoice',
       );
     }
     const customerId = customerIds[0]!;
@@ -1115,7 +1700,7 @@ export class ArApService {
       arDebits.map((line) => line.projectId).find((id): id is string => Boolean(id));
     if (!projectId) {
       throw badRequest(
-        'Set a header or line project when posting Client Receivable (1121) so an AR invoice can be created',
+        'Set a header or line project when posting Client Receivable (1151) so an AR invoice can be created',
       );
     }
     const project = await this.projectsService.getById(projectId);

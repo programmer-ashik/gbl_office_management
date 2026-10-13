@@ -1,3 +1,4 @@
+import dns from 'node:dns';
 import mongoose from 'mongoose';
 import { getConfig } from '../config';
 import { getMemoryMongoUri, stopMemoryMongo } from './memory-mongo';
@@ -12,6 +13,10 @@ export async function connectDatabase(): Promise<void> {
     console.log(
       'Connecting to in-memory MongoDB replica set (transactions enabled)',
     );
+  }
+
+  if (!config.mongodb.memory && config.mongodb.dnsServers.length > 0) {
+    dns.setServers(config.mongodb.dnsServers);
   }
 
   mongoose.set('strictQuery', true);

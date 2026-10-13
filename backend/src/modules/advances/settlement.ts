@@ -16,6 +16,18 @@ export type VoucherInput = {
   description?: string;
 };
 
+/** What is still to be settled by vouchers after any recovery from salary. */
+export function advanceBalanceMinor(row: {
+  requestedMinor: number;
+  disbursedMinor?: number;
+  payrollDeductedMinor?: number;
+}): number {
+  return Math.max(
+    0,
+    (row.disbursedMinor ?? row.requestedMinor) - (row.payrollDeductedMinor ?? 0),
+  );
+}
+
 export function classifySettlement(
   advancedMinor: number,
   spentMinor: number,
@@ -33,15 +45,18 @@ export function classifySettlement(
 }
 
 export function buildSettlementJournalLines(input: {
-  projectId: string;
+  projectId?: string;
   employeeId: string;
   advancedMinor: number;
   vouchers: VoucherInput[];
   returnAccountCode?: string;
+  /** The employee's requisition purpose; replaces generic line wording. */
+  purpose?: string;
 }): {
   settlementCase: SettlementCase;
   lines: JournalLineDto[];
 } {
+  const purpose = input.purpose?.trim();
   const spentMinor = input.vouchers.reduce(
     (sum, line) => sum + line.amountMinor,
     0,
@@ -58,7 +73,7 @@ export function buildSettlementJournalLines(input: {
     lines.push({
       accountCode: voucher.accountCode,
       debit: fromMinorUnits(voucher.amountMinor),
-      description: voucher.description || voucher.accountName,
+      description: voucher.description || purpose || voucher.accountName,
       projectId: input.projectId,
     });
   }
@@ -75,14 +90,14 @@ export function buildSettlementJournalLines(input: {
     lines.push({
       accountCode: input.returnAccountCode,
       debit: fromMinorUnits(remainderMinor),
-      description: 'Unspent advance returned',
+      description: purpose || 'Unspent advance returned',
     });
   }
 
   lines.push({
     accountCode: ADVANCE_ASSET_CODE,
     credit: fromMinorUnits(input.advancedMinor),
-    description: 'Close employee advance',
+    description: purpose || 'Close employee advance',
     projectId: input.projectId,
     entityType: JournalEntityType.EMPLOYEE,
     entityId: input.employeeId,
@@ -92,7 +107,7 @@ export function buildSettlementJournalLines(input: {
     lines.push({
       accountCode: EMPLOYEE_PAYABLE_CODE,
       credit: fromMinorUnits(excessMinor),
-      description: 'Excess spend due to employee',
+      description: purpose || 'Excess spend due to employee',
       entityType: JournalEntityType.EMPLOYEE,
       entityId: input.employeeId,
     });

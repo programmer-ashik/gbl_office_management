@@ -13,6 +13,8 @@ export interface IProject {
   code: string;
   name: string;
   client: IProjectClient;
+  /** Customer record the project belongs to; older projects only carry `client.name`. */
+  customerId?: Types.ObjectId;
   startDate: Date;
   endDate?: Date;
   contractValueMinor: number;
@@ -43,6 +45,7 @@ const projectSchema = new Schema<IProject>(
     code: { type: String, required: true, unique: true, uppercase: true, trim: true },
     name: { type: String, required: true, trim: true, maxlength: 160 },
     client: { type: clientSchema, required: true },
+    customerId: { type: Schema.Types.ObjectId, ref: 'Customer', index: true },
     startDate: { type: Date, required: true, index: true },
     endDate: { type: Date },
     contractValueMinor: { type: Number, required: true, min: 0 },

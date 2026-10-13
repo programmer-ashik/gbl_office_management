@@ -7,7 +7,7 @@ type Props = {
   className?: string;
 };
 
-/** Truncate long table text; click to expand/collapse full content. */
+/** Truncate long table text; click to expand it downward (wrapped) and back. */
 export function ExpandableText({
   text,
   maxChars = 48,
@@ -19,18 +19,21 @@ export function ExpandableText({
   if (!value) return <span className={className}>{empty}</span>;
   if (value.length <= maxChars) {
     return (
-      <span className={className} title={value}>
+      <span className={`expandable-text-static ${className ?? ""}`} title={value}>
         {value}
       </span>
     );
   }
   return (
-    <p
-      className={`text-blue-400 cursor-pointer ${className ?? ""}`}
-      title={open ? "Hide details" : "Show full description"}
+    <button
+      type="button"
+      className={`expandable-text${open ? " is-open" : ""} ${className ?? ""}`}
+      aria-expanded={open}
+      title={open ? "Show less" : "Show full description"}
       onClick={() => setOpen((prev) => !prev)}
     >
       {open ? value : `${value.slice(0, maxChars).trimEnd()}…`}
-    </p>
+      <span className="expandable-text-toggle">{open ? "Show less" : "More"}</span>
+    </button>
   );
 }

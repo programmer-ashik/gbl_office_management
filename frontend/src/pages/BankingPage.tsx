@@ -7,6 +7,7 @@ import { money } from '../types/accounting'
 import {
   TREASURY_KIND_LABEL,
   TreasuryKind,
+  treasuryName,
   type TreasuryAccount,
 } from '../types/banking'
 
@@ -73,6 +74,9 @@ export function BankingPage() {
         <div className="table-actions">
           <Link to="/banking/transfers" className="action-link">
             Transfers
+          </Link>
+          <Link to="/banking/cheques" className="action-link">
+            Cheques
           </Link>
           <Link to="/banking/reconciliation" className="action-link">
             Reconciliation
@@ -169,7 +173,7 @@ export function BankingPage() {
             {accounts.map((account) => (
               <tr key={account.id}>
                 <td>
-                  <Link to={`/banking/${account.id}`}>{account.name}</Link>
+                  <Link to={`/banking/${account.id}`}>{treasuryName(account)}</Link>
                   {account.institution ? (
                     <span className="muted"> · {account.institution}</span>
                   ) : null}
