@@ -324,8 +324,8 @@ export function ChequeEntryPage() {
 
   const bankOptions = banks.map((row) => ({
     value: row.id,
-    label: `${row.glAccountCode} · ${treasuryName(row)}${row.accountNumber ? ` · ${row.accountNumber}` : ''}`,
-    keywords: `${row.name} ${row.institution ?? ''}`,
+    label: treasuryName(row),
+    keywords: `${row.glAccountCode} ${row.name} ${row.institution ?? ''} ${row.accountNumber ?? ''}`,
   }))
 
   return (

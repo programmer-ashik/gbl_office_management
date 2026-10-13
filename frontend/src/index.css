@@ -465,7 +465,7 @@ input[type="date"] {
 }
 
 .triple-row {
-  grid-template-columns: 1fr 1.4fr 1.2fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr);
 }
 
 button {
@@ -2022,6 +2022,7 @@ td:nth-last-child(-n + 2) {
 .ui-select {
   position: relative;
   width: 100%;
+  min-width: 0;
   z-index: 1;
 }
 
@@ -2031,6 +2032,7 @@ td:nth-last-child(-n + 2) {
 
 .ui-select-trigger {
   width: 100%;
+  min-width: 0;
   min-height: var(--input-h);
   display: flex;
   align-items: center;
